@@ -38,6 +38,13 @@ export interface CliAdapterConfig {
   parseSummary?: (stdout: string, stderr: string, exitCode: number | null) => string;
   /** Additional args to append (e.g. model selection) */
   extraArgs?: (runtime: AgentResolvedRuntime) => string[];
+  /** Optional hook to run before the CLI process starts (e.g. git init for aider). */
+  beforeExecute?: (context: AdapterExecutionContext) => Promise<void>;
+  /** Optional hook to fully override runtime resolution in both preflight and execute. */
+  resolveRuntime?: (
+    invocation: InvocationSpec,
+    options: { selection?: AdapterPreflightOptions["selection"]; context?: AdapterExecutionContext }
+  ) => Promise<AgentResolvedRuntime>;
 }
 
 /**
@@ -61,14 +68,20 @@ class BaseCliAdapterImpl implements AgentAdapter {
 
   async preflight(options?: AdapterPreflightOptions): Promise<AdapterPreflightResult> {
     const invocation = await this.resolveInvocation();
-    const versionProbe = await probeInvocationVersion(invocation, process.cwd());
-    const resolvedRuntime = {
-      effectiveAgentVersion: versionProbe.version,
-      agentVersionSource: versionProbe.source !== "unknown" ? versionProbe.source : undefined,
-      source: "cli-default" as const,
-      verification: "inferred" as const,
-      notes: versionProbe.note ? [versionProbe.note] : []
-    };
+    let resolvedRuntime: AgentResolvedRuntime;
+
+    if (this.config.resolveRuntime) {
+      resolvedRuntime = await this.config.resolveRuntime(invocation, { selection: options?.selection });
+    } else {
+      const versionProbe = await probeInvocationVersion(invocation, process.cwd());
+      resolvedRuntime = {
+        effectiveAgentVersion: versionProbe.version,
+        agentVersionSource: versionProbe.source !== "unknown" ? versionProbe.source : undefined,
+        source: "cli-default" as const,
+        verification: "inferred" as const,
+        notes: versionProbe.note ? [versionProbe.note] : []
+      };
+    }
 
     try {
       const result = await probeHelp(invocation, process.cwd());
@@ -96,7 +109,17 @@ class BaseCliAdapterImpl implements AgentAdapter {
   async execute(context: AdapterExecutionContext): Promise<AdapterExecutionResult> {
     const invocation = await this.resolveInvocation();
     const prompt = buildAgentPrompt(context);
-    const runtime = await this.resolveRuntime(context);
+    let runtime: AgentResolvedRuntime;
+
+    if (this.config.resolveRuntime) {
+      runtime = await this.config.resolveRuntime(invocation, { context });
+    } else {
+      runtime = await this.resolveRuntime(context);
+    }
+
+    if (this.config.beforeExecute) {
+      await this.config.beforeExecute(context);
+    }
 
     const args = [
       ...invocation.argsPrefix,

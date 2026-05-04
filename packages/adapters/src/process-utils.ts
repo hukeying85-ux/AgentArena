@@ -1,4 +1,4 @@
-import { execSync, spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { BenchmarkCancelledError, resolveTimeoutMs } from "@agentarena/core";
@@ -136,8 +136,9 @@ export async function runProcess(
             }, 2000);
           } else {
             // Use taskkill to kill the process tree on Windows
+            if (pid === undefined) return;
             try {
-              execSync(`taskkill /F /T /PID ${pid}`, { stdio: "ignore" });
+              execFileSync("taskkill", ["/F", "/T", "/PID", String(pid)], { stdio: "ignore" });
             } catch {
               if (child) child.kill("SIGTERM");
             }
@@ -203,11 +204,11 @@ export async function runProcess(
       if (stdoutTruncated) return;
       stdoutBytes += chunk.length;
       if (stdoutBytes > MAX_PROCESS_OUTPUT_BYTES) {
-        stdout += chunk.toString().slice(0, MAX_PROCESS_OUTPUT_BYTES - (stdoutBytes - chunk.length));
+        stdout += chunk.toString("utf8").slice(0, MAX_PROCESS_OUTPUT_BYTES - (stdoutBytes - chunk.length));
         stdout += `\n[stdout truncated at ${MAX_PROCESS_OUTPUT_BYTES} bytes]`;
         stdoutTruncated = true;
       } else {
-        stdout += chunk.toString();
+        stdout += chunk.toString("utf8");
       }
     });
 
@@ -215,11 +216,11 @@ export async function runProcess(
       if (stderrTruncated) return;
       stderrBytes += chunk.length;
       if (stderrBytes > MAX_PROCESS_OUTPUT_BYTES) {
-        stderr += chunk.toString().slice(0, MAX_PROCESS_OUTPUT_BYTES - (stderrBytes - chunk.length));
+        stderr += chunk.toString("utf8").slice(0, MAX_PROCESS_OUTPUT_BYTES - (stderrBytes - chunk.length));
         stderr += `\n[stderr truncated at ${MAX_PROCESS_OUTPUT_BYTES} bytes]`;
         stderrTruncated = true;
       } else {
-        stderr += chunk.toString();
+        stderr += chunk.toString("utf8");
       }
     });
 

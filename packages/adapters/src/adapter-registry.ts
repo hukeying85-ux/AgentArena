@@ -4,16 +4,16 @@ import type {
   AgentAdapter,
   AgentResolvedRuntime
 } from "@agentarena/core";
-import { AiderAdapter } from "./aider-adapter.js";
+import { createAiderAdapter } from "./aider-adapter.js";
 import { AugmentAdapter } from "./augment-adapter.js";
 import { ClaudeCodeAdapter } from "./claude-adapter.js";
 import { CodexCliAdapter } from "./codex-adapter.js";
-import { CopilotAdapter } from "./copilot-adapter.js";
+import { createCopilotAdapter } from "./copilot-adapter.js";
 import { CursorAdapter } from "./cursor-adapter.js";
 import { DemoAdapter } from "./demo-adapter.js";
 import { GeminiCliAdapter } from "./gemini-adapter.js";
-import { KiloCliAdapter } from "./kilo-adapter.js";
-import { OpencodeAdapter } from "./opencode-adapter.js";
+import { createKiloAdapter } from "./kilo-adapter.js";
+import { createOpencodeAdapter } from "./opencode-adapter.js";
 import { QwenCodeAdapter } from "./qwen-adapter.js";
 import { demoProfiles, resolveCodexRuntime } from "./shared.js";
 import { TraeAdapter } from "./trae-adapter.js";
@@ -27,10 +27,10 @@ const adapterEntries: Array<[string, AgentAdapter]> = [
   ["claude-code", new ClaudeCodeAdapter()],
   ["cursor", new CursorAdapter()],
   ["gemini-cli", new GeminiCliAdapter()],
-  ["aider", new AiderAdapter()],
-  ["copilot", new CopilotAdapter()],
-  ["kilo-cli", new KiloCliAdapter()],
-  ["opencode", new OpencodeAdapter()],
+  ["aider", createAiderAdapter()],
+  ["copilot", createCopilotAdapter()],
+  ["kilo-cli", createKiloAdapter()],
+  ["opencode", createOpencodeAdapter()],
   ["qwen-code", new QwenCodeAdapter()],
   ["trae", new TraeAdapter()],
   ["augment", new AugmentAdapter()],

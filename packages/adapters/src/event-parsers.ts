@@ -202,105 +202,19 @@ export interface GeminiJsonEvent {
   };
 }
 
-export function parseGeminiEvents(stdout: string): {
-  tokenUsage: number;
-  estimatedCostUsd: number;
-  costKnown: boolean;
-  summaryFromEvents?: string;
-  sessionId?: string;
-  error?: string;
-} {
-  let tokenUsage = 0;
-  let estimatedCostUsd = 0;
-  let costKnown = false;
-  let summaryFromEvents: string | undefined;
-  let sessionId: string | undefined;
-  let error: string | undefined;
-  let parseErrorCount = 0;
-  const MAX_PARSE_ERRORS = 10;
-
-  for (const rawLine of stdout.split(/\r?\n/)) {
-    const line = stripAnsi(rawLine.trim());
-    if (!line.startsWith("{")) {
-      continue;
-    }
-
-    let parsed: GeminiJsonEvent;
-    try {
-      parsed = JSON.parse(line) as GeminiJsonEvent;
-    } catch {
-      parseErrorCount += 1;
-      if (parseErrorCount <= 3) {
-        console.warn(`parseGeminiEvents: Failed to parse JSON line: ${line.slice(0, 100)}...`);
-      }
-      continue;
-    }
-
-    if (parsed.session_id) {
-      sessionId = parsed.session_id;
-    }
-
-    if (parsed.message?.content && Array.isArray(parsed.message.content)) {
-      const text = parsed.message.content
-        .filter((value) => value.type === "text" && typeof value.text === "string")
-        .map((value) => value.text?.trim() ?? "")
-        .filter(Boolean)
-        .join("\n");
-
-      if (text) {
-        summaryFromEvents = text;
-      }
-
-      const usage = parsed.message.usage;
-      if (usage) {
-        tokenUsage +=
-          safeNumber(usage.input_tokens) +
-          safeNumber(usage.output_tokens) +
-          safeNumber(usage.cache_creation_input_tokens) +
-          safeNumber(usage.cache_read_input_tokens);
-      }
-    }
-
-    if (parsed.type === "result") {
-      const usage = parsed.usage;
-      if (usage) {
-        tokenUsage =
-          safeNumber(usage.input_tokens) +
-          safeNumber(usage.output_tokens) +
-          safeNumber(usage.cache_creation_input_tokens) +
-          safeNumber(usage.cache_read_input_tokens);
-      }
-
-      if (typeof parsed.total_cost_usd === "number" && Number.isFinite(parsed.total_cost_usd)) {
-        estimatedCostUsd = parsed.total_cost_usd;
-        costKnown = !parsed.is_error;
-      }
-
-      if (typeof parsed.result === "string" && parsed.result.trim()) {
-        summaryFromEvents = parsed.result.trim();
-      }
-
-      if (parsed.is_error) {
-        error = parsed.error ?? parsed.result ?? "The adapter reported an error.";
-      }
-    }
-  }
-
-  if (parseErrorCount > MAX_PARSE_ERRORS) {
-    console.warn(`parseGeminiEvents: Skipped ${parseErrorCount} unparseable lines in total.`);
-  }
-
-  return {
-    tokenUsage,
-    estimatedCostUsd,
-    costKnown,
-    summaryFromEvents,
-    sessionId,
-    error
-  };
-}
-
-export function parseClaudeEvents(stdout: string): {
+/**
+ * Generic parser for CLI event streams that emit one JSON object per line.
+ * Handles the shared pattern used by both Claude Code and Gemini CLI:
+ * - Strip ANSI, parse JSON lines
+ * - Extract session ID, message content, usage tokens, cost, errors
+ *
+ * @param stdout - Raw stdout from the CLI process
+ * @param callerName - Label used in diagnostic warnings (e.g. "parseClaudeEvents")
+ */
+export function parseStreamJsonEvents(
+  stdout: string,
+  callerName: string
+): {
   tokenUsage: number;
   estimatedCostUsd: number;
   costKnown: boolean;
@@ -329,7 +243,7 @@ export function parseClaudeEvents(stdout: string): {
     } catch {
       parseErrorCount += 1;
       if (parseErrorCount <= 3) {
-        console.warn(`parseClaudeEvents: Failed to parse JSON line: ${line.slice(0, 100)}...`);
+        console.warn(`${callerName}: Failed to parse JSON line: ${line.slice(0, 100)}...`);
       }
       continue;
     }
@@ -387,7 +301,7 @@ export function parseClaudeEvents(stdout: string): {
   }
 
   if (parseErrorCount > MAX_PARSE_ERRORS) {
-    console.warn(`parseClaudeEvents: Skipped ${parseErrorCount} unparseable lines in total.`);
+    console.warn(`${callerName}: Skipped ${parseErrorCount} unparseable lines in total.`);
   }
 
   return {
@@ -398,4 +312,12 @@ export function parseClaudeEvents(stdout: string): {
     sessionId,
     error
   };
+}
+
+export function parseGeminiEvents(stdout: string): ReturnType<typeof parseStreamJsonEvents> {
+  return parseStreamJsonEvents(stdout, "parseGeminiEvents");
+}
+
+export function parseClaudeEvents(stdout: string): ReturnType<typeof parseStreamJsonEvents> {
+  return parseStreamJsonEvents(stdout, "parseClaudeEvents");
 }

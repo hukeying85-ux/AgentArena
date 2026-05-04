@@ -1,3 +1,5 @@
+export type { AdapterEvent, AdapterEventType, ParsedAdapterOutput } from "./adapter-events.js";
+export { emitEvent, parseAdapterEvents } from "./adapter-events.js";
 export { getAdapter, getCodexDefaultResolvedRuntime, listAvailableAdapters, preflightAdapters } from "./adapter-registry.js";
 export type { ClaudeProviderProfileInput } from "./claude-provider-profiles.js";
 export {

@@ -61,6 +61,7 @@ function registryPath(): string {
 }
 
 function secretTarget(profileId: string): string {
+  validateProfileId(profileId);
   const prefix = process.env.AGENTARENA_CLAUDE_SECRET_PREFIX?.trim() || "AgentArena/claude-profile/";
   return `${prefix}${profileId}`;
 }
@@ -70,7 +71,19 @@ function secretDirectory(): string {
 }
 
 function secretFilePath(profileId: string): string {
+  validateProfileId(profileId);
   return path.join(secretDirectory(), `${profileId}.secret`);
+}
+
+function validateProfileId(profileId: string): void {
+  if (
+    !/^[a-zA-Z0-9][a-zA-Z0-9-]{0,62}[a-zA-Z0-9]$/.test(profileId) &&
+    !/^[a-zA-Z0-9]$/.test(profileId)
+  ) {
+    throw new Error(
+      `Invalid profile ID: "${profileId}". Must contain only alphanumeric characters and hyphens.`
+    );
+  }
 }
 
 function slugify(value: string): string {
@@ -170,11 +183,13 @@ function encodeForPowerShell(value: string): string {
 }
 
 async function runPowerShellJson(script: string): Promise<unknown> {
-  const command = `${script}\n`;
+  // Encode the entire script as Base64 UTF-16LE for -EncodedCommand,
+  // eliminating any risk of shell injection through script content.
+  const encoded = Buffer.from(script, "utf16le").toString("base64");
   return await new Promise((resolve, reject) => {
     execFile(
       powershellExecutable(),
-      ["-NoProfile", "-NonInteractive", "-Command", command],
+      ["-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
       { windowsHide: true },
       (error, stdout, stderr) => {
         if (error) {
@@ -496,11 +511,11 @@ export async function writeClaudeWorkspaceSettings(
   const settingsPath = path.join(claudeDir, "settings.local.json");
 
   await fs.mkdir(claudeDir, { recursive: true });
+  // Only write non-sensitive config (permissions). Secrets are passed via process environment.
   await fs.writeFile(
     settingsPath,
     JSON.stringify(
       {
-        env: environment,
         permissions: {
           allow: [],
           deny: []

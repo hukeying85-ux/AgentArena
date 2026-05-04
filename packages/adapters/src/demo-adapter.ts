@@ -5,6 +5,7 @@ import type {
   AdapterPreflightResult,
   AgentAdapter
 } from "@agentarena/core";
+import type { AdapterEvent } from "./adapter-events.js";
 import { sleep } from "./process-utils.js";
 import {
   buildDemoSummary,
@@ -43,8 +44,13 @@ export class DemoAdapter implements AgentAdapter {
   }
 
   async execute(context: AdapterExecutionContext): Promise<AdapterExecutionResult> {
-    await context.trace({
+    // Emit standardized adapter.start event
+    const startEvent: AdapterEvent = {
       type: "adapter.start",
+      timestamp: new Date().toISOString()
+    };
+    await context.trace({
+      type: startEvent.type,
       message: `Starting ${this.title}`,
       metadata: {
         repoPath: context.repoPath,
@@ -59,16 +65,44 @@ export class DemoAdapter implements AgentAdapter {
     const tokenUsage = computeTokenUsage(context.task.prompt, this.profile);
     const version = await getAdaptersPackageVersion();
 
+    // Emit standardized adapter.file_change events
+    for (const filePath of changedFilesHint) {
+      const fileEvent: AdapterEvent = {
+        type: "adapter.file_change",
+        path: filePath,
+        action: "create",
+        timestamp: new Date().toISOString()
+      };
+      await context.trace({
+        type: fileEvent.type,
+        message: `Created ${filePath}`,
+        metadata: { path: filePath, action: "create" }
+      });
+    }
+
+    // Emit standardized adapter.usage event
+    const usageEvent: AdapterEvent = {
+      type: "adapter.usage",
+      inputTokens: Math.round(tokenUsage * 0.6),
+      outputTokens: Math.round(tokenUsage * 0.4),
+      timestamp: new Date().toISOString()
+    };
     await context.trace({
-      type: "adapter.write",
-      message: `Created ${changedFilesHint.length} demo artifact(s)`,
-      metadata: {
-        changedFilesHint
-      }
+      type: usageEvent.type,
+      message: `Token usage: ${tokenUsage}`,
+      metadata: { inputTokens: usageEvent.inputTokens, outputTokens: usageEvent.outputTokens }
     });
 
+    // Emit standardized adapter.result event
+    const resultEvent: AdapterEvent = {
+      type: "adapter.result",
+      status: "success",
+      summary,
+      totalCostUsd: this.profile.estimatedCostUsd,
+      timestamp: new Date().toISOString()
+    };
     await context.trace({
-      type: "adapter.finish",
+      type: resultEvent.type,
       message: summary,
       metadata: {
         tokenUsage,

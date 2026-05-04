@@ -168,11 +168,13 @@ function resolveEffectiveModel(...candidates: (string | null | undefined)[]): st
   return undefined;
 }
 
+const MAX_PACKAGE_TRAVERSE_DEPTH = 10;
+
 async function readPackageVersion(startPath: string): Promise<string | undefined> {
   let currentPath = path.resolve(startPath);
   const { root } = path.parse(currentPath);
 
-  while (currentPath !== root) {
+  for (let depth = 0; depth < MAX_PACKAGE_TRAVERSE_DEPTH && currentPath !== root; depth++) {
     const packagePath = path.join(currentPath, "package.json");
     try {
       const contents = await fs.readFile(packagePath, "utf8");
@@ -190,19 +192,20 @@ async function readPackageVersion(startPath: string): Promise<string | undefined
   return undefined;
 }
 
-let adaptersPackageVersionPromise: Promise<string | undefined> | null = null;
+let adaptersPackageVersionCache: { value: Promise<string | undefined> } | null = null;
 
 export async function getAdaptersPackageVersion(): Promise<string | undefined> {
-  if (!adaptersPackageVersionPromise) {
-    adaptersPackageVersionPromise = readPackageVersion(path.join(import.meta.dirname, "..")).catch((error) => {
-      // Reset the promise on failure so subsequent calls can retry
-      adaptersPackageVersionPromise = null;
+  if (!adaptersPackageVersionCache) {
+    const promise = readPackageVersion(path.join(import.meta.dirname, "..")).catch((error) => {
+      // Invalidate cache on failure so the next call retries.
+      adaptersPackageVersionCache = null;
       console.warn(`Warning: Failed to read adapters package version: ${error instanceof Error ? error.message : String(error)}`);
       return undefined;
     });
+    adaptersPackageVersionCache = { value: promise };
   }
 
-  return await adaptersPackageVersionPromise;
+  return await adaptersPackageVersionCache.value;
 }
 
 export async function probeInvocationVersion(
