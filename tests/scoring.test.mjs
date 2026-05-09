@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { computeCompositeScore } from "../packages/report/dist/index.js";
+import { DEFAULT_SCORE_WEIGHTS, computeScoreComponents as frontendComputeScoreComponents, normalizeApplicableWeights as frontendNormalizeApplicableWeights, getCompositeScoreDetails, getScoreWeightPreset } from "../apps/web-report/src/view-model/scoring.js";
+import { getDefaultWeights } from "../packages/core/dist/index.js";
+import { computeScoreComponents as backendComputeScoreComponents, normalizeApplicableWeights as backendNormalizeApplicableWeights, CRITICAL_FAIL_SCORE_BAND, computeCompositeScore, FAILED_SCORE_BAND } from "../packages/report/dist/index.js";
 
 function createResult(overrides = {}) {
   return {
@@ -341,4 +343,237 @@ test("computeCompositeScore acceptance rate affects efficiency-first mode", () =
     scoreHigh > scoreLow,
     `Higher acceptance rate should yield higher score: ${scoreHigh} vs ${scoreLow}`
   );
+});
+
+// ---------------------------------------------------------------------------
+// Frontend–backend scoring consistency tests
+// ---------------------------------------------------------------------------
+
+test("backend and frontend computeScoreComponents produce identical results", () => {
+  const result = createResult({
+    status: "success",
+    durationMs: 2000,
+    estimatedCostUsd: 0.10,
+    costKnown: true,
+    judgeResults: [
+      { success: true, critical: true },
+      { success: false, critical: true },
+      { success: true, critical: false },
+      { success: true, type: "test-result", totalCount: 10, passedCount: 8, failedCount: 2 },
+      { success: true, type: "lint-check", errorCount: 3, warningCount: 1 },
+      { success: true, type: "patch-validation" }
+    ]
+  });
+  const run = createRun({ results: [result] });
+
+  const backendComponents = backendComputeScoreComponents(result, run);
+  const frontendDetails = frontendComputeScoreComponents(result, run);
+
+  // Compare each component key
+  const keys = ["status", "tests", "criticalJudges", "nonCriticalJudges", "lint", "precision", "duration", "cost"];
+  for (const key of keys) {
+    assert.ok(
+      Math.abs(backendComponents[key] - frontendDetails[key]) < 0.001,
+      `Component '${key}' mismatch: backend=${backendComponents[key]} frontend=${frontendDetails[key]}`
+    );
+  }
+});
+
+test("backend and frontend computeCompositeScore produce identical scores", () => {
+  const result = createResult({
+    status: "success",
+    durationMs: 1500,
+    estimatedCostUsd: 0.08,
+    costKnown: true,
+    judgeResults: [
+      { success: true, critical: true },
+      { success: true, type: "test-result", totalCount: 5, passedCount: 4, failedCount: 1 },
+      { success: true, type: "lint-check", errorCount: 0, warningCount: 2 }
+    ]
+  });
+  const otherResult = createResult({ durationMs: 800, estimatedCostUsd: 0.02, costKnown: true });
+  const run = createRun({ results: [result, otherResult], expectedChangedPaths: ["src/a.ts"] });
+
+  const backendScore = computeCompositeScore(result, run, undefined, "practical");
+  const frontendScore = getCompositeScoreDetails(result, run, getScoreWeightPreset("practical")).total;
+
+  assert.ok(
+    Math.abs(backendScore - frontendScore) < 0.2,
+    `Score mismatch: backend=${backendScore} frontend=${frontendScore}`
+  );
+});
+
+test("frontend SCORE_WEIGHT_PRESETS match backend getDefaultWeights for all modes", () => {
+  const modes = ["practical", "balanced", "issue-resolution", "efficiency-first", "rotating-tasks", "comprehensive"];
+  for (const mode of modes) {
+    const backendWeights = getDefaultWeights(mode);
+    const frontendWeights = getScoreWeightPreset(mode);
+    for (const key of Object.keys(backendWeights)) {
+      assert.ok(
+        Math.abs(backendWeights[key] - (frontendWeights[key] ?? 0)) < 0.001,
+        `Weight mismatch for mode='${mode}' key='${key}': backend=${backendWeights[key]} frontend=${frontendWeights[key] ?? 0}`
+      );
+    }
+    // Also verify no extra keys in frontend
+    for (const key of Object.keys(frontendWeights)) {
+      assert.ok(
+        key in backendWeights,
+        `Extra key '${key}' in frontend preset '${mode}' not present in backend`
+      );
+    }
+  }
+});
+
+test("frontend DEFAULT_SCORE_WEIGHTS matches backend practical mode", () => {
+  const backendPractical = getDefaultWeights("practical");
+  for (const key of Object.keys(backendPractical)) {
+    assert.ok(
+      Math.abs(backendPractical[key] - (DEFAULT_SCORE_WEIGHTS[key] ?? 0)) < 0.001,
+      `Default weight mismatch for key='${key}': backend=${backendPractical[key]} frontend=${DEFAULT_SCORE_WEIGHTS[key] ?? 0}`
+    );
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Legacy judges key migration tests
+// ---------------------------------------------------------------------------
+
+test("normalizeApplicableWeights migrates legacy 'judges' key to criticalJudges/nonCriticalJudges", () => {
+  const result = createResult({
+    status: "success",
+    durationMs: 1000,
+    estimatedCostUsd: 0.05,
+    costKnown: true,
+    judgeResults: [{ success: true, critical: true }, { success: true }]
+  });
+  const run = createRun({ results: [result] });
+
+  const legacyWeights = { status: 0.2, tests: 0.2, judges: 0.15, duration: 0.25, cost: 0.2 };
+
+  // Backend migration
+  const backendResult = backendNormalizeApplicableWeights(legacyWeights, result, run);
+  assert.ok(!("judges" in backendResult), "Backend should not contain legacy 'judges' key");
+  assert.ok("criticalJudges" in backendResult, "Backend should contain 'criticalJudges' key");
+  assert.ok("nonCriticalJudges" in backendResult, "Backend should contain 'nonCriticalJudges' key");
+  // 0.15 split 2:1 → criticalJudges=0.10, nonCriticalJudges=0.05
+  assert.ok(Math.abs(backendResult.criticalJudges - 0.10) < 0.001, `Expected criticalJudges≈0.10, got ${backendResult.criticalJudges}`);
+  assert.ok(Math.abs(backendResult.nonCriticalJudges - 0.05) < 0.001, `Expected nonCriticalJudges≈0.05, got ${backendResult.nonCriticalJudges}`);
+
+  // Frontend migration
+  const frontendResult = frontendNormalizeApplicableWeights(legacyWeights, result, run);
+  assert.ok(!("judges" in frontendResult), "Frontend should not contain legacy 'judges' key");
+  assert.ok("criticalJudges" in frontendResult, "Frontend should contain 'criticalJudges' key");
+  assert.ok("nonCriticalJudges" in frontendResult, "Frontend should contain 'nonCriticalJudges' key");
+  assert.ok(Math.abs(frontendResult.criticalJudges - 0.10) < 0.001, `Expected criticalJudges≈0.10, got ${frontendResult.criticalJudges}`);
+  assert.ok(Math.abs(frontendResult.nonCriticalJudges - 0.05) < 0.001, `Expected nonCriticalJudges≈0.05, got ${frontendResult.nonCriticalJudges}`);
+});
+
+test("normalizeApplicableWeights does not overwrite existing criticalJudges when migrating 'judges'", () => {
+  const result = createResult({
+    status: "success",
+    durationMs: 1000,
+    estimatedCostUsd: 0.05,
+    costKnown: true,
+    judgeResults: [{ success: true }]
+  });
+  const run = createRun({ results: [result] });
+
+  // Both judges AND criticalJudges specified — criticalJudges should be kept from explicit key,
+  // and only nonCriticalJudges should come from judges migration (1/3 of 0.15 = 0.05)
+  // Pre-normalization: { status: 0.2, tests: 0.2, criticalJudges: 0.12, nonCriticalJudges: 0.05, duration: 0.18, cost: 0.15 }
+  // Sum = 0.90, so after normalization criticalJudges = 0.12/0.90 = 0.1333
+  const weights = { status: 0.2, tests: 0.2, judges: 0.15, criticalJudges: 0.12, duration: 0.18, cost: 0.15 };
+  const backendResult = backendNormalizeApplicableWeights(weights, result, run);
+  // After normalization: 0.12 / (0.2+0.2+0.12+0.05+0.18+0.15) = 0.12/0.90 ≈ 0.1333
+  assert.ok(Math.abs(backendResult.criticalJudges - 0.1333) < 0.01, `Expected criticalJudges≈0.1333 (normalized), got ${backendResult.criticalJudges}`);
+  // nonCriticalJudges from judges migration: 0.05/0.90 ≈ 0.0556
+  assert.ok(Math.abs(backendResult.nonCriticalJudges - 0.0556) < 0.01, `Expected nonCriticalJudges≈0.0556 (normalized), got ${backendResult.nonCriticalJudges}`);
+  // Legacy 'judges' key should be gone
+  assert.ok(!("judges" in backendResult), "Legacy 'judges' key should be removed");
+});
+
+// ---------------------------------------------------------------------------
+// Score band boundary tests
+// ---------------------------------------------------------------------------
+
+test("FAILED_SCORE_BAND: failed run score is within [10, 40]", () => {
+  const result = createResult({
+    status: "error",
+    durationMs: 1000,
+    estimatedCostUsd: 0,
+    costKnown: false,
+    judgeResults: []
+  });
+  const run = createRun({ results: [result] });
+
+  const score = computeCompositeScore(result, run);
+  assert.ok(score >= FAILED_SCORE_BAND.min, `Score ${score} below min ${FAILED_SCORE_BAND.min}`);
+  assert.ok(score <= FAILED_SCORE_BAND.max, `Score ${score} above max ${FAILED_SCORE_BAND.max}`);
+});
+
+test("FAILED_SCORE_BAND: failed run with fast duration and low cost still capped at 40", () => {
+  const fastResult = createResult({ status: "error", durationMs: 100 });
+  const cheapResult = createResult({ status: "success", durationMs: 500, estimatedCostUsd: 0.01, costKnown: true });
+  const run = createRun({ results: [fastResult, cheapResult] });
+
+  const score = computeCompositeScore(fastResult, run);
+  assert.ok(score <= FAILED_SCORE_BAND.max, `Even fast failed run should not exceed ${FAILED_SCORE_BAND.max}, got ${score}`);
+});
+
+test("CRITICAL_FAIL_SCORE_BAND: critical judge failure produces score in [50, 70]", () => {
+  const result = createResult({
+    status: "success",
+    durationMs: 1000,
+    estimatedCostUsd: 0.05,
+    costKnown: true,
+    judgeResults: [
+      { success: false, critical: true, type: "security" },
+      { success: true, type: "test-result", totalCount: 5, passedCount: 5, failedCount: 0 }
+    ]
+  });
+  const otherResult = createResult({ durationMs: 800, estimatedCostUsd: 0.02, costKnown: true });
+  const run = createRun({ results: [result, otherResult] });
+
+  const score = computeCompositeScore(result, run);
+  assert.ok(score >= CRITICAL_FAIL_SCORE_BAND.min, `Score ${score} below min ${CRITICAL_FAIL_SCORE_BAND.min}`);
+  assert.ok(score <= CRITICAL_FAIL_SCORE_BAND.max, `Score ${score} above max ${CRITICAL_FAIL_SCORE_BAND.max}`);
+});
+
+test("CRITICAL_FAIL_SCORE_BAND: all non-critical passed but critical failed still in band", () => {
+  const result = createResult({
+    status: "success",
+    durationMs: 500,
+    estimatedCostUsd: 0.01,
+    costKnown: true,
+    judgeResults: [
+      { success: false, critical: true },
+      { success: true, type: "test-result", totalCount: 10, passedCount: 10, failedCount: 0 },
+      { success: true, type: "lint-check", errorCount: 0, warningCount: 0 }
+    ]
+  });
+  const otherResult = createResult({ durationMs: 400, estimatedCostUsd: 0.005, costKnown: true });
+  const run = createRun({ results: [result, otherResult] });
+
+  const score = computeCompositeScore(result, run);
+  assert.ok(score >= CRITICAL_FAIL_SCORE_BAND.min, `Score ${score} should be >= ${CRITICAL_FAIL_SCORE_BAND.min}`);
+  assert.ok(score <= CRITICAL_FAIL_SCORE_BAND.max, `Score ${score} should be <= ${CRITICAL_FAIL_SCORE_BAND.max}`);
+});
+
+test("Successful run with no critical judge failures scores above CRITICAL_FAIL_SCORE_BAND max", () => {
+  const result = createResult({
+    status: "success",
+    durationMs: 500,
+    estimatedCostUsd: 0.01,
+    costKnown: true,
+    judgeResults: [
+      { success: true, critical: true },
+      { success: true, type: "test-result", totalCount: 5, passedCount: 5, failedCount: 0 },
+      { success: true, type: "lint-check", errorCount: 0, warningCount: 0 }
+    ]
+  });
+  const otherResult = createResult({ durationMs: 400, estimatedCostUsd: 0.005, costKnown: true });
+  const run = createRun({ results: [result, otherResult] });
+
+  const score = computeCompositeScore(result, run);
+  assert.ok(score > CRITICAL_FAIL_SCORE_BAND.max, `Fully successful run should score > ${CRITICAL_FAIL_SCORE_BAND.max}, got ${score}`);
 });

@@ -339,47 +339,42 @@ test("getRunVerdict prefers structured test and lint quality over softer metrics
   assert.ok(getCompositeScoreDetails(verdict.bestAgent, run).total > getCompositeScoreDetails(run.results[0], run).total);
 });
 
-// TODO: This test needs adjustment - the scoring logic makes it hard for speed to win
-// even with efficiency-first weights because status (success/fail) dominates.
-// The test data needs to be redesigned so that speed actually wins with efficiency weights.
-test.skip("getRunVerdict changes winner when custom weights favor speed", () => {
+test("getRunVerdict changes winner when custom weights favor speed", () => {
   const run = createRun("run-weight-shift", "Task WS", {
     results: [
       createResult("quality", {
-        durationMs: 5000,  // Much slower
+        durationMs: 2000,  // Slower
         costKnown: true,
-        estimatedCostUsd: 0.5,  // More expensive
+        estimatedCostUsd: 0.10,  // More expensive
         judgeResults: [
           { success: true },
-          { success: true, type: "test-result", totalCount: 4, passedCount: 4, failedCount: 0 },
+          { success: true, type: "test-result", totalCount: 10, passedCount: 10, failedCount: 0 },
           { success: true, type: "lint-check", errorCount: 0, warningCount: 0 }
-        ],
-        diffPrecision: { score: 0.9, matchedFiles: ["src/a.ts"], unexpectedFiles: [], totalChangedFiles: 1, expectedScopeCount: 1 }
+        ]
       }),
       createResult("speed", {
-        durationMs: 200,  // Much faster
+        durationMs: 500,  // Much faster
         costKnown: true,
-        estimatedCostUsd: 0.05,  // Much cheaper
+        estimatedCostUsd: 0.02,  // Much cheaper
         judgeResults: [
-          { success: true }, 
-          { success: true, type: "test-result", totalCount: 4, passedCount: 3, failedCount: 1 }  // Only 1 test fails
-        ],
-        diffPrecision: { score: 0.6, matchedFiles: ["README.md"], unexpectedFiles: [], totalChangedFiles: 1, expectedScopeCount: 1 }
+          { success: true },
+          { success: true, type: "test-result", totalCount: 10, passedCount: 5, failedCount: 5 }  // Half tests fail
+        ]
       })
     ]
   });
 
   const defaultVerdict = getRunVerdict(run, { scoreWeights: DEFAULT_SCORE_WEIGHTS });
   
-  // With efficiency-first weights, speed should win due to much better duration and cost
+  // With speed-focused weights, speed should win due to much better duration and cost
   // even though quality has better test results
   const speedVerdict = getRunVerdict(run, {
-    scoreWeights: { status: 0.10, tests: 0.05, criticalJudges: 0.05, tokenEfficiency: 0.50, duration: 0.25, cost: 0.05 }
+    scoreWeights: { status: 0.10, tests: 0.10, criticalJudges: 0.05, duration: 0.50, cost: 0.25 }
   });
 
   // Quality wins with default weights (correctness-focused)
   assert.equal(defaultVerdict.bestAgent.agentId, "quality");
-  // Speed wins with efficiency-first weights
+  // Speed wins with speed-focused weights
   assert.equal(speedVerdict.bestAgent.agentId, "speed");
 });
 

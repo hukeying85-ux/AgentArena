@@ -30,6 +30,7 @@
 
 // ---------------------------------------------------------------------------
 // Weight presets — mirrors packages/core/src/scoring-weights.ts
+// Consistency is guarded by automated tests in tests/scoring.test.mjs
 // ---------------------------------------------------------------------------
 
 /** @type {ScoreWeights} */
@@ -265,7 +266,7 @@ const CRITICAL_FAIL_SCORE_BAND = { min: 50, max: 70 };
  * @param {Object} run
  * @returns {Object}
  */
-function computeScoreComponents(result, run) {
+export function computeScoreComponents(result, run) {
   const testJudge = findJudgeByType(result, "test-result");
   const lintJudge = findJudgeByType(result, "lint-check");
   const patchJudges = (result.judgeResults ?? []).filter(j => j.type === "patch-validation");
@@ -353,7 +354,7 @@ function computeScoreComponents(result, run) {
  * @param {Object} run
  * @returns {ScoreWeights}
  */
-function normalizeApplicableWeights(weights, result, run) {
+export function normalizeApplicableWeights(weights, result, run) {
   // Compatibility: migrate legacy "judges" key → criticalJudges + nonCriticalJudges
   /** @type {Record<string, number>} */
   const migratedWeights = {};

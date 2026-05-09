@@ -5,8 +5,9 @@
  * The frontend (view-model/scoring.js) mirrors these values in
  * SCORE_WEIGHT_PRESETS for display and dynamic re-scoring.
  *
- * When adding or changing presets, update BOTH this file AND
- * apps/web-report/src/view-model/scoring.js.
+ * Consistency is guarded by automated tests in tests/scoring.test.mjs
+ * ("frontend SCORE_WEIGHT_PRESETS match backend getDefaultWeights for all modes").
+ * If you change a preset here, the test will catch any frontend drift.
  */
 
 const PRACTICAL_WEIGHTS = {
