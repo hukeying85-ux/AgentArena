@@ -345,4 +345,12 @@ export async function runBenchmarkCommand(
   if (benchmark.results.some((result) => result.status !== "success")) {
     process.exitCode = 1;
   }
+
+  // Auto-cleanup old runs (keep most recent 50 by default)
+  try {
+    const { runCleanup } = await import("./cleanup.js");
+    await runCleanup({ ...parsed, maxRuns: parsed.maxRuns ?? 50 });
+  } catch {
+    // Non-critical — don't fail the run if cleanup fails
+  }
 }

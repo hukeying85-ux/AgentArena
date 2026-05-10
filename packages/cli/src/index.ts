@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { type ParsedArgs, parseArgs, printHelp } from "./args.js";
+import { runCleanup } from "./commands/cleanup.js";
 import { runDoctor } from "./commands/doctor.js";
 import { runInit, runInitCi, runInitTaskpack } from "./commands/init.js";
 import { runListAdapters } from "./commands/list-adapters.js";
@@ -50,6 +51,9 @@ async function main(): Promise<void> {
         break;
       case "publish":
         await runPublish(parsed);
+        break;
+      case "clean":
+        await runCleanup(parsed);
         break;
       case "ui":
         await runUi(parsed);

@@ -40,6 +40,7 @@ export interface ParsedArgs {
   format?: 'human' | 'json';
   resultFile?: string;
   githubToken?: string;
+  maxRuns?: number;
 }
 
 export function printHelp(): void {
@@ -56,6 +57,7 @@ Commands:
   init-taskpack    Create a new task pack from a template
   init-ci          Create a CI workflow file for automated benchmarks
   publish          Publish a benchmark result to the community leaderboard
+  clean            Remove old benchmark runs (keeps most recent 50 by default)
   ui               Start the web UI server
 
 Run Command:
@@ -500,6 +502,18 @@ export function parseArgs(argv: string[]): ParsedArgs {
           throw new Error("--token requires a GitHub personal access token. Example: --token ghp_xxxx");
         }
         break;
+      case "--max-runs": {
+        const maxRunsValue = args.shift();
+        if (!maxRunsValue) {
+          throw new Error("--max-runs requires a number. Example: --max-runs 50");
+        }
+        const value = Number.parseInt(maxRunsValue, 10);
+        if (!Number.isInteger(value) || value <= 0) {
+          throw new Error(`--max-runs must be a positive integer. Got: ${maxRunsValue}`);
+        }
+        parsed.maxRuns = value;
+        break;
+      }
       case "--welcome":
       case "-w":
         parsed.welcome = true;
