@@ -14,7 +14,7 @@ export async function validateWorkspacePath(
   targetPath: string,
   context: string,
   trace: ((event: { type: string; message: string; metadata?: Record<string, unknown> }) => Promise<void>) | undefined,
-  mode: SandboxMode = "warn"
+  mode: SandboxMode = "strict"
 ): Promise<boolean> {
   if (mode === "off") return true;
 
@@ -43,7 +43,7 @@ export async function validateWorkspacePath(
 export function createWorkspaceSandbox(
   workspacePath: string,
   trace: ((event: { type: string; message: string; metadata?: Record<string, unknown> }) => Promise<void>) | undefined,
-  mode: SandboxMode = "warn"
+  mode: SandboxMode = "strict"
 ) {
   return {
     async validate(targetPath: string, context: string): Promise<boolean> {

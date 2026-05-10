@@ -90,6 +90,28 @@ export function checkCorsOrigin(origin: string | undefined, host: string, port: 
   return allowedOrigins.has(origin);
 }
 
+/**
+ * Paths that expose sensitive data (secrets, credentials, profiles).
+ * These always require authentication, even on localhost.
+ */
+const SENSITIVE_API_PATHS = new Set([
+  "/api/provider-profiles",
+  "/api/run",
+  "/api/run/cancel",
+  "/api/preflight",
+  "/api/create-adhoc-taskpack",
+]);
+
+/**
+ * Check if a path pattern matches a sensitive path (including sub-paths like /api/provider-profiles/:id/secret).
+ */
+function isSensitivePath(pathname: string): boolean {
+  if (SENSITIVE_API_PATHS.has(pathname)) return true;
+  // Match sub-paths: /api/provider-profiles/:id, /api/provider-profiles/:id/secret
+  if (pathname.startsWith("/api/provider-profiles/")) return true;
+  return false;
+}
+
 export function checkAuthHeader(
   requestUrl: URL,
   method: string | undefined,
@@ -97,10 +119,22 @@ export function checkAuthHeader(
   authToken: string,
   authHeader: string | undefined
 ): boolean {
-  const isDestructiveApi = method !== "GET" && requestUrl.pathname.startsWith("/api/");
-  if (isDestructiveApi || (!isLocalhost && requestUrl.pathname.startsWith("/api/"))) {
+  const isApiPath = requestUrl.pathname.startsWith("/api/");
+  if (!isApiPath) return true;
+
+  // Sensitive API paths ALWAYS require auth, even on localhost
+  const isSensitive = isSensitivePath(requestUrl.pathname);
+  const isDestructiveApi = method !== "GET";
+
+  if (isSensitive || isDestructiveApi || !isLocalhost) {
     const providedToken = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : "";
-    return providedToken === authToken;
+    // Use timing-safe comparison to prevent timing attacks
+    if (providedToken.length !== authToken.length) return false;
+    let mismatch = 0;
+    for (let i = 0; i < providedToken.length; i++) {
+      mismatch |= providedToken.charCodeAt(i) ^ authToken.charCodeAt(i);
+    }
+    return mismatch === 0;
   }
   return true;
 }
@@ -116,7 +150,9 @@ export function jsonResponse(data: unknown, statusCode = 200): { statusCode: num
       "X-Frame-Options": "DENY",
       "X-Content-Type-Options": "nosniff",
       "Referrer-Policy": "strict-origin-when-cross-origin",
-      "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'"
+      "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'",
+      // Prevent caching of API responses that may contain sensitive data
+      "Pragma": "no-cache"
     }
   };
 }
