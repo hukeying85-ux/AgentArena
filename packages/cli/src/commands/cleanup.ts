@@ -29,7 +29,7 @@ export async function runCleanup(parsed: ParsedArgs): Promise<void> {
     );
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === "ENOENT") {
-      console.log("No runs directory found. Nothing to clean.");
+      console.error("No runs directory found. Nothing to clean.");
       return;
     }
     throw e;
@@ -40,11 +40,11 @@ export async function runCleanup(parsed: ParsedArgs): Promise<void> {
   const toRemove = entries.slice(maxRuns);
 
   if (toRemove.length === 0) {
-    console.log(`${entries.length} run(s) found, within limit of ${maxRuns}. Nothing to clean.`);
+    console.error(`${entries.length} run(s) found, within limit of ${maxRuns}. Nothing to clean.`);
     return;
   }
 
-  console.log(`${entries.length} run(s) found, removing ${toRemove.length} oldest (keeping ${maxRuns})...`);
+  console.error(`${entries.length} run(s) found, removing ${toRemove.length} oldest (keeping ${maxRuns})...`);
 
   let removed = 0;
   for (const entry of toRemove) {
@@ -56,5 +56,5 @@ export async function runCleanup(parsed: ParsedArgs): Promise<void> {
     }
   }
 
-  console.log(`Removed ${removed} run(s). ${entries.length - removed} remaining.`);
+  console.error(`Removed ${removed} run(s). ${entries.length - removed} remaining.`);
 }

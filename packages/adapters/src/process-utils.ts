@@ -2,7 +2,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { BenchmarkCancelledError, resolveTimeoutMs } from "@agentarena/core";
-import { adapterWarn } from "./shared.js";
+import { adapterWarn } from "./adapter-diagnostics.js";
 
 export interface ProcessResult {
   exitCode: number | null;
