@@ -32,17 +32,19 @@ coverage/
 
 # AI Assistant local configs
 .agents/
+.catpaw/
 .claude/
 .codebuddy/
 .codex/
 .iflow/
 .kilocode/
+.opencode/
 .qoder/
 .qwen/
+.sisyphus/
 .trae/
 skills/
 specs/
-.trae/
 
 # Python scripts (not part of this project)
 *.py
