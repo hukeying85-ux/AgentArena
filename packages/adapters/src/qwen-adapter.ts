@@ -10,16 +10,11 @@ import {
   type AgentResolvedRuntime,
   ensureDirectory
 } from "@agentarena/core";
+import type { InvocationSpec } from "./adapter-capabilities.js";
+import { formatAdapterError } from "./adapter-diagnostics.js";
+import { buildAgentPrompt, createPreflightResult, getChangedFilesFromGit } from "./adapter-helpers.js";
+import { probeHelp, probeInvocationVersion } from "./invocation-probes.js";
 import { agentTimeoutMs, runProcess } from "./process-utils.js";
-import {
-  adapterWarn,
-  buildAgentPrompt,
-  createPreflightResult,
-  formatAdapterError,
-  type InvocationSpec,
-  probeHelp,
-  probeInvocationVersion
-} from "./shared.js";
 
 /**
  * Qwen Code CLI 能力定义
@@ -142,17 +137,18 @@ function parseQwenOutput(
     if (stats && typeof stats === "object" && "models" in stats) {
       const models = (stats as Record<string, unknown>).models;
       if (models && typeof models === "object") {
-        for (const modelName of Object.keys(models)) {
-          const modelStats = (models as Record<string, unknown>)[modelName];
+        for (const modelKey of Object.keys(models)) {
+          const modelStats = (models as Record<string, unknown>)[modelKey];
           if (modelStats && typeof modelStats === "object") {
             const ms = modelStats as Record<string, unknown>;
-            inputTokens += (ms.input as number) ?? (ms.prompt_tokens as number) ?? 0;
-            outputTokens += (ms.output as number) ?? (ms.completion_tokens as number) ?? 0;
+            inputTokens += Number(ms.input) || Number(ms.prompt_tokens) || 0;
+            outputTokens += Number(ms.output) || Number(ms.completion_tokens) || 0;
           }
         }
         tokenUsage = inputTokens + outputTokens;
 
-        const pricing = getModelPricing(modelName);
+        const pricingModelName = Object.keys(models)[0] ?? modelName;
+        const pricing = getModelPricing(pricingModelName);
         estimatedCostUsd = (inputTokens / 1000) * pricing.input + (outputTokens / 1000) * pricing.output;
       }
     }
@@ -382,20 +378,7 @@ export class QwenCodeAdapter implements AgentAdapter {
       resolvedRuntime.effectiveModel
     );
 
-    // 检测变化的文件
-    const changedFilesHint: string[] = [];
-    try {
-      const { execFileSync } = await import("node:child_process");
-      const gitDiff = execFileSync("git", ["diff", "--name-only"], {
-        cwd: context.workspacePath,
-        encoding: "utf8"
-      }).trim();
-      if (gitDiff) {
-        changedFilesHint.push(...gitDiff.split("\n").filter(Boolean));
-      }
-    } catch (e) {
-      adapterWarn("git diff failed in workspace", { cwd: context.workspacePath, error: e instanceof Error ? e.message : String(e) });
-    }
+    const changedFilesHint = await getChangedFilesFromGit(context.workspacePath);
 
     let summary: string;
     if (execution.error) {

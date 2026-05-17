@@ -41,6 +41,7 @@ export interface ParsedArgs {
   resultFile?: string;
   githubToken?: string;
   maxRuns?: number;
+  trustProxy?: boolean;
 }
 
 export function printHelp(): void {
@@ -164,6 +165,7 @@ UI Command:
     --port <port>              Server port (default: 4320)
     --auth-token <token>       Custom auth token for non-localhost access (default: auto-generated)
     --no-open                  Don't open browser automatically
+    --trust-proxy              Trust X-Forwarded-For header for rate limiting (when behind reverse proxy)
 
 Global Options:
   -w, --welcome                Show welcome message with getting started tips
@@ -431,8 +433,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
           throw new Error("--max-concurrency requires a number. Example: --max-concurrency 4");
         }
         const value = Number.parseInt(concurrencyValue, 10);
-        if (!Number.isInteger(value) || value <= 0) {
-          throw new Error(`--max-concurrency must be a positive integer. Got: ${concurrencyValue}`);
+        if (!Number.isInteger(value) || value <= 0 || value > 64) {
+          throw new Error(`--max-concurrency must be a positive integer between 1 and 64. Got: ${concurrencyValue}`);
         }
         parsed.maxConcurrency = value;
         break;
@@ -482,6 +484,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
       case "--debug":
         parsed.debug = true;
         parsed.verbose = true;
+        break;
+      case "--trust-proxy":
+        parsed.trustProxy = true;
         break;
       case "--format": {
         const formatValue = args.shift();

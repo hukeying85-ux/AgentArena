@@ -19,10 +19,24 @@ import {
 import {
   type ClaudeProviderProfile,
   createAgentSelection,
+  logger,
+  metrics,
   validateTaskPackId,
 } from "@agentarena/core";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { jsonResponse } from "../server.js";
+
+export async function withErrorHandling(promise: Promise<ApiResponse>): Promise<ApiResponse> {
+  try {
+    return await promise;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    // biome-ignore lint/suspicious/noConsole: server error logging
+    console.error(`[agentarena] API handler error: ${message}`);
+    return jsonResponse({ error: "Internal server error" }, 500);
+  }
+}
+
 import {
   createAdhocLintCommand,
   createAdhocTestCommand,
@@ -136,9 +150,20 @@ export async function handlePreflight(rawBody: string): Promise<ApiResponse> {
       configSource: "ui"
     });
     const results = await preflightAdapters([selection], { probeAuth: true });
-    return jsonResponse(results[0]);
+    const result = results[0];
+    
+    metrics.preflightTotal.inc({ status: result.status, agentId: body.baseAgentId });
+    logger.info("server", "preflight.check", `Preflight check completed for ${body.baseAgentId}`, {
+      metadata: { status: result.status, agentId: body.baseAgentId }
+    });
+    
+    return jsonResponse(result);
   } catch (err: unknown) {
-    console.error(`[agentarena] Preflight failed: ${err instanceof Error ? err.message : String(err)}`);
+    metrics.preflightTotal.inc({ status: "error", agentId: body.baseAgentId });
+    logger.error("server", "preflight.error", "Preflight check failed", {
+      metadata: { agentId: body.baseAgentId },
+      error: err
+    });
     return jsonResponse({ error: "Internal server error" }, 500);
   }
 }
@@ -161,7 +186,12 @@ export async function handleProviderProfileCreate(rawBody: string): Promise<ApiR
   }
   const profile = await saveClaudeProviderProfile(payload);
   if (payload.secret?.trim()) {
-    await setClaudeProviderProfileSecret(profile.id, payload.secret);
+    try {
+      await setClaudeProviderProfileSecret(profile.id, payload.secret);
+    } catch (secretError) {
+      await deleteClaudeProviderProfile(profile.id).catch(() => {});
+      return jsonResponse({ error: `Profile created but secret storage failed: ${secretError instanceof Error ? secretError.message : String(secretError)}` }, 500);
+    }
   }
   const profiles = await listClaudeProviderProfiles();
   return jsonResponse({
@@ -240,11 +270,75 @@ export async function handleCreateAdhocTaskpack(rawBody: string): Promise<ApiRes
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   const adhocTitle = body.title?.trim() || `Adhoc Task ${timestamp}`;
   const adhocId = `adhoc-${timestamp}`;
-  const buildCommand = createPackageScriptCommand("build");
+
+  // Detect project language based on file presence
+  const cwd = process.cwd();
+  const languageDetectors: Array<{ lang: string; files: string[] }> = [
+    { lang: "node-js", files: ["package.json"] },
+    { lang: "python", files: ["pyproject.toml", "setup.py", "requirements.txt", "Pipfile"] },
+    { lang: "go", files: ["go.mod"] },
+    { lang: "rust", files: ["Cargo.toml"] },
+    { lang: "ruby", files: ["Gemfile"] },
+  ];
+  let detectedLang = "generic";
+  for (const detector of languageDetectors) {
+    for (const file of detector.files) {
+      try {
+        await fs.access(path.join(cwd, file));
+        detectedLang = detector.lang;
+        break;
+      } catch {}
+    }
+    if (detectedLang !== "generic") break;
+  }
+
   const testReportFile = `.agentarena/${adhocId}-test-results.json`;
   const lintReportFile = `.agentarena/${adhocId}-lint-results.json`;
-  const testCommand = createAdhocTestCommand(testReportFile);
-  const lintCommand = createAdhocLintCommand(lintReportFile);
+
+  // Generate language-specific judges
+  const languageJudges: Record<string, Array<Record<string, unknown>>> = {
+    "node-js": [
+      { id: "repo-not-broken", type: "file-exists", label: "Node package manifest still exists", path: "package.json" },
+      { id: "readme-exists", type: "file-exists", label: "Repository README still exists", path: "README.md" },
+      { id: "build-passes", type: "command", label: "Node project still builds", command: createPackageScriptCommand("build"), timeoutMs: 120000 },
+      { id: "tests-pass", type: "test-result", label: "Node tests still pass", command: createAdhocTestCommand(testReportFile), format: "auto", reportFile: testReportFile, timeoutMs: 120000 },
+      { id: "lint-clean", type: "lint-check", label: "Node lint stays clean", command: createAdhocLintCommand(lintReportFile), format: "auto", reportFile: lintReportFile, maxWarnings: 0, timeoutMs: 120000 }
+    ],
+    "python": [
+      { id: "repo-not-broken", type: "file-exists", label: "Python project files exist", path: "pyproject.toml" },
+      { id: "readme-exists", type: "file-exists", label: "Repository README still exists", path: "README.md" },
+      { id: "tests-pass", type: "command", label: "Python tests pass", command: "python -m pytest --tb=short -q", timeoutMs: 120000 },
+      { id: "lint-clean", type: "command", label: "Python lint clean", command: "python -m flake8 --max-line-length=120 --ignore=E501,W503", timeoutMs: 60000 }
+    ],
+    "go": [
+      { id: "repo-not-broken", type: "file-exists", label: "Go module file exists", path: "go.mod" },
+      { id: "readme-exists", type: "file-exists", label: "Repository README still exists", path: "README.md" },
+      { id: "build-passes", type: "command", label: "Go build passes", command: "go build ./...", timeoutMs: 120000 },
+      { id: "tests-pass", type: "command", label: "Go tests pass", command: "go test -v ./...", timeoutMs: 120000 },
+      { id: "vet-clean", type: "command", label: "Go vet clean", command: "go vet ./...", timeoutMs: 60000 }
+    ],
+    "rust": [
+      { id: "repo-not-broken", type: "file-exists", label: "Cargo.toml exists", path: "Cargo.toml" },
+      { id: "readme-exists", type: "file-exists", label: "Repository README still exists", path: "README.md" },
+      { id: "build-passes", type: "command", label: "Cargo build passes", command: "cargo build", timeoutMs: 300000 },
+      { id: "tests-pass", type: "command", label: "Cargo tests pass", command: "cargo test", timeoutMs: 300000 },
+      { id: "clippy-clean", type: "command", label: "Clippy clean", command: "cargo clippy -- -D warnings", timeoutMs: 120000 }
+    ],
+    "ruby": [
+      { id: "repo-not-broken", type: "file-exists", label: "Gemfile exists", path: "Gemfile" },
+      { id: "readme-exists", type: "file-exists", label: "Repository README still exists", path: "README.md" },
+      { id: "build-passes", type: "command", label: "Bundle install passes", command: "bundle install --jobs=4", timeoutMs: 120000 },
+      { id: "tests-pass", type: "command", label: "Ruby tests pass", command: "bundle exec rake test", timeoutMs: 120000 },
+      { id: "lint-clean", type: "command", label: "Rubocop clean", command: "bundle exec rubocop --format=quiet", timeoutMs: 60000 }
+    ],
+    "generic": [
+      { id: "readme-exists", type: "file-exists", label: "Repository README still exists", path: "README.md" }
+    ]
+  };
+
+  const judges = languageJudges[detectedLang] ?? languageJudges.generic;
+  const repoTypeLabel = detectedLang === "node-js" ? "node-js" : detectedLang;
+
   const yamlContent = stringifyYaml({
     schemaVersion: "agentarena.taskpack/v1",
     id: adhocId,
@@ -255,52 +349,13 @@ export async function handleCreateAdhocTaskpack(rawBody: string): Promise<ApiRes
       owner: "user",
       difficulty: "medium",
       objective: "Execute the user-provided prompt and verify the result.",
-      repoTypes: ["node-js"],
-      tags: ["adhoc", "custom", "node-assumptions"],
+      repoTypes: [repoTypeLabel],
+      tags: ["adhoc", "custom", detectedLang],
       dependencies: [],
-      judgeRationale: "These default checks assume a Node-style repository with package.json, README, build, test, and lint commands."
+      judgeRationale: `These default checks assume a ${detectedLang} repository with appropriate build, test, and lint commands.`
     },
     prompt: body.prompt,
-    judges: [
-      {
-        id: "repo-not-broken",
-        type: "file-exists",
-        label: "Node package manifest still exists",
-        path: "package.json"
-      },
-      {
-        id: "readme-exists",
-        type: "file-exists",
-        label: "Repository README still exists",
-        path: "README.md"
-      },
-      {
-        id: "build-passes",
-        type: "command",
-        label: "Node project still builds",
-        command: buildCommand,
-        timeoutMs: 120000
-      },
-      {
-        id: "tests-pass",
-        type: "test-result",
-        label: "Node tests still pass with structured results",
-        command: testCommand,
-        format: "auto",
-        reportFile: testReportFile,
-        timeoutMs: 120000
-      },
-      {
-        id: "lint-clean",
-        type: "lint-check",
-        label: "Node lint stays clean",
-        command: lintCommand,
-        format: "auto",
-        reportFile: lintReportFile,
-        maxWarnings: 0,
-        timeoutMs: 120000
-      }
-    ]
+    judges
   }, { lineWidth: 0 });
   const adhocPath = path.join(adhocDir, `${adhocId}.yaml`);
   await fs.writeFile(adhocPath, yamlContent, "utf8");

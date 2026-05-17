@@ -131,21 +131,7 @@ const scoreWeightElements = {
   cost: "scoreWeightCost"
 };
 
-// Weight name mapping for slider labels — now uses i18n keys
-const _WEIGHT_NAMES = {
-  status: 'scoreWeightStatus',
-  tests: 'scoreWeightTests',
-  criticalJudges: 'scoreWeightCriticalJudges',
-  nonCriticalJudges: 'scoreWeightNonCriticalJudges',
-  resolutionRate: 'scoreWeightResolutionRate',
-  tokenEfficiency: 'scoreWeightTokenEfficiency',
-  acceptanceRate: 'scoreWeightAcceptanceRate',
-  categoryScore: 'scoreWeightCategoryScore',
-  duration: 'scoreWeightDuration',
-  cost: 'scoreWeightCost',
-  precision: 'scoreWeightPrecision',
-  lint: 'scoreWeightLint'
-};
+
 
 function t(key, ...args) {
   return translate(state.language, key, ...args);
@@ -799,6 +785,9 @@ async function renderCommunityView() {
     return;
   }
 
+  // Guard against stale fetches overwriting newer data
+  const requestId = ++state._communityRequestId;
+
   // Try cache first
   const cached = getCachedCommunityData(taskPackId);
   if (cached) {
@@ -822,6 +811,10 @@ async function renderCommunityView() {
 
   try {
     const data = await fetchCommunityIndex(taskPackId);
+
+    // Discard stale results if a newer request was made
+    if (state._communityRequestId !== requestId) return;
+
     state.communityTaskPackId = taskPackId;
     state.communityData = data;
     state.communityLoading = false;
@@ -836,6 +829,9 @@ async function renderCommunityView() {
       elements.communityContent.innerHTML = `<p class="community-empty">${t("communityNoData")}</p><p class="community-hint">${t("communityPublishHint")}</p>`;
     }
   } catch (error) {
+    // Discard stale errors if a newer request was made
+    if (state._communityRequestId !== requestId) return;
+
     state.communityLoading = false;
     state.communityError = error?.message ?? "Unknown error";
     elements.communityStatus.textContent = t("communityError");
@@ -1594,7 +1590,6 @@ if (elements.tryDemoBtn) {
       btn.addEventListener("click", () => {
         loadDemoData();
       });
-      console.log('Demo button event listener added after DOM ready');
     }
   });
 }
@@ -1686,9 +1681,7 @@ function loadDemoData() {
 
   // Apply the demo data
   setTimeout(() => {
-    console.log('setTimeout callback, applying demo data');
     applyRuns([demoRun]);
-    console.log('applyRuns called');
     state.notice = localText(
       "演示数据已加载。这是一个模拟的 benchmark 结果，展示了 AgentArena 的主要功能。",
       "Demo data loaded. This is a simulated benchmark result showcasing AgentArena's main features."

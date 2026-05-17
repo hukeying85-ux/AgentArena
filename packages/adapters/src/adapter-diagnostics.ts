@@ -1,5 +1,6 @@
 export function adapterWarn(message: string, metadata?: Record<string, unknown>): void {
   const detail = metadata ? ` ${JSON.stringify(metadata)}` : "";
+  // biome-ignore lint/suspicious/noConsole: intentional diagnostic output
   console.warn(`[adapters] ${message}${detail}`);
 }
 
@@ -15,7 +16,7 @@ const ERROR_HINTS: ErrorHint[] = [
   },
   {
     pattern: /EACCES|permission denied/i,
-    suggestion: (title, cmd) => `Permission denied running "${cmd}". Check file permissions or run with appropriate access.`
+    suggestion: (_title, cmd) => `Permission denied running "${cmd}". Check file permissions or run with appropriate access.`
   },
   {
     pattern: /timed? ?out/i,

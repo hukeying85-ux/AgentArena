@@ -7,17 +7,12 @@ import type {
   AgentAdapter,
   AgentResolvedRuntime
 } from "@agentarena/core";
+import type { InvocationSpec } from "./adapter-capabilities.js";
+import { formatAdapterError } from "./adapter-diagnostics.js";
+import { buildAgentPrompt, createPreflightResult, getChangedFilesFromGit } from "./adapter-helpers.js";
 import { parseGeminiEvents } from "./event-parsers.js";
+import { probeHelp, probeInvocationVersion } from "./invocation-probes.js";
 import { agentTimeoutMs, runProcess } from "./process-utils.js";
-import {
-  adapterWarn,
-  buildAgentPrompt,
-  createPreflightResult,
-  formatAdapterError,
-  type InvocationSpec,
-  probeHelp,
-  probeInvocationVersion
-} from "./shared.js";
 
 const GEMINI_CAPABILITY: AdapterCapability = {
   supportTier: "experimental",
@@ -205,20 +200,7 @@ export class GeminiCliAdapter implements AgentAdapter {
       }
     });
 
-    // Detect changed files via git diff
-    const changedFilesHint: string[] = [];
-    try {
-      const { execFileSync } = await import("node:child_process");
-      const gitDiff = execFileSync("git", ["diff", "--name-only"], {
-        cwd: context.workspacePath,
-        encoding: "utf8"
-      }).trim();
-      if (gitDiff) {
-        changedFilesHint.push(...gitDiff.split("\n").filter(Boolean));
-      }
-    } catch (e) {
-      adapterWarn("git diff failed in workspace", { cwd: context.workspacePath, error: e instanceof Error ? e.message : String(e) });
-    }
+    const changedFilesHint = await getChangedFilesFromGit(context.workspacePath);
 
     return {
       status: execution.exitCode === 0 && !execution.error ? "success" : "failed",

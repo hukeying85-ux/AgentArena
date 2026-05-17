@@ -4,7 +4,7 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 import { pipeline } from "node:stream/promises";
 import { createGunzip, createGzip } from "node:zlib";
-import { ensureDirectory, type TraceEvent } from "@agentarena/core";
+import { ensureDirectory, logger, metrics, type TraceEvent } from "@agentarena/core";
 import { matchesFilter, type TraceFilter, type TraceQueryOptions } from "./types.js";
 
 /**
@@ -42,8 +42,9 @@ async function readTraceFileStreaming(filePath: string): Promise<{ events: Trace
 async function queryTraceFileStream(
   filePath: string,
   options: TraceQueryOptions = {}
-): Promise<TraceEvent[]> {
+): Promise<{ events: TraceEvent[]; malformedCount: number }> {
   const { limit, offset = 0, filter, reverse } = options;
+  let malformedCount = 0;
 
   const stream = createReadStream(filePath, { encoding: "utf8" });
   const rl = createInterface({ input: stream, crlfDelay: Infinity });
@@ -59,12 +60,12 @@ async function queryTraceFileStream(
           filtered.push(event);
         }
       } catch {
-        // skip malformed
+        malformedCount++;
       }
     }
     filtered.reverse();
     const end = limit !== undefined ? offset + limit : undefined;
-    return filtered.slice(offset, end);
+    return { events: filtered.slice(offset, end), malformedCount };
   }
 
   // Forward query: streaming with early termination
@@ -85,17 +86,16 @@ async function queryTraceFileStream(
 
       results.push(event);
       if (results.length >= needed - offset) {
-        // We have enough — destroy the stream to stop reading
         rl.close();
         stream.destroy();
         break;
       }
     } catch {
-      // skip malformed
+      malformedCount++;
     }
   }
 
-  return results;
+  return { events: results, malformedCount };
 }
 
 export class JsonlTraceRecorder {
@@ -124,6 +124,11 @@ export class JsonlTraceRecorder {
       await fs.appendFile(this.filePath, `${JSON.stringify(event)}\n`, "utf8");
     }).catch((error) => {
       this.writeFailed = true;
+      metrics.traceWriteErrorsTotal.inc({ filePath: this.filePath.slice(0, 50) });
+      logger.error("trace", "trace.write", "Trace write failed", {
+        metadata: { filePath: this.filePath },
+        error
+      });
       throw error;
     });
     await this.writeQueue;
@@ -145,6 +150,11 @@ export class JsonlTraceRecorder {
       await fs.appendFile(this.filePath, lines, "utf8");
     }).catch((error) => {
       this.writeFailed = true;
+      metrics.traceWriteErrorsTotal.inc({ filePath: this.filePath.slice(0, 50) });
+      logger.error("trace", "trace.write", "Trace batch write failed", {
+        metadata: { filePath: this.filePath, eventCount: events.length },
+        error
+      });
       throw error;
     });
     await this.writeQueue;
@@ -164,9 +174,8 @@ export class JsonlTraceRecorder {
 
   async query(options: TraceQueryOptions = {}): Promise<TraceEvent[]> {
     try {
-      // Use streaming query: filters during read, stops early when page is full.
-      // This avoids loading the entire file into memory for large traces.
-      return await queryTraceFileStream(this.filePath, options);
+      const { events } = await queryTraceFileStream(this.filePath, options);
+      return events;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
         throw error;
@@ -263,13 +272,29 @@ export class JsonlTraceRecorder {
 
 export class InMemoryTraceRecorder {
   private events: TraceEvent[] = [];
+  private readonly maxEvents: number;
+  private droppedCount = 0;
+
+  constructor(options?: { maxEvents?: number }) {
+    this.maxEvents = options?.maxEvents ?? 10000;
+  }
 
   async record(event: TraceEvent): Promise<void> {
     this.events.push({ ...event });
+    this.evictIfNeeded();
   }
 
   async recordBatch(events: TraceEvent[]): Promise<void> {
     this.events.push(...events.map((event) => ({ ...event })));
+    this.evictIfNeeded();
+  }
+
+  private evictIfNeeded(): void {
+    if (this.events.length <= this.maxEvents) return;
+    const dropCount = this.events.length - this.maxEvents;
+    this.events.splice(0, dropCount);
+    this.droppedCount += dropCount;
+    logger.warn("trace", "trace.evict", `Dropped ${dropCount} oldest trace events (maxEvents: ${this.maxEvents}, total dropped: ${this.droppedCount})`);
   }
 
   getEvents(): TraceEvent[] {

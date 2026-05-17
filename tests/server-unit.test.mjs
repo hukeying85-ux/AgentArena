@@ -162,11 +162,10 @@ test("checkRateLimit: expensive paths are tracked separately", () => {
 
 // ─── generateAuthToken tests ───
 
-test("generateAuthToken: returns a UUID-like string", () => {
+test("generateAuthToken: returns a high-entropy hex bearer token", () => {
   const token = generateAuthToken();
   assert.ok(token.length > 0, "Token should not be empty");
-  // UUID v4 format: 8-4-4-4-12
-  assert.ok(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(token), "Token should be a UUID");
+  assert.ok(/^[0-9a-f]{64}$/.test(token), "Token should be 32 random bytes encoded as hex");
 });
 
 test("generateAuthToken: generates unique tokens", () => {

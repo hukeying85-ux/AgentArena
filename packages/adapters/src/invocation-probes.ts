@@ -1,10 +1,10 @@
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { AdapterPreflightResult, AgentResolvedRuntime } from "@agentarena/core";
+import type { AdapterPreflightResult } from "@agentarena/core";
 import { ensureDirectory } from "@agentarena/core";
-import { adapterWarn } from "./adapter-diagnostics.js";
 import type { InvocationSpec } from "./adapter-capabilities.js";
+import { adapterWarn } from "./adapter-diagnostics.js";
 import { writeClaudeWorkspaceSettings } from "./claude-provider-profiles.js";
 import { parseClaudeEvents } from "./event-parsers.js";
 import type { ProcessResult } from "./process-utils.js";
@@ -56,6 +56,7 @@ export async function getAdaptersPackageVersion(): Promise<string | undefined> {
   if (!adaptersPackageVersionCache) {
     const promise = readPackageVersion(path.join(import.meta.dirname, "..")).catch((error) => {
       adaptersPackageVersionCache = null;
+      // biome-ignore lint/suspicious/noConsole: startup diagnostic
       console.warn(`Warning: Failed to read adapters package version: ${error instanceof Error ? error.message : String(error)}`);
       return undefined;
     });

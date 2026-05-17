@@ -7,21 +7,14 @@ import type {
   AgentAdapter,
   AgentResolvedRuntime
 } from "@agentarena/core";
+import { CLAUDE_CODE_CAPABILITY, type InvocationSpec } from "./adapter-capabilities.js";
+import { formatAdapterError } from "./adapter-diagnostics.js";
+import { buildAgentPrompt, createPreflightResult } from "./adapter-helpers.js";
 import { getClaudeProviderProfileSecret, writeClaudeWorkspaceSettings } from "./claude-provider-profiles.js";
 import { parseClaudeEvents } from "./event-parsers.js";
+import { probeClaudeLikeAuth, probeClaudeProfileAuth, probeHelp, probeInvocationVersion } from "./invocation-probes.js";
 import { agentTimeoutMs, runProcess } from "./process-utils.js";
-import {
-  buildAgentPrompt,
-  CLAUDE_CODE_CAPABILITY,
-  createPreflightResult,
-  formatAdapterError,
-  type InvocationSpec,
-  probeClaudeLikeAuth,
-  probeClaudeProfileAuth,
-  probeHelp,
-  probeInvocationVersion,
-  resolveClaudeRuntime
-} from "./shared.js";
+import { resolveClaudeRuntime } from "./runtime-resolution.js";
 
 async function resolveClaudeInvocation(): Promise<InvocationSpec> {
   const command = process.env.AGENTARENA_CLAUDE_BIN?.trim() || "claude";
@@ -232,7 +225,7 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
     });
 
     return {
-      status: execution.exitCode === 0 && !execution.error ? "success" : "failed",
+      status: execution.exitCode === 0 && !execution.error && !parsed.error ? "success" : "failed",
       summary,
       tokenUsage: parsed.tokenUsage,
       estimatedCostUsd: parsed.estimatedCostUsd,

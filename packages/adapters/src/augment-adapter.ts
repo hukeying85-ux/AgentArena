@@ -7,16 +7,11 @@ import type {
   AgentAdapter,
   AgentResolvedRuntime
 } from "@agentarena/core";
+import type { InvocationSpec } from "./adapter-capabilities.js";
+import { formatAdapterError } from "./adapter-diagnostics.js";
+import { buildAgentPrompt, createPreflightResult, getChangedFilesFromGit } from "./adapter-helpers.js";
+import { probeHelp, probeInvocationVersion } from "./invocation-probes.js";
 import { agentTimeoutMs, runProcess } from "./process-utils.js";
-import {
-  adapterWarn,
-  buildAgentPrompt,
-  createPreflightResult,
-  formatAdapterError,
-  type InvocationSpec,
-  probeHelp,
-  probeInvocationVersion
-} from "./shared.js";
 
 export const AUGMENT_CAPABILITY: AdapterCapability = {
   supportTier: "experimental",
@@ -285,18 +280,7 @@ export class AugmentAdapter implements AgentAdapter {
     const changedFilesHint: string[] = [...parsed.changedFiles];
 
     if (changedFilesHint.length === 0) {
-      try {
-        const { execFileSync } = await import("node:child_process");
-        const gitDiff = execFileSync("git", ["diff", "--name-only"], {
-          cwd: context.workspacePath,
-          encoding: "utf8"
-        }).trim();
-        if (gitDiff) {
-          changedFilesHint.push(...gitDiff.split("\n").filter(Boolean));
-        }
-      } catch (e) {
-        adapterWarn("git diff failed in workspace", { cwd: context.workspacePath, error: e instanceof Error ? e.message : String(e) });
-      }
+      changedFilesHint.push(...await getChangedFilesFromGit(context.workspacePath));
     }
 
     const summary =

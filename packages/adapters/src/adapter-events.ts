@@ -140,6 +140,7 @@ export function parseAdapterEvents(stdout: string): ParsedAdapterOutput {
     } catch {
       parseErrorCount++;
       if (parseErrorCount <= 3) {
+        // biome-ignore lint/suspicious/noConsole: parse error diagnostic
         console.warn(`parseAdapterEvents: Failed to parse JSON line: ${line.slice(0, 100)}...`);
       }
       continue;
@@ -193,6 +194,7 @@ export function parseAdapterEvents(stdout: string): ParsedAdapterOutput {
   }
 
   if (parseErrorCount > MAX_PARSE_ERRORS) {
+    // biome-ignore lint/suspicious/noConsole: parse error diagnostic
     console.warn(`parseAdapterEvents: Skipped ${parseErrorCount} unparseable lines in total.`);
   }
 

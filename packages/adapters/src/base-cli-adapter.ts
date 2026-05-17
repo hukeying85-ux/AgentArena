@@ -7,16 +7,11 @@ import type {
   AgentAdapter,
   AgentResolvedRuntime
 } from "@agentarena/core";
+import type { InvocationSpec } from "./adapter-capabilities.js";
+import { formatAdapterError } from "./adapter-diagnostics.js";
+import { buildAgentPrompt, createPreflightResult, getChangedFilesFromGit } from "./adapter-helpers.js";
+import { probeHelp, probeInvocationVersion } from "./invocation-probes.js";
 import { agentTimeoutMs, pathExists, runProcess } from "./process-utils.js";
-import {
-  adapterWarn,
-  buildAgentPrompt,
-  createPreflightResult,
-  formatAdapterError,
-  type InvocationSpec,
-  probeHelp,
-  probeInvocationVersion
-} from "./shared.js";
 
 /**
  * Configuration for creating a CLI-based agent adapter.
@@ -152,15 +147,7 @@ class BaseCliAdapterImpl implements AgentAdapter {
       ? this.config.parseSummary(execution.stdout, execution.stderr, execution.exitCode)
       : execution.stdout.trim() || `${this.title} completed the task.`;
 
-    // Detect changed files via git
-    const changedFilesHint: string[] = [];
-    try {
-      const { execFileSync } = await import("node:child_process");
-      const gitDiff = execFileSync("git", ["diff", "--name-only"], { cwd: context.workspacePath, encoding: "utf8" }).trim();
-      if (gitDiff) changedFilesHint.push(...gitDiff.split("\n").filter(Boolean));
-    } catch (e) {
-      adapterWarn("git diff failed in workspace", { cwd: context.workspacePath, error: e instanceof Error ? e.message : String(e) });
-    }
+    const changedFilesHint = await getChangedFilesFromGit(context.workspacePath);
 
     await context.trace({
       type: "adapter.finish",
@@ -182,18 +169,16 @@ class BaseCliAdapterImpl implements AgentAdapter {
   private async resolveInvocation(): Promise<InvocationSpec> {
     const { binEnvVar, command } = this.config;
     if (binEnvVar && process.env[binEnvVar]?.trim()) {
-      const cmd = process.env[binEnvVar]?.trim();
-      if (cmd) {
-        // Validate that the binary exists before returning
-        const exists = await pathExists(cmd);
-        if (!exists) {
-          throw new Error(
-            `Custom binary path "${cmd}" (from ${binEnvVar}) does not exist or is not accessible. ` +
-            `Please check your ${binEnvVar} environment variable.`
-          );
-        }
-        return { command: cmd, argsPrefix: [], displayCommand: cmd };
+      const cmd = process.env[binEnvVar].trim();
+      // Validate that the binary exists before returning
+      const exists = await pathExists(cmd);
+      if (!exists) {
+        throw new Error(
+          `Custom binary path "${cmd}" (from ${binEnvVar}) does not exist or is not accessible. ` +
+          `Please check your ${binEnvVar} environment variable.`
+        );
       }
+      return { command: cmd, argsPrefix: [], displayCommand: cmd };
     }
     if (process.platform === "win32") {
       return { command: `${command}.cmd`, argsPrefix: [], displayCommand: `${command}.cmd` };

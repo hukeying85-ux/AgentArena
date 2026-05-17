@@ -5,9 +5,13 @@ import http from "node:http";
 import path from "node:path";
 import { getCodexDefaultResolvedRuntime } from "@agentarena/adapters";
 import {
+  clearRunState,
   createCancellation,
   createRunId,
   isAbortError,
+  loadRunState,
+  metrics,
+  saveRunState,
 } from "@agentarena/core";
 import { writeReport } from "@agentarena/report";
 import { type BenchmarkProgressEvent, runBenchmark } from "@agentarena/runner";
@@ -18,9 +22,11 @@ import {
   checkRateLimit,
   detectContentType,
   generateAuthToken,
+  getClientIp,
   HttpError,
   jsonResponse,
   readRequestBody,
+  setTrustProxy,
   startRateLimitCleanup,
   textResponse,
 } from "../server.js";
@@ -37,6 +43,7 @@ import {
   handleProviderProfileUpdate,
   handleTaskpacksList,
   handleUiInfo,
+  withErrorHandling,
 } from "./api-routes.js";
 import {
   normalizeUiSelections,
@@ -57,16 +64,13 @@ interface ActiveUiRun {
   cancel: () => void;
 }
 
-async function maybeOpenBrowser(url: string): Promise<void> {
+function maybeOpenBrowser(url: string): void {
   const platform = process.platform;
   const command = platform === "win32" ? "cmd.exe" : platform === "darwin" ? "open" : "xdg-open";
   const args = platform === "win32" ? ["/c", "start", "", url] : [url];
-  await new Promise<void>((resolve) => {
-    const child = spawn(command, args, { stdio: "ignore", detached: true, windowsHide: true, shell: false });
-    child.on("error", () => resolve());
-    child.unref();
-    resolve();
-  });
+  const child = spawn(command, args, { stdio: "ignore", detached: true, windowsHide: true, shell: false });
+  child.on("error", () => {});
+  child.unref();
 }
 
 /**
@@ -97,12 +101,34 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
     updatedAt: new Date().toISOString()
   };
 
+  // Restore persisted run state on startup
+  try {
+    const persistedState = await loadRunState(process.cwd());
+    if (persistedState && persistedState.state === "running") {
+      // Server crashed while a run was in progress — mark it as error
+      activeRunStatus = {
+        ...persistedState,
+        state: "error",
+        phase: "idle",
+        error: "Server restarted while run was in progress. Previous run state was recovered.",
+        updatedAt: new Date().toISOString()
+      };
+      await saveRunState(process.cwd(), activeRunStatus as import("@agentarena/core").UiRunState);
+    } else if (persistedState) {
+      activeRunStatus = persistedState as UiRunStatus;
+    }
+  } catch (error) {
+    console.warn("[agentarena] Failed to restore persisted run state:", error instanceof Error ? error.message : String(error));
+  }
+
   const setRunStatus = (status: Partial<UiRunStatus>): void => {
     activeRunStatus = {
       ...activeRunStatus,
       ...status,
       updatedAt: new Date().toISOString()
     };
+    // Fire-and-forget persistence (don't await, don't block)
+    saveRunState(process.cwd(), activeRunStatus as import("@agentarena/core").UiRunState).catch(() => {});
   };
 
   const appendRunLog = (entry: Omit<UiRunLogEntry, "timestamp">): void => {
@@ -115,18 +141,31 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
       logs: [...activeRunStatus.logs, nextEntry].slice(-MAX_UI_LOG_ENTRIES),
       updatedAt: nextEntry.timestamp
     };
+    // Fire-and-forget persistence (don't await, don't block)
+    saveRunState(process.cwd(), activeRunStatus as import("@agentarena/core").UiRunState).catch(() => {});
   };
+
+  // Configure proxy trust if requested
+  if (parsed.trustProxy) {
+    setTrustProxy(true);
+  }
 
   // Periodically clean up stale rate limit entries to prevent memory leaks
   const rateLimitCleanupInterval = startRateLimitCleanup();
 
   const server = http.createServer(async (request, response) => {
+    const requestStartTime = Date.now();
+    let requestPath = "/";
+    const requestMethod = request.method ?? "GET";
+    let responseStatusCode = 200;
+
     try {
       const requestUrl = new URL(request.url ?? "/", `http://${host}:${port}`);
+      requestPath = requestUrl.pathname;
 
       // ─── Middleware: Rate limiting ───
       if (requestUrl.pathname.startsWith("/api/")) {
-        const clientIp = request.socket.remoteAddress ?? "unknown";
+        const clientIp = getClientIp(request);
         const rateLimitResult = checkRateLimit(clientIp, requestUrl.pathname);
         if (!rateLimitResult.allowed) {
           const retryAfterSeconds = Math.ceil((rateLimitResult.retryAfterMs ?? 1000) / 1000);
@@ -151,7 +190,8 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
       }
 
       // ─── Middleware: Token authentication ───
-      if (!checkAuthHeader(requestUrl, request.method, isLocalhost, authToken, request.headers.authorization)) {
+      const clientIp = getClientIp(request);
+      if (!checkAuthHeader(requestUrl, request.method, isLocalhost, authToken, request.headers.authorization, clientIp)) {
         sendApiResponse(response, jsonResponse({ error: "Authentication required. Pass token via Authorization: Bearer <token> header." }, 401));
         return;
       }
@@ -160,33 +200,33 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
 
       // GET /api/ui-info
       if (request.method === "GET" && requestUrl.pathname === "/api/ui-info") {
-        sendApiResponse(response, await handleUiInfo(codexDefaults, host, port, isLocalhost));
+        sendApiResponse(response, await withErrorHandling(handleUiInfo(codexDefaults, host, port, isLocalhost)));
         return;
       }
 
       // GET /api/adapters
       if (request.method === "GET" && requestUrl.pathname === "/api/adapters") {
-        sendApiResponse(response, await handleAdaptersList());
+        sendApiResponse(response, await withErrorHandling(handleAdaptersList()));
         return;
       }
 
       // POST /api/preflight
       if (request.method === "POST" && requestUrl.pathname === "/api/preflight") {
         const rawBody = await readRequestBody(request);
-        sendApiResponse(response, await handlePreflight(rawBody));
+        sendApiResponse(response, await withErrorHandling(handlePreflight(rawBody)));
         return;
       }
 
       // GET /api/provider-profiles
       if (request.method === "GET" && requestUrl.pathname === "/api/provider-profiles") {
-        sendApiResponse(response, await handleProviderProfilesGet());
+        sendApiResponse(response, await withErrorHandling(handleProviderProfilesGet()));
         return;
       }
 
       // POST /api/provider-profiles
       if (request.method === "POST" && requestUrl.pathname === "/api/provider-profiles") {
         const rawBody = await readRequestBody(request);
-        sendApiResponse(response, await handleProviderProfileCreate(rawBody));
+        sendApiResponse(response, await withErrorHandling(handleProviderProfileCreate(rawBody)));
         return;
       }
 
@@ -198,18 +238,18 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
 
         if (request.method === "PUT" && !action) {
           const rawBody = await readRequestBody(request);
-          sendApiResponse(response, await handleProviderProfileUpdate(profileId, rawBody));
+          sendApiResponse(response, await withErrorHandling(handleProviderProfileUpdate(profileId, rawBody)));
           return;
         }
 
         if (request.method === "DELETE" && !action) {
-          sendApiResponse(response, await handleProviderProfileDelete(profileId));
+          sendApiResponse(response, await withErrorHandling(handleProviderProfileDelete(profileId)));
           return;
         }
 
         if (request.method === "POST" && action === "secret") {
           const rawBody = await readRequestBody(request);
-          sendApiResponse(response, await handleProviderProfileSecret(profileId, rawBody));
+          sendApiResponse(response, await withErrorHandling(handleProviderProfileSecret(profileId, rawBody)));
           return;
         }
       }
@@ -237,6 +277,18 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
       // GET /api/taskpacks
       if (request.method === "GET" && requestUrl.pathname === "/api/taskpacks") {
         sendApiResponse(response, await handleTaskpacksList());
+        return;
+      }
+
+      // GET /api/metrics — Prometheus metrics endpoint
+      if (request.method === "GET" && requestUrl.pathname === "/api/metrics") {
+        const { exportAllMetrics } = await import("@agentarena/core");
+        const metricsText = exportAllMetrics();
+        response.writeHead(200, {
+          "Content-Type": "text/plain; version=0.0.4; charset=utf-8",
+          "Cache-Control": "no-store"
+        });
+        response.end(metricsText);
         return;
       }
 
@@ -331,6 +383,7 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
           logs: [],
           updatedAt: new Date().toISOString()
         };
+        saveRunState(process.cwd(), activeRunStatus as import("@agentarena/core").UiRunState).catch(() => {});
 
         setRunStatus({
           state: "running",
@@ -469,10 +522,12 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
                   }
             );
           } finally {
-            if (activeRunStatus.state !== "cancelling" && activeRunStatus.state !== "cancelled") {
+            if (activeRunStatus.state !== "cancelling" && activeRunStatus.state !== "cancelled" && activeRunStatus.state !== "error") {
               activeRunStatus = { ...activeRunStatus, state: "done" };
             }
             activeRun = null;
+            // Clear persisted state on completion
+            clearRunState(process.cwd()).catch(() => {});
           }
         })()
         };
@@ -527,10 +582,16 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
       response.end(methodNotAllowed.body);
     } catch (error) {
       const statusCode = error instanceof HttpError ? error.statusCode : 500;
+      responseStatusCode = statusCode;
       const message = statusCode >= 500 ? "Internal server error" : (error instanceof Error ? error.message : String(error));
       const payload = jsonResponse({ error: message }, statusCode);
       response.writeHead(payload.statusCode, payload.headers);
       response.end(payload.body);
+    } finally {
+      const durationSeconds = (Date.now() - requestStartTime) / 1000;
+      const actualStatusCode = response.statusCode || responseStatusCode;
+      metrics.httpRequestsTotal.inc({ method: requestMethod, path: requestPath, status: String(actualStatusCode) });
+      metrics.httpRequestDuration.observe({ method: requestMethod, path: requestPath }, durationSeconds);
     }
   });
 
@@ -559,7 +620,7 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
   }
 
   if (!parsed.noOpen) {
-    await maybeOpenBrowser(url);
+    maybeOpenBrowser(url);
   }
 
   await new Promise<void>((resolve) => {
