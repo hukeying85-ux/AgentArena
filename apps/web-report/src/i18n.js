@@ -419,7 +419,26 @@ const en = {
   chartDocsAbility: 'Docs Ability',
   chartWeightTotal: 'Total Weight',
   chartWeightWarning: 'Total weight should be 100%',
-  chartNoData: 'No chart data available.'
+  chartNoData: 'No chart data available.',
+
+  // Task Pack Market
+  marketTitle: 'Task Pack Market',
+  marketDescription: 'Browse and import community-shared task packs',
+  marketSearchPlaceholder: 'Search task packs...',
+  marketImportUrl: 'Import URL',
+  marketNoResults: 'No matching task packs found',
+  marketEmpty: 'No task packs yet. Click "Import URL" to add one.',
+  marketTaskCount: (n) => `${n} task(s)`,
+  marketImport: 'Import',
+  marketDialogTitle: 'Import Task Pack',
+  marketDialogHint: 'Enter a GitHub repo URL or raw content URL',
+  marketDialogCancel: 'Cancel',
+  marketDialogConfirm: 'Import',
+  marketImportSuccess: (name) => `Task pack "${name}" imported successfully!`,
+  marketImportFailed: (err) => `Import failed: ${err}`,
+  marketLoadFailed: (status) => `Load failed: ${status}`,
+  marketFetchFailed: (status) => `Failed to fetch task pack: ${status}`,
+  marketInvalidFormat: 'Invalid task pack format'
 };
 
 const zhCN = {
@@ -1034,7 +1053,26 @@ const zhCN = {
   chartDocsAbility: '文档能力',
   chartWeightTotal: '总权重',
   chartWeightWarning: '总权重应为 100%',
-  chartNoData: '暂无图表数据。'
+  chartNoData: '暂无图表数据。',
+
+  // Task Pack Market
+  marketTitle: '任务包市场',
+  marketDescription: '浏览和导入社区共享的任务包',
+  marketSearchPlaceholder: '搜索任务包...',
+  marketImportUrl: '导入 URL',
+  marketNoResults: '未找到匹配的任务包',
+  marketEmpty: '暂无任务包，点击"导入 URL"添加',
+  marketTaskCount: (n) => `${n} 个任务`,
+  marketImport: '导入',
+  marketDialogTitle: '导入任务包',
+  marketDialogHint: '输入 GitHub 仓库 URL 或 raw content URL',
+  marketDialogCancel: '取消',
+  marketDialogConfirm: '导入',
+  marketImportSuccess: (name) => `任务包 "${name}" 导入成功！`,
+  marketImportFailed: (err) => `导入失败: ${err}`,
+  marketLoadFailed: (status) => `加载失败: ${status}`,
+  marketFetchFailed: (status) => `无法获取任务包: ${status}`,
+  marketInvalidFormat: '无效的任务包格式'
 };
 
 export const MESSAGES = {

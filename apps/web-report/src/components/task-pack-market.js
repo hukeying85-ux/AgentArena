@@ -1,15 +1,16 @@
 /**
- * @fileoverview 任务包市场组件
- * 提供任务包浏览、搜索、导入功能
+ * @fileoverview Task Pack Market component
+ * Provides task pack browsing, search, and import functionality
  */
 
 import { h } from '../utils/dom.js';
+import { translate } from '../i18n.js';
 
-// 任务包注册表 URL（GitHub raw）
+// Task pack registry URL (GitHub raw)
 const TASK_PACK_REGISTRY_URL = 'https://raw.githubusercontent.com/agentarena/agentarena/main/task-packs.json';
 
 /**
- * 任务包市场类
+ * Task Pack Market class
  */
 export class TaskPackMarket {
   constructor(container, options = {}) {
@@ -17,6 +18,7 @@ export class TaskPackMarket {
     this.options = {
       registryUrl: options.registryUrl || TASK_PACK_REGISTRY_URL,
       onImport: options.onImport || (() => {}),
+      language: options.language || 'en',
       ...options
     };
     this.packs = [];
@@ -24,8 +26,13 @@ export class TaskPackMarket {
     this.searchQuery = '';
   }
 
+  /** @param {string} key */
+  t(key, ...args) {
+    return translate(this.options.language, key, ...args);
+  }
+
   /**
-   * 初始化并加载任务包列表
+   * Initialize and load task pack list
    */
   async init() {
     await this.loadRegistry();
@@ -33,18 +40,18 @@ export class TaskPackMarket {
   }
 
   /**
-   * 加载任务包注册表
+   * Load task pack registry
    */
   async loadRegistry() {
     try {
       const response = await fetch(this.options.registryUrl, {
         cache: 'no-cache'
       });
-      
+
       if (!response.ok) {
-        throw new Error(`加载失败: ${response.status}`);
+        throw new Error(this.t('marketLoadFailed', response.status));
       }
-      
+
       this.packs = await response.json();
       this.filteredPacks = [...this.packs];
     } catch (err) {
@@ -55,46 +62,44 @@ export class TaskPackMarket {
   }
 
   /**
-   * 搜索过滤
-   * @param {string} query - 搜索关键词
+   * Search filter
+   * @param {string} query - search keyword
    */
   filter(query) {
     this.searchQuery = query.toLowerCase().trim();
-    
+
     if (!this.searchQuery) {
       this.filteredPacks = [...this.packs];
     } else {
-      this.filteredPacks = this.packs.filter(pack => 
+      this.filteredPacks = this.packs.filter(pack =>
         pack.name.toLowerCase().includes(this.searchQuery) ||
         pack.description.toLowerCase().includes(this.searchQuery) ||
         pack.tags.some(tag => tag.toLowerCase().includes(this.searchQuery))
       );
     }
-    
+
     this.renderList();
   }
 
   /**
-   * 从 GitHub URL 导入任务包
-   * @param {string} url - GitHub 仓库 URL
+   * Import task pack from GitHub URL
+   * @param {string} url - GitHub repo URL
    */
   async importFromUrl(url) {
     try {
-      // 转换 GitHub URL 为 raw content URL
       const rawUrl = this._convertToRawUrl(url);
-      
+
       const response = await fetch(rawUrl);
       if (!response.ok) {
-        throw new Error(`无法获取任务包: ${response.status}`);
+        throw new Error(this.t('marketFetchFailed', response.status));
       }
-      
+
       const taskPack = await response.json();
-      
-      // 验证任务包格式
+
       if (!taskPack.id || !taskPack.tasks || !Array.isArray(taskPack.tasks)) {
-        throw new Error('无效的任务包格式');
+        throw new Error(this.t('marketInvalidFormat'));
       }
-      
+
       this.options.onImport(taskPack);
       return { success: true, pack: taskPack };
     } catch (err) {
@@ -103,86 +108,80 @@ export class TaskPackMarket {
   }
 
   /**
-   * 将 GitHub URL 转换为 raw content URL
+   * Convert GitHub URL to raw content URL
    * @param {string} url - GitHub URL
    * @returns {string} raw content URL
    */
   _convertToRawUrl(url) {
-    // 处理 https://github.com/user/repo/blob/branch/path/to/file.json
     const blobMatch = url.match(/github\.com\/([^/]+)\/([^/]+)\/blob\/([^/]+)\/(.+)/);
     if (blobMatch) {
       const [, user, repo, branch, path] = blobMatch;
       return `https://raw.githubusercontent.com/${user}/${repo}/${branch}/${path}`;
     }
-    
-    // 处理 https://github.com/user/repo
+
     const repoMatch = url.match(/github\.com\/([^/]+)\/([^/]+)\/?$/);
     if (repoMatch) {
       const [, user, repo] = repoMatch;
-      // 尝试获取默认的任务包文件
       return `https://raw.githubusercontent.com/${user}/${repo}/main/taskpack.json`;
     }
-    
+
     return url;
   }
 
   /**
-   * 渲染整个市场界面
+   * Render the market UI
    */
   render() {
     if (!this.container) return;
-    
+
     this.container.innerHTML = '';
-    
-    // 标题
+
     const header = h('div', { className: 'market-header' },
-      h('h3', { className: 'market-title' }, '任务包市场'),
-      h('p', { className: 'market-description' }, '浏览和导入社区共享的任务包')
+      h('h3', { className: 'market-title' }, this.t('marketTitle')),
+      h('p', { className: 'market-description' }, this.t('marketDescription'))
     );
-    
-    // 搜索栏
+
     const searchBox = h('div', { className: 'market-search' },
       h('input', {
         type: 'text',
         className: 'market-search-input',
-        placeholder: '搜索任务包...',
+        placeholder: this.t('marketSearchPlaceholder'),
         oninput: (e) => this.filter(e.target.value)
       }),
       h('button', {
         className: 'market-import-btn',
         onclick: () => this.showImportDialog()
-      }, '导入 URL')
+      }, this.t('marketImportUrl'))
     );
-    
-    // 列表容器
+
     this.listContainer = h('div', { className: 'market-list' });
-    
+
     this.container.appendChild(header);
     this.container.appendChild(searchBox);
     this.container.appendChild(this.listContainer);
-    
+
     this.renderList();
   }
 
   /**
-   * 渲染任务包列表
+   * Render task pack list
    */
   renderList() {
     if (!this.listContainer) return;
-    
+
     this.listContainer.innerHTML = '';
-    
+
     if (this.filteredPacks.length === 0) {
       this.listContainer.appendChild(
         h('div', { className: 'market-empty' },
-          this.searchQuery 
-            ? '未找到匹配的任务包'
-            : '暂无任务包，点击"导入 URL"添加'
+          this.searchQuery
+            ? this.t('marketNoResults')
+            : this.t('marketEmpty')
         )
       );
       return;
     }
-    
+
     for (const pack of this.filteredPacks) {
       const card = this._createPackCard(pack);
       this.listContainer.appendChild(card);
@@ -190,19 +189,19 @@ export class TaskPackMarket {
   }
 
   /**
-   * 创建任务包卡片
-   * @param {Object} pack - 任务包数据
+   * Create a task pack card
+   * @param {Object} pack - task pack data
    * @returns {HTMLElement}
    */
   _createPackCard(pack) {
-    const tags = pack.tags?.map(tag => 
+    const tags = pack.tags?.map(tag =>
       h('span', { className: 'market-tag' }, tag)
     ) || [];
-    
+
     return h('div', { className: 'market-card' },
       h('div', { className: 'market-card-header' },
         h('h4', { className: 'market-card-title' }, pack.name),
-        h('span', { className: 'market-card-count' }, `${pack.taskCount || '?'} 任务`)
+        h('span', { className: 'market-card-count' }, this.t('marketTaskCount', pack.taskCount || '?'))
       ),
       h('p', { className: 'market-card-description' }, pack.description || ''),
       h('div', { className: 'market-card-tags' }, ...tags),
@@ -211,19 +210,19 @@ export class TaskPackMarket {
         h('button', {
           className: 'market-card-import',
           onclick: () => this.importFromUrl(pack.repo)
-        }, '导入')
+        }, this.t('marketImport'))
       )
     );
   }
 
   /**
-   * 显示导入对话框
+   * Show import dialog
    */
   showImportDialog() {
-    const dialog = h('div', { className: 'market-dialog-overlay' },
+    const dialog = h('div', { className: 'market-dialog-overlay', role: 'dialog', 'aria-modal': 'true' },
       h('div', { className: 'market-dialog' },
-        h('h4', {}, '导入任务包'),
-        h('p', { className: 'market-dialog-hint' }, '输入 GitHub 仓库 URL 或 raw content URL'),
+        h('h4', {}, this.t('marketDialogTitle')),
+        h('p', { className: 'market-dialog-hint' }, this.t('marketDialogHint')),
         h('input', {
           type: 'text',
           className: 'market-dialog-input',
@@ -234,27 +233,27 @@ export class TaskPackMarket {
           h('button', {
             className: 'market-dialog-cancel',
             onclick: () => dialog.remove()
-          }, '取消'),
+          }, this.t('marketDialogCancel')),
           h('button', {
             className: 'market-dialog-confirm',
             onclick: async () => {
               const input = dialog.querySelector('#market-import-url');
               const url = input.value.trim();
               if (!url) return;
-              
+
               const result = await this.importFromUrl(url);
               if (result.success) {
                 dialog.remove();
-                alert(`任务包 "${result.pack.name}" 导入成功！`);
+                alert(this.t('marketImportSuccess', result.pack.name));
               } else {
-                alert(`导入失败: ${result.error}`);
+                alert(this.t('marketImportFailed', result.error));
               }
             }
-          }, '导入')
+          }, this.t('marketDialogConfirm'))
         )
       )
     );
-    
+
     document.body.appendChild(dialog);
   }
 }

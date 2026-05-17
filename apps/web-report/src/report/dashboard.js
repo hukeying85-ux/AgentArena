@@ -485,15 +485,31 @@ function renderPreflights(run) {
 }
 
 
+let agentListVirtual = null;
+
 function renderAgentList(run) {
   elements.agentCount.textContent = String(run.results.length);
   elements.agentList.classList.remove("empty-state");
-  elements.agentList.innerHTML = run.results
-    .map((result) => {
+
+  // Clean up previous virtual list instance
+  if (agentListVirtual) {
+    agentListVirtual.destroy();
+    agentListVirtual = null;
+  }
+
+  if (run.results.length > VIRTUAL_LIST_THRESHOLD) {
+    // Use virtual scrolling for large agent lists
+    agentListVirtual = createVirtualList(elements.agentList, {
+      itemHeight: 64,
+      overscan: 5,
+      className: 'agent-list virtual-list',
+      role: 'listbox'
+    });
+    agentListVirtual.setItems(run.results, (result) => {
       const active = recordKey(result) === state.selectedAgentId ? "active" : "";
       const runtime = runtimeIdentity(result);
       return `
-        <button class="agent-button ${active}" type="button" data-agent-id="${escapeHtml(recordKey(result))}">
+        <button class="agent-button ${active}" type="button" data-agent-id="${escapeHtml(recordKey(result))}" style="width:100%;height:100%;text-align:left;">
           <div class="row">
             <strong>${escapeHtml(resultLabel(result))}</strong>
             <span class="status-badge ${statusClass(result.status)}">${escapeHtml(translateStatus(result.status))}</span>
@@ -503,8 +519,27 @@ function renderAgentList(run) {
           </div>
         </button>
       `;
-    })
-    .join("");
+    });
+  } else {
+    // Standard rendering for small lists
+    elements.agentList.innerHTML = run.results
+      .map((result) => {
+        const active = recordKey(result) === state.selectedAgentId ? "active" : "";
+        const runtime = runtimeIdentity(result);
+        return `
+          <button class="agent-button ${active}" type="button" data-agent-id="${escapeHtml(recordKey(result))}">
+            <div class="row">
+              <strong>${escapeHtml(resultLabel(result))}</strong>
+              <span class="status-badge ${statusClass(result.status)}">${escapeHtml(translateStatus(result.status))}</span>
+            </div>
+            <div class="meta">
+              ${escapeHtml(runtime.provider)} | ${escapeHtml(runtime.model)} | ${escapeHtml(runtime.version)} | ${escapeHtml(formatDuration(result.durationMs))} | ${escapeHtml(formatCost(result))}
+            </div>
+          </button>
+        `;
+      })
+      .join("");
+  }
 }
 
 
@@ -931,6 +966,11 @@ function renderCompareTableV2(run) {
   const cheapestKey = verdict.lowestKnownCost ? recordKey(verdict.lowestKnownCost) : null;
   const medals = ["🥇", "🥈", "🥉"];
 
+  // Pagination: show first 25 rows, then "show all" button
+  const COMPARE_PAGE_SIZE = 25;
+  const showAll = state._compareShowAll || results.length <= COMPARE_PAGE_SIZE;
+  const displayResults = showAll ? results : results.slice(0, COMPARE_PAGE_SIZE);
+
   elements.compareTable.innerHTML = `
     <table class="compare-table">
       <thead>
@@ -954,7 +994,7 @@ function renderCompareTableV2(run) {
         </tr>
       </thead>
       <tbody>
-        ${results
+        ${displayResults
           .map((result, index) => {
             const passedJudges = result.judgeResults.filter((judge) => judge.success).length;
             const totalJudges = result.judgeResults.length;
@@ -1003,7 +1043,14 @@ function renderCompareTableV2(run) {
           .join("")}
       </tbody>
     </table>
+    ${!showAll ? `<div class="compare-show-more"><button class="btn-link" onclick="window.__showAllCompare && window.__showAllCompare()">${escapeHtml(localText(`显示全部 ${results.length} 个变体`, `Show all ${results.length} variants`))}</button></div>` : ""}
   `;
+
+  // Set up show-all handler
+  window.__showAllCompare = () => {
+    state._compareShowAll = true;
+    renderCompareTableV2(run);
+  };
 
   // Render radar charts for expanded agent detail panels
   const radarContainers = elements.compareTable?.querySelectorAll?.('.agent-radar-chart') || [];

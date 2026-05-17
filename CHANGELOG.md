@@ -48,11 +48,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Compress failure cleanup: removes incomplete .gz files
 - Auth probe false positive fix: checks parsed error events even on exitCode 0
 
+### Fixed (code review)
+- CLI: finally block no longer overwrites "error" state to "done" — UI now correctly shows failed runs
+- Scoring: failed score band 10-40 is now reachable (multiplier fixed from 10 to 100)
+- Scoring: critical judge failure scoring uses user-configured weights instead of hardcoded multipliers
+- Judges: unknown judge types return structured failure instead of crashing with undefined
+- Server: constant-time auth comparison always iterates full token length (no timing leak)
+- Server: X-Forwarded-For uses last entry before proxy to resist spoofing
+- Adapters: qwen-adapter variable shadowing fixed, pricing uses correct model key
+- Adapters: claude-adapter includes parsed.error in status determination
+- Adapters: codex-adapter splice ordering fixed for model and reasoning effort args
+- Adapters: event-parsers empty if block now breaks instead of continuing
+- Adapters: process-utils byte/char mismatch in output truncation fixed
+- Adapters: duplicate SIGKILL timer prevention in process cleanup
+- Core: snapshot copy uses verbatimSymlinks to prevent symlink following
+- Judges: command-runner uses process group SIGKILL on Unix, prevents duplicate timers
+- Web-report: storage clearAll() no longer hangs when IndexedDB store is unavailable
+- Web-report: scoring weight comparison uses deep equality instead of reference identity
+- Web-report: community view null guards for lastPublishedAt, avgScore, successRate
+- Web-report: ResizeObserver leak fixed by disconnecting previous observer
+- Web-report: stale community fetch guard prevents overwriting newer data
+- CLI: run command uses throw instead of process.exit for consistent error handling
+- CLI: --max-concurrency has upper bound of 64
+- CLI: -v flag conflict resolved (--version uses -V, --verbose keeps -v)
+- API routes: withErrorHandling logs errors instead of silently swallowing
+- Dead code removed: unused GeminiJsonEvent, tryGetAdapter, _WEIGHT_NAMES
+- All 600 tests passing (4 pre-existing failures resolved)
+
+### Added
+- docs/getting-started.md: user-facing install and first benchmark guide
+- docs/troubleshooting.md: common issues, auth failures, Windows fixes, FAQ
+- CHANGELOG.md: this file
+
 ### Security
 - Regex injection protection (flags whitelist + 2000 char limit for regex-match judge)
 - Sensitive data protection in adapter console output
 - Task pack path traversal prevention
 - JSON Pointer bounds checking
+- Timing-safe auth token comparison (constant-time, no length leak)
+- Symlink-aware path validation with TOCTOU consideration
+- verbatimSymlinks in snapshot copy prevents external file leakage
 
 ## 0.1.0 (2026-03-19)
 
