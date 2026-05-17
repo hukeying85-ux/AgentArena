@@ -73,7 +73,7 @@ async function main(): Promise<void> {
         break;
       case "version":
       case "--version":
-      case "-v": {
+      case "-V": {
         const path = await import("node:path");
         const { fileURLToPath } = await import("node:url");
         const { promises: fs } = await import("node:fs");

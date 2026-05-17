@@ -20,24 +20,25 @@ AgentArena is local-first by default. You point it at your own repository, task 
 
 See **[docs/ui-and-adapters.md](./docs/ui-and-adapters.md)** for local UI bind address & auth rules, doctor/preflight semantics, and related contract tests. Quantitative line coverage: `pnpm test:coverage` (Node `--experimental-test-coverage`).
 
-## Try It in 60 Seconds
-
-No agent CLI needed. Just clone and run:
+## Quick Install
 
 ```bash
-git clone https://github.com/aabbcdl/AgentArena.git
-cd AgentArena
-pnpm install
-pnpm build
+npm install -g @agentarena/cli
+```
 
-# Run a benchmark with built-in demo agents (no auth required)
-node packages/cli/dist/index.js run \
-  --repo . \
-  --task examples/taskpacks/demo-repo-health.json \
-  --agents demo-fast,demo-thorough,demo-budget
+## Try It in 60 Seconds
+
+No external agent CLI needed. The built-in demo agents work out of the box:
+
+```bash
+# Create a task pack
+agentarena init-taskpack --template repo-health --output my-task.yaml
+
+# Run with demo agents (no auth required)
+agentarena run --repo . --task my-task.yaml --agents demo-fast,demo-thorough
 
 # View the results in your browser
-node packages/cli/dist/index.js ui
+agentarena ui
 ```
 
 Open `http://127.0.0.1:4320`, load the result from `.agentarena/runs/`, and explore the dashboard.
@@ -45,12 +46,15 @@ Open `http://127.0.0.1:4320`, load the result from `.agentarena/runs/`, and expl
 When you're ready to benchmark real agents, just install their CLIs and run:
 
 ```bash
-node packages/cli/dist/index.js run \
+agentarena run \
   --repo . \
-  --task examples/taskpacks/official/repo-health.yaml \
+  --task my-task.yaml \
   --agents codex,claude-code,cursor \
   --probe-auth
 ```
+
+> **New to AgentArena?** See the [Getting Started Guide](./docs/getting-started.md) for a step-by-step walkthrough.
+> **Running into issues?** Check the [Troubleshooting Guide](./docs/troubleshooting.md).
 
 ## How AgentArena Compares
 
@@ -342,10 +346,14 @@ docs/
 
 ## Documentation
 
+- **[Getting Started](./docs/getting-started.md)** — install and run your first benchmark
+- **[Troubleshooting](./docs/troubleshooting.md)** — common issues and fixes
 - [Project overview](./docs/overview.md)
 - [Benchmark fairness](./docs/fairness.md)
 - [Adapter capabilities](./docs/adapter-capabilities.md)
 - [Task pack modes](./docs/taskpack-modes.md)
+- [Scoring deep dive](./docs/scoring.md)
+- [HTTP API](./docs/http-api.md)
 - [Web report app](./apps/web-report/README.md)
 - [Runner Docker](./docs/runner-docker.md)
 - [Official task packs](./examples/taskpacks/official/README.md)

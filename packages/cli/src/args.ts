@@ -77,6 +77,7 @@ Run Command:
     --max-concurrency <n>      Maximum number of agents to run in parallel (default: 1)
     --json                     Output results as JSON
     --verbose, -v              Show verbose error messages with stack traces
+    -V                         Show version number
     --debug                    Show detailed debug output (adapter comms, judge timing, trace events)
 
   Scoring Options:
