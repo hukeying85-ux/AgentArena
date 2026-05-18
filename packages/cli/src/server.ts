@@ -254,7 +254,12 @@ export class HttpError extends Error {
   }
 }
 
-export async function readRequestBody(request: http.IncomingMessage, maxBytes = 1_048_576, timeoutMs = 30_000): Promise<string> {
+/** Maximum request body size (1 MB) */
+const MAX_REQUEST_BODY_BYTES = 1_048_576;
+/** Request body read timeout (30 seconds) */
+const REQUEST_BODY_TIMEOUT_MS = 30_000;
+
+export async function readRequestBody(request: http.IncomingMessage, maxBytes = MAX_REQUEST_BODY_BYTES, timeoutMs = REQUEST_BODY_TIMEOUT_MS): Promise<string> {
   const chunks: Buffer[] = [];
   let totalBytes = 0;
 

@@ -11,7 +11,8 @@ import {
   isAbortError,
   throwIfAborted,
 } from "@agentarena/core";
-import { normalizeSelections, runAgent } from "./agent-lifecycle.js";
+import { normalizeSelections } from "./normalize-selections.js";
+import { runAgent } from "./agent-lifecycle.js";
 import { agentConcurrency, mapWithConcurrency } from "./concurrency.js";
 import { resolveAndValidateRepo } from "./repo-resolution.js";
 import {
@@ -23,7 +24,9 @@ import { collectResults } from "./result-collection.js";
 import { cleanupWorkspace, formatErrorDetails, formatErrorMessage, type WorkspaceCleanupResult } from "./workspace.js";
 import { prepareWorkspace } from "./workspace-prep.js";
 
-export type { AgentRunContext, normalizeSelections, runAgent, wrapWithTimeout } from "./agent-lifecycle.js";
+export type { AgentRunContext, runAgent } from "./agent-lifecycle.js";
+export type { normalizeSelections } from "./normalize-selections.js";
+export type { wrapWithTimeout } from "./timeout-utils.js";
 export type { agentConcurrency, agentExecuteTimeoutMs, MapWithConcurrencyResult, mapWithConcurrency, resolvePositiveInt } from "./concurrency.js";
 export { DEFAULT_AGENT_CONCURRENCY } from "./concurrency.js";
 export type { RepoResolution, RepoResolutionOptions } from "./repo-resolution.js";

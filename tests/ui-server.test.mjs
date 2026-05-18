@@ -143,8 +143,8 @@ test("POST /api/run missing agents returns 400", { timeout: 60_000 }, async () =
   const { child, authToken } = await startServer(port);
   try {
     const res = await request(port, "POST", "/api/run", {
-      repoPath: "/tmp/test",
-      taskPath: "/tmp/test.yaml"
+      repoPath: process.cwd(),
+      taskPath: path.join(process.cwd(), "test.yaml")
     }, authToken);
     assert.equal(res.statusCode, 400);
     assert.ok(res.body.error.includes("agent") || res.body.error.includes("required"));

@@ -165,9 +165,12 @@ export async function runBenchmarkCommand(
   await fs.writeFile(csvPath, generateCsv(benchmark), "utf8");
 
   // Generate decision report
+  // TODO: expose as CLI flags (--team-size, --daily-runs)
+  const DEFAULT_TEAM_SIZE = 10;
+  const DEFAULT_DAILY_RUNS = 5;
   const decisionReport = generateDecisionReport(benchmark, {
-    teamSize: 10,
-    dailyRuns: 5,
+    teamSize: DEFAULT_TEAM_SIZE,
+    dailyRuns: DEFAULT_DAILY_RUNS,
   });
   const decisionReportPath = path.join(
     benchmark.outputPath,

@@ -57,6 +57,43 @@ import {
 const DEFAULT_UI_PORT = 4320;
 const MAX_UI_LOG_ENTRIES = 30;
 
+/**
+ * Validate a run payload from the UI. Returns an error message if invalid, or null if valid.
+ * This is a pure validation function with no side effects.
+ */
+function validateRunPayload(runPayload: UiRunPayload): string | null {
+  if (!runPayload.repoPath || typeof runPayload.repoPath !== "string") {
+    return "repoPath is required and must be a string.";
+  }
+  if (!runPayload.taskPath || typeof runPayload.taskPath !== "string") {
+    return "taskPath is required and must be a string.";
+  }
+  // Path containment checks (security: prevent path traversal)
+  const resolvedRepoPath = path.resolve(runPayload.repoPath);
+  const resolvedTaskPath = path.resolve(runPayload.taskPath);
+  const cwd = process.cwd();
+  if (!resolvedRepoPath.startsWith(cwd + path.sep) && resolvedRepoPath !== cwd) {
+    return "repoPath must be within the current working directory.";
+  }
+  if (!resolvedTaskPath.startsWith(cwd + path.sep) && resolvedTaskPath !== cwd) {
+    return "taskPath must be within the current working directory.";
+  }
+  // Numeric validation
+  if (runPayload.maxConcurrency !== undefined) {
+    const parsed = Number(runPayload.maxConcurrency);
+    if (!Number.isFinite(parsed) || parsed < 1) {
+      return "maxConcurrency must be a positive integer.";
+    }
+  }
+  if (runPayload.tokenBudget !== undefined) {
+    const parsed = Number(runPayload.tokenBudget);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      return "tokenBudget must be a positive number.";
+    }
+  }
+  return null;
+}
+
 const WEB_REPORT_DIST_ROOT = path.join(WORKSPACE_ROOT, "apps", "web-report", "dist");
 
 interface ActiveUiRun {
@@ -88,12 +125,42 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
   // Token priority: --auth-token > AGENTARENA_AUTH_TOKEN env > auto-generated
   const authToken = parsed.authToken?.trim() || process.env.AGENTARENA_AUTH_TOKEN?.trim() || generateAuthToken();
   let activeRun: ActiveUiRun | null = null;
-  // Mutex flag: set synchronously when a run request begins processing (before any await),
-  // preventing concurrent requests from bypassing the activeRun check during the
-  // async gap between check and assignment. Cleared when activeRun is fully assigned
-  // or if the request fails before starting the run.
+  /**
+   * Mutex flag for concurrent run requests.
+   *
+   * Problem: Between checking `activeRun === null` and assigning `activeRun = { ... }`,
+   * there are `await` points (e.g., readRequestBody) where another request can sneak in.
+   * This flag is set synchronously BEFORE any await, preventing the TOCTOU race.
+   *
+   * Reset points (7 total — missing any one causes deadlock):
+   *   1. Line ~316: validation failure (missing repoPath)
+   *   2. Line ~324: validation failure (missing taskPath)
+   *   3. Line ~332: validation failure (missing agents)
+   *   4. Line ~340: validation failure (invalid scoreMode)
+   *   5. Line ~348: validation failure (invalid tokenBudget)
+   *   6. Line ~356: validation failure (invalid maxConcurrency)
+   *   7. Line ~408: successful run start (transferred to activeRun)
+   */
   let runStarting = false;
   const codexDefaults = await getCodexDefaultResolvedRuntime();
+
+  /**
+   * Run state machine.
+   *
+   * States: idle | running | done | error | cancelled | cancelling
+   * Phases: idle | starting | preflight | benchmark | report | complete
+   *
+   * Transitions:
+   *   idle       → running     (POST /api/run accepted)
+   *   running    → done        (benchmark completes normally)
+   *   running    → error       (benchmark throws)
+   *   running    → cancelling  (POST /api/run/cancel)
+   *   running    → cancelled   (abort signal propagates)
+   *   cancelling → cancelled   (abort completes)
+   *   *          → error       (server restart recovery — persisted state was running)
+   *
+   * Guard: finally block must NOT overwrite "error" or "cancelled" with "done".
+   */
   let activeRunStatus: UiRunStatus = {
     state: "idle",
     phase: "idle",
@@ -327,52 +394,18 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
           sendApiResponse(response, jsonResponse({ error: "Invalid JSON in request body." }, 400));
           return;
         }
-        if (!runPayload.repoPath || typeof runPayload.repoPath !== "string") {
+
+        const validationError = validateRunPayload(runPayload);
+        if (validationError) {
           runStarting = false;
-          sendApiResponse(response, jsonResponse({ error: "repoPath is required and must be a string." }, 400));
+          sendApiResponse(response, jsonResponse({ error: validationError }, 400));
           return;
         }
-        if (!runPayload.taskPath || typeof runPayload.taskPath !== "string") {
-          runStarting = false;
-          sendApiResponse(response, jsonResponse({ error: "taskPath is required and must be a string." }, 400));
-          return;
-        }
+
         const selections = normalizeUiSelections(runPayload);
         if (selections.length === 0) {
           runStarting = false;
           sendApiResponse(response, jsonResponse({ error: "At least one agent selection is required." }, 400));
-          return;
-        }
-        if (runPayload.maxConcurrency !== undefined) {
-          const parsed = Number(runPayload.maxConcurrency);
-          if (!Number.isFinite(parsed) || parsed < 1) {
-            runStarting = false;
-            sendApiResponse(response, jsonResponse({ error: "maxConcurrency must be a positive integer." }, 400));
-            return;
-          }
-        }
-        if (runPayload.tokenBudget !== undefined) {
-          const parsed = Number(runPayload.tokenBudget);
-          if (!Number.isFinite(parsed) || parsed <= 0) {
-            runStarting = false;
-            sendApiResponse(response, jsonResponse({ error: "tokenBudget must be a positive number." }, 400));
-            return;
-          }
-        }
-
-        const resolvedRepoPath = path.resolve(runPayload.repoPath);
-        const resolvedTaskPath = path.resolve(runPayload.taskPath);
-        const cwd = process.cwd();
-
-        if (!resolvedRepoPath.startsWith(cwd + path.sep) && resolvedRepoPath !== cwd) {
-          runStarting = false;
-          sendApiResponse(response, jsonResponse({ error: "repoPath must be within the current working directory." }, 400));
-          return;
-        }
-
-        if (!resolvedTaskPath.startsWith(cwd + path.sep) && resolvedTaskPath !== cwd) {
-          runStarting = false;
-          sendApiResponse(response, jsonResponse({ error: "taskPath must be within the current working directory." }, 400));
           return;
         }
 

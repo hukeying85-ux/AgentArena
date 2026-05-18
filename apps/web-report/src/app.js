@@ -19,6 +19,18 @@ import { stateManager } from "./core/state.js";
 import { initCrossRunEvents } from "./cross-run-events.js";
 import { buildDemoRun } from "./demo-data.js";
 import { translate } from "./i18n.js";
+import { selectAgent, selectRun } from "./selection-handlers.js";
+import {
+  taskIntentSummary as taskIntentSummaryImpl,
+  baselineTaskWarning as baselineTaskWarningImpl,
+  taskMeaningBadges as taskMeaningBadgesImpl,
+  summarizeTaskPrompt as summarizeTaskPromptImpl,
+  summarizeJudges as summarizeJudgesImpl,
+  formatJudgeType as formatJudgeTypeImpl,
+  translateDifficulty as translateDifficultyImpl,
+  translateStatus as translateStatusImpl,
+  statusClass,
+} from "./task-utils.js";
 import { createLauncherModule } from "./launcher/module.js";
 import { createCrossRunRenders } from "./report/cross-run.js";
 import { createDashboardModule } from "./report/dashboard.js";
@@ -260,78 +272,19 @@ function localText(zh, en) {
   return state.language === "zh-CN" ? zh : en;
 }
 
-function translateDifficulty(d) {
-  if (!d) return "";
-  const map = { easy: t("difficultyEasy"), medium: t("difficultyMedium"), hard: t("difficultyHard") };
-  return map[d] || d;
-}
-
-function translateStatus(s) {
-  if (s === "success") return t("compareStatusSuccess");
-  if (s === "failed") return t("compareStatusFailed");
-  return s;
-}
+function translateDifficulty(d) { return translateDifficultyImpl(d, t); }
+function translateStatus(s) { return translateStatusImpl(s, t); }
 
 // providerDisplayName is imported from ./app-helpers.js
 
 // clientRandomId is imported from ./app-helpers.js
 
-function taskIntentSummary(task) {
-  const objective = task.metadata?.objective ?? task.description ?? "";
-  const rationale = task.metadata?.judgeRationale ?? "";
-  const repoTypes = task.metadata?.repoTypes?.length ? task.metadata.repoTypes.join(", ") : "generic";
-  return {
-    objective,
-    rationale,
-    repoTypes
-  };
-}
+function taskIntentSummary(task) { return taskIntentSummaryImpl(task); }
+function baselineTaskWarning(task) { return baselineTaskWarningImpl(task, t); }
+function taskMeaningBadges(task) { return taskMeaningBadgesImpl(task, t); }
 
-function baselineTaskWarning(task) {
-  if (task.id === "official-repo-health" || task.id === "repo-health") {
-    return t("baselineWarning");
-  }
-
-  return t("generalWarning");
-}
-
-function taskMeaningBadges(task) {
-  if (task.id === "official-repo-health" || task.id === "repo-health") {
-    return [
-      t("baselineSanityCheck"),
-      t("notACodeReview"),
-      t("notABugfixBenchmark")
-    ];
-  }
-
-  return [t("interpretThroughGoal")];
-}
-
-function summarizeTaskPrompt(prompt) {
-  const compact = String(prompt ?? "")
-    .replaceAll(/\s+/g, " ")
-    .trim();
-  if (!compact) {
-    return "n/a";
-  }
-
-  return compact.length > 160 ? `${compact.slice(0, 157)}...` : compact;
-}
-
-function summarizeJudges(taskPack) {
-  const judges = Array.isArray(taskPack?.judges) ? taskPack.judges : [];
-  if (judges.length === 0) {
-    return t("noJudges");
-  }
-
-  const labels = judges.map((judge) => judge.label || judge.id).filter(Boolean);
-  const summary = labels.slice(0, 3).join(", ");
-  if (labels.length <= 3) {
-    return summary;
-  }
-
-  return t("judgesSummary", summary, labels.length);
-}
+function summarizeTaskPrompt(prompt) { return summarizeTaskPromptImpl(prompt); }
+function summarizeJudges(taskPack) { return summarizeJudgesImpl(taskPack, t); }
 
 
 function runFocusLine(run) {
@@ -513,6 +466,22 @@ const traceReplay = createTraceReplayModule({
   t
 });
 
+// Shared deps for selectAgent/selectRun helpers
+const selectionDeps = {
+  elements,
+  syncLocationState,
+  renderAgentList,
+  renderCompareTableV2,
+  renderComparisonBars,
+  renderAgentTrendTableV2,
+  renderSelectedAgentV2,
+  renderRunDiffTableV2,
+  getAgentTrendRows,
+  setHidden,
+  updateCurrentRun,
+  render
+};
+
 const {
   downloadTextFile: downloadTextFileImpl,
   handleFileSelection: handleFileSelectionImpl,
@@ -686,26 +655,8 @@ function renderStaticText() {
 
 // fetchWithTimeout is imported from ./app-helpers.js
 
-function formatJudgeType(type) {
-  const typeMap = {
-    "test-result": "judgeTestResult",
-    "lint-check": "judgeLintCheck",
-    "file-exists": "judgeFileExists",
-    "file-contains": "judgeFileContains",
-    "json-value": "judgeJsonValue",
-    glob: "judgeGlob",
-    "file-count": "judgeFileCount",
-    snapshot: "judgeSnapshot",
-    "json-schema": "judgeJsonSchema",
-    "patch-validation": "judgePatchValidation",
-    "token-efficiency": "judgeTokenEfficiency"
-  };
-  return t(typeMap[type] || "judgeCommand");
-}
-
-function statusClass(status) {
-  return `status-${status}`;
-}
+function formatJudgeType(type) { return formatJudgeTypeImpl(type, t); }
+// statusClass imported from task-utils.js
 
 // setHidden is imported from ./app-helpers.js
 
@@ -1273,21 +1224,8 @@ elements.runInfo.addEventListener("click", (event) => {
 
 elements.agentList.addEventListener("click", (event) => {
   const button = event.target.closest("[data-agent-id]");
-  if (!button || !state.run) {
-    return;
-  }
-
-  state.selectedAgentId = button.getAttribute("data-agent-id");
-  syncLocationState(state, "push");
-  renderAgentList(state.run);
-  renderCompareTableV2(state.run);
-  renderAgentTrendTableV2(state.run);
-  renderSelectedAgentV2();
-  setHidden(
-    elements.agentTrendSection,
-    !state.selectedAgentId || getAgentTrendRows(state.runs, state.run, state.selectedAgentId).length <= 1
-  );
-  // Scroll to compare table to show filter result
+  if (!button || !state.run) return;
+  selectAgent(button.getAttribute("data-agent-id"), state, selectionDeps);
   elements.agentCompareSection?.scrollIntoView({ behavior: "smooth", block: "start" });
 });
 
@@ -1313,37 +1251,15 @@ elements.compareTable.addEventListener("click", (event) => {
     return;
   }
 
-  state.selectedAgentId = clickedId;
   state.expandedCompareAgentId = null;
-  syncLocationState(state, "push");
-  renderAgentList(state.run);
-  renderCompareTableV2(state.run);
-  renderAgentTrendTableV2(state.run);
-  renderSelectedAgentV2();
-  setHidden(
-    elements.agentTrendSection,
-    !state.selectedAgentId || getAgentTrendRows(state.runs, state.run, state.selectedAgentId).length <= 1
-  );
+  selectAgent(clickedId, state, selectionDeps);
 });
 
 elements.comparisonBars.addEventListener("click", (event) => {
   const barRow = event.target.closest("[data-bar-agent-id]");
-  if (!barRow || !state.run) {
-    return;
-  }
-
-  state.selectedAgentId = barRow.getAttribute("data-bar-agent-id");
+  if (!barRow || !state.run) return;
   state.expandedCompareAgentId = null;
-  syncLocationState(state, "push");
-  renderAgentList(state.run);
-  renderCompareTableV2(state.run);
-  renderComparisonBars(state.run);
-  renderAgentTrendTableV2(state.run);
-  renderSelectedAgentV2();
-  setHidden(
-    elements.agentTrendSection,
-    !state.selectedAgentId || getAgentTrendRows(state.runs, state.run, state.selectedAgentId).length <= 1
-  );
+  selectAgent(barRow.getAttribute("data-bar-agent-id"), state, selectionDeps);
 });
 
 elements.compareTable.addEventListener("keydown", (event) => {
@@ -1364,45 +1280,20 @@ elements.comparisonBars.addEventListener("keydown", (event) => {
 
 elements.runCompareTable.addEventListener("click", (event) => {
   const row = event.target.closest("[data-compare-run-id]");
-  if (!row) {
-    return;
-  }
-
-  state.selectedRunId = row.getAttribute("data-compare-run-id");
-  updateCurrentRun();
-  syncLocationState(state, "push");
-  render();
+  if (!row) return;
+  selectRun(row.getAttribute("data-compare-run-id"), state, selectionDeps);
 });
 
 elements.runDiffTable.addEventListener("click", (event) => {
   const row = event.target.closest("[data-run-diff-agent-id]");
-  if (!row || !state.run) {
-    return;
-  }
-
-  state.selectedAgentId = row.getAttribute("data-run-diff-agent-id");
-  syncLocationState(state, "push");
-  renderAgentList(state.run);
-  renderCompareTableV2(state.run);
-  renderRunDiffTableV2();
-  renderAgentTrendTableV2(state.run);
-  renderSelectedAgentV2();
-  setHidden(
-    elements.agentTrendSection,
-    !state.selectedAgentId || getAgentTrendRows(state.runs, state.run, state.selectedAgentId).length <= 1
-  );
+  if (!row || !state.run) return;
+  selectAgent(row.getAttribute("data-run-diff-agent-id"), state, selectionDeps);
 });
 
 elements.agentTrendTable.addEventListener("click", (event) => {
   const row = event.target.closest("[data-agent-trend-run-id]");
-  if (!row) {
-    return;
-  }
-
-  state.selectedRunId = row.getAttribute("data-agent-trend-run-id");
-  updateCurrentRun();
-  syncLocationState(state, "push");
-  render();
+  if (!row) return;
+  selectRun(row.getAttribute("data-agent-trend-run-id"), state, selectionDeps);
 });
 
 elements.judgeSearch.addEventListener("input", (event) => {

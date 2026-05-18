@@ -59,52 +59,46 @@ export function resolveReportLocale(value?: string): ReportLocale {
   return value === "zh-CN" ? "zh-CN" : "en";
 }
 
+/**
+ * Registry: maps agent IDs to their config extractors.
+ * Each extractor reads agent-specific CLI flags from `parsed` and returns a config object.
+ * Adding a new agent adapter = adding one entry here.
+ */
+const AGENT_CONFIG_EXTRACTORS: Record<string, (parsed: ParsedArgs) => Record<string, string | undefined>> = {
+  codex: (p) => ({
+    model: p.codexModel?.trim() || undefined,
+    reasoningEffort: p.codexReasoning?.trim() || undefined,
+  }),
+  "claude-code": (p) => ({
+    model: p.claudeModel?.trim() || undefined,
+    providerProfileId: p.claudeProfile?.trim() || undefined,
+  }),
+  "gemini-cli": (p) => ({ model: p.geminiModel?.trim() || undefined }),
+  aider: (p) => ({ model: p.aiderModel?.trim() || undefined }),
+  "kilo-cli": (p) => ({ model: p.kiloModel?.trim() || undefined }),
+  opencode: (p) => ({ model: p.opencodeModel?.trim() || undefined }),
+  "qwen-code": (p) => ({ model: p.qwenModel?.trim() || undefined }),
+  copilot: (p) => ({ model: p.copilotModel?.trim() || undefined }),
+};
+
+/** Returns true if the config has at least one defined value (user specified CLI flags). */
+function hasConfigValues(config: Record<string, string | undefined>): boolean {
+  return Object.values(config).some((v) => v !== undefined);
+}
+
 export function normalizeCliSelections(
   parsed: ParsedArgs,
 ): import("@agentarena/core").AgentSelection[] {
   return parsed.agentIds.map((agentId) => {
     const adapter = listAvailableAdapters().find((entry) => entry.id === agentId);
-    const config =
-      agentId === "codex"
-        ? {
-            model: parsed.codexModel?.trim() || undefined,
-            reasoningEffort: parsed.codexReasoning?.trim() || undefined,
-          }
-        : agentId === "claude-code"
-          ? {
-              model: parsed.claudeModel?.trim() || undefined,
-              providerProfileId: parsed.claudeProfile?.trim() || undefined,
-            }
-          : agentId === "gemini-cli"
-            ? { model: parsed.geminiModel?.trim() || undefined }
-            : agentId === "aider"
-              ? { model: parsed.aiderModel?.trim() || undefined }
-              : agentId === "kilo-cli"
-                ? { model: parsed.kiloModel?.trim() || undefined }
-                : agentId === "opencode"
-                  ? { model: parsed.opencodeModel?.trim() || undefined }
-                  : agentId === "qwen-code"
-                    ? { model: parsed.qwenModel?.trim() || undefined }
-                    : agentId === "copilot"
-                      ? { model: parsed.copilotModel?.trim() || undefined }
-                      : {};
+    const extractor = AGENT_CONFIG_EXTRACTORS[agentId];
+    const config = extractor ? extractor(parsed) : {};
 
     return createAgentSelection({
       baseAgentId: agentId,
       displayLabel: adapter?.title ?? agentId,
       config,
-      configSource:
-        (agentId === "codex" && (config.model || config.reasoningEffort)) ||
-        (agentId === "claude-code" &&
-          (config.model || config.providerProfileId)) ||
-        (agentId === "gemini-cli" && config.model) ||
-        (agentId === "aider" && config.model) ||
-        (agentId === "kilo-cli" && config.model) ||
-        (agentId === "opencode" && config.model) ||
-        (agentId === "qwen-code" && config.model) ||
-        (agentId === "copilot" && config.model)
-          ? "cli"
-          : undefined,
+      configSource: hasConfigValues(config) ? "cli" : undefined,
     });
   });
 }

@@ -26,6 +26,7 @@ import { runCommandSteps, runJudges } from "@agentarena/judges";
 import type { loadTaskPack } from "@agentarena/taskpacks";
 import { JsonlTraceRecorder } from "@agentarena/trace";
 import { agentExecuteTimeoutMs } from "./concurrency.js";
+import { normalizeSelections } from "./normalize-selections.js";
 import {
   buildChangedFiles,
   createBaseResult,
@@ -36,9 +37,12 @@ import {
   summarizeCommandStepFailure
 } from "./result-builder.js";
 import { buildDiffPrecision, collectChangedFiles } from "./snapshot.js";
+import { wrapWithTimeout } from "./timeout-utils.js";
 import { debugLog, formatErrorDetails, formatErrorMessage } from "./workspace.js";
 
 const AGENT_EXECUTE_TIMEOUT_GRACE_MS = 5_000;
+/** Timeout for teardown commands (30 seconds) */
+const TEARDOWN_TIMEOUT_MS = 30_000;
 
 export interface AgentRunContext {
   task: Awaited<ReturnType<typeof loadTaskPack>>;
@@ -713,54 +717,7 @@ export function buildFinalResult(
   });
 }
 
-export function wrapWithTimeout<T>(
-  promise: Promise<T>,
-  timeoutMs: number,
-  label: string
-): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timeoutHandle = setTimeout(() => {
-      reject(new Error(`${label} timed out after ${timeoutMs}ms.`));
-    }, timeoutMs);
-
-    promise
-      .then((value) => {
-        clearTimeout(timeoutHandle);
-        resolve(value);
-      })
-      .catch((error) => {
-        clearTimeout(timeoutHandle);
-        reject(error);
-      });
-  });
-}
-
-export function normalizeSelections(options: { agents?: AgentSelection[]; agentIds: string[] }): AgentSelection[] {
-  const rawSelections =
-    options.agents && options.agents.length > 0
-      ? options.agents
-      : options.agentIds.map((agentId) =>
-          createAgentSelection({
-            baseAgentId: agentId,
-            displayLabel: getAdapter(agentId).title
-          })
-        );
-
-  const seenVariantIds = new Map<string, number>();
-  return rawSelections.map((selection) => {
-    const occurrence = (seenVariantIds.get(selection.variantId) ?? 0) + 1;
-    seenVariantIds.set(selection.variantId, occurrence);
-    if (occurrence === 1) {
-      return selection;
-    }
-
-    return {
-      ...selection,
-      variantId: `${selection.variantId}-${occurrence}`,
-      displayLabel: `${selection.displayLabel} #${occurrence}`
-    };
-  });
-}
+// wrapWithTimeout and normalizeSelections moved to dedicated modules
 
 export async function runAgent(
   repoPath: string,
@@ -803,7 +760,7 @@ export async function runAgent(
 
   let teardownResults: CommandStepResult[] = [];
   let teardownError: unknown;
-  const teardownTimeout = 30_000;
+  const teardownTimeout = TEARDOWN_TIMEOUT_MS;
   let teardownTimedOut = false;
   const teardownAbortController = new AbortController();
   const teardownTimeoutHandle = setTimeout(() => {

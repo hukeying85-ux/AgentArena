@@ -22,6 +22,11 @@ interface ProcessError extends Error {
 
 export const DEFAULT_AGENT_TIMEOUT_MS = 15 * 60 * 1_000;
 
+/** Grace period before sending SIGKILL after SIGTERM (Unix) */
+const SIGKILL_GRACE_MS = 2000;
+/** Wait time before escalating to SIGKILL in terminateProcessTree (Unix) */
+const TERMINATE_ESCALATE_MS = 1000;
+
 export function agentTimeoutMs(): number {
   return resolveTimeoutMs(process.env.AGENTARENA_AGENT_TIMEOUT_MS, DEFAULT_AGENT_TIMEOUT_MS);
 }
@@ -130,7 +135,7 @@ export async function runProcess(
                 if (child && !child.killed) child.kill("SIGKILL");
               }
               sigkillHandle = undefined;
-            }, 2000);
+            }, SIGKILL_GRACE_MS);
           } else {
             // Use taskkill to kill the process tree on Windows
             if (pid === undefined) return;
@@ -294,8 +299,8 @@ export async function terminateProcessTree(pid: number): Promise<void> {
       try { process.kill(pid, "SIGTERM"); } catch (error) { adapterWarn("process.kill SIGTERM fallback failed", { pid, error: error instanceof Error ? error.message : String(error) }); }
     }
 
-    // Escalate to SIGKILL after 1 second
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    // Escalate to SIGKILL after grace period
+    await new Promise((resolve) => setTimeout(resolve, TERMINATE_ESCALATE_MS));
     try {
       process.kill(-pid, "SIGKILL");
     } catch {
