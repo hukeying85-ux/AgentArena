@@ -117,11 +117,12 @@ test("createCancelledRunResult has cancelled status", () => {
     { agentId: "test", title: "Test", baseAgentId: "test", capabilities: {} },
     "/tmp/trace.jsonl",
     "/tmp/workspace",
-    1000,
+    "Run was cancelled by user",
     [],
     []
   );
   assert.equal(result.status, "cancelled");
+  assert.ok(result.summary.includes("cancelled"));
 });
 
 test("createSkippedRunResult has failed status (skipped uses failed internally)", () => {

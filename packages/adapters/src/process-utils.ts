@@ -206,10 +206,14 @@ export async function runProcess(
     child.stdout?.on("data", (chunk: Buffer) => {
       if (stdoutTruncated) return;
       const str = chunk.toString("utf8");
-      stdoutBytes += Buffer.byteLength(str, "utf8");
+      const chunkBytes = Buffer.byteLength(str, "utf8");
+      stdoutBytes += chunkBytes;
       if (stdoutBytes > MAX_PROCESS_OUTPUT_BYTES) {
-        const remaining = MAX_PROCESS_OUTPUT_BYTES - (stdoutBytes - Buffer.byteLength(str, "utf8"));
-        stdout += Buffer.from(str, "utf8").slice(0, remaining).toString("utf8");
+        const prevBytes = stdoutBytes - chunkBytes;
+        const remaining = MAX_PROCESS_OUTPUT_BYTES - prevBytes;
+        // Use TextDecoder for safe multi-byte truncation (avoids splitting UTF-8 sequences)
+        const decoder = new TextDecoder("utf8", { fatal: false });
+        stdout += decoder.decode(Buffer.from(str, "utf8").slice(0, remaining));
         stdout += `\n[stdout truncated at ${MAX_PROCESS_OUTPUT_BYTES} bytes]`;
         stdoutTruncated = true;
       } else {
@@ -220,10 +224,13 @@ export async function runProcess(
     child.stderr?.on("data", (chunk: Buffer) => {
       if (stderrTruncated) return;
       const str = chunk.toString("utf8");
-      stderrBytes += Buffer.byteLength(str, "utf8");
+      const chunkBytes = Buffer.byteLength(str, "utf8");
+      stderrBytes += chunkBytes;
       if (stderrBytes > MAX_PROCESS_OUTPUT_BYTES) {
-        const remaining = MAX_PROCESS_OUTPUT_BYTES - (stderrBytes - Buffer.byteLength(str, "utf8"));
-        stderr += Buffer.from(str, "utf8").slice(0, remaining).toString("utf8");
+        const prevBytes = stderrBytes - chunkBytes;
+        const remaining = MAX_PROCESS_OUTPUT_BYTES - prevBytes;
+        const decoder = new TextDecoder("utf8", { fatal: false });
+        stderr += decoder.decode(Buffer.from(str, "utf8").slice(0, remaining));
         stderr += `\n[stderr truncated at ${MAX_PROCESS_OUTPUT_BYTES} bytes]`;
         stderrTruncated = true;
       } else {

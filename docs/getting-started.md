@@ -141,8 +141,11 @@ AgentArena computes a composite score (0-100) based on:
 
 You can adjust the scoring weights with `--score-mode`:
 - `practical` (default) — balanced for real-world tasks
+- `balanced` — equal emphasis on all dimensions
 - `issue-resolution` — SWE-bench style, focused on test passing
 - `efficiency-first` — rewards faster, cheaper runs
+- `rotating-tasks` — category-aware scoring for diverse task sets
+- `comprehensive` — all weight keys enabled, thorough evaluation
 
 ## Next Steps
 

@@ -125,6 +125,8 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
   // Token priority: --auth-token > AGENTARENA_AUTH_TOKEN env > auto-generated
   const authToken = parsed.authToken?.trim() || process.env.AGENTARENA_AUTH_TOKEN?.trim() || generateAuthToken();
   let activeRun: ActiveUiRun | null = null;
+  /** Generation counter to prevent stale finally blocks from corrupting new run state. */
+  let runGeneration = 0;
   /**
    * Mutex flag for concurrent run requests.
    *
@@ -433,6 +435,7 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
 
         const cancellationController = new AbortController();
         const cancellation = createCancellation(cancellationController.signal);
+        const currentRunGeneration = ++runGeneration;
 
         activeRun = {
           cancel: () => cancellationController.abort(),
@@ -555,12 +558,15 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
                   }
             );
           } finally {
-            if (activeRunStatus.state !== "cancelling" && activeRunStatus.state !== "cancelled" && activeRunStatus.state !== "error") {
-              activeRunStatus = { ...activeRunStatus, state: "done" };
+            // Only update state if this is still the current run (not stale from a cancel/restart)
+            if (currentRunGeneration === runGeneration) {
+              if (activeRunStatus.state !== "cancelling" && activeRunStatus.state !== "cancelled" && activeRunStatus.state !== "error") {
+                activeRunStatus = { ...activeRunStatus, state: "done" };
+              }
+              activeRun = null;
+              // Clear persisted state on completion
+              clearRunState(process.cwd()).catch(() => {});
             }
-            activeRun = null;
-            // Clear persisted state on completion
-            clearRunState(process.cwd()).catch(() => {});
           }
         })()
         };
@@ -577,7 +583,9 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
         }
         activeRun.cancel();
         activeRunStatus = { ...activeRunStatus, state: "cancelling" };
-        activeRun = null;
+        // Don't set activeRun = null here — let the old run's finally block handle it.
+        // Setting it null here would allow a new run to start while the old one is still
+        // cleaning up, causing state corruption via the stale finally block.
         appendRunLog({ phase: activeRunStatus.phase, message: "Cancellation requested by user." });
         sendApiResponse(response, jsonResponse({ cancelled: true }));
         return;

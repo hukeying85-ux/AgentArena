@@ -73,12 +73,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CLI: -v flag conflict resolved (--version uses -V, --verbose keeps -v)
 - API routes: withErrorHandling logs errors instead of silently swallowing
 - Dead code removed: unused GeminiJsonEvent, tryGetAdapter, _WEIGHT_NAMES
-- All 600 tests passing (4 pre-existing failures resolved)
+- All 659 tests passing with 0 failures
 
 ### Added
 - docs/getting-started.md: user-facing install and first benchmark guide
 - docs/troubleshooting.md: common issues, auth failures, Windows fixes, FAQ
 - CHANGELOG.md: this file
+- Comprehensive codebase restructuring: score-metrics.ts, score-weights.ts, timeout-utils.ts, normalize-selections.ts, task-utils.js, selection-handlers.js
 
 ### Security
 - Regex injection protection (flags whitelist + 2000 char limit for regex-match judge)

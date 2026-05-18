@@ -1,7 +1,7 @@
 {
   "name": "@agentarena/adapters",
   "version": "0.1.0",
-  "description": "Agent adapters for AgentArena — demo, codex, claude-code, cursor",
+  "description": "Agent adapters for AgentArena — 15 adapters: demo-fast/thorough/budget, codex, claude-code, cursor, gemini-cli, aider, copilot, kilo-cli, opencode, qwen-code, trae, augment",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

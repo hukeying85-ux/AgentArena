@@ -138,10 +138,13 @@ export function checkCorsOrigin(origin: string | undefined, host: string, port: 
   if (!origin) return true;
   // Reject null origin (from file:// protocol, privacy redirects, etc.)
   if (origin === "null") return false;
+  // Normalize host for IPv6 bracket notation (browsers send [::1] but config may have ::1)
+  const normalizedHost = host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
   const allowedOrigins = new Set([
-    `http://${host}:${port}`,
+    `http://${normalizedHost}:${port}`,
     `http://localhost:${port}`,
-    `http://127.0.0.1:${port}`
+    `http://127.0.0.1:${port}`,
+    `http://[::1]:${port}`
   ]);
   if (host === "0.0.0.0") {
     allowedOrigins.add(`http://localhost:${port}`);
@@ -263,14 +266,16 @@ export async function readRequestBody(request: http.IncomingMessage, maxBytes = 
   const chunks: Buffer[] = [];
   let totalBytes = 0;
 
+  let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
+
   const timeoutPromise = new Promise<never>((_, reject) => {
-    const timer = setTimeout(() => {
+    timeoutTimer = setTimeout(() => {
       request.destroy();
       reject(new HttpError("Request body read timed out.", 408));
     }, timeoutMs);
-    request.on("end", () => clearTimeout(timer));
-    request.on("error", () => clearTimeout(timer));
-    request.on("close", () => clearTimeout(timer));
+    request.on("end", () => { if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = undefined; } });
+    request.on("error", () => { if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = undefined; } });
+    request.on("close", () => { if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = undefined; } });
   });
 
   const readPromise = (async () => {
@@ -278,10 +283,12 @@ export async function readRequestBody(request: http.IncomingMessage, maxBytes = 
       const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       totalBytes += buffer.length;
       if (totalBytes > maxBytes) {
+        if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = undefined; }
         throw new HttpError("Request body too large.", 413);
       }
       chunks.push(buffer);
     }
+    if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = undefined; }
     return Buffer.concat(chunks).toString("utf8");
   })();
 
