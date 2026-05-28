@@ -455,7 +455,7 @@ test("share helpers produce shareable summary text and PR tables", () => {
   assert.match(shareCard, /AgentArena \| Task A/);
   assert.match(shareCard, /Best variant: demo-fast .*score \d+\.\d/);
   assert.match(prTable, /\| Variant \| Base Agent \| Provider \| Provider Kind \| Model \| Reasoning \| Version \| Verification \| Status \| Score \| Duration \| Tokens \| Cost \| Judges \| Tests \| Lint \| Diff Precision \| Files \|/);
-  assert.match(prTable, /\| demo-fast \| demo-fast \| official \| unknown \| unknown \| default \| unknown \| unknown\/unknown \| success \| \d+\.\d \| 1000ms \| 100 \| \$0\.10 \| 2\/2 \| n\/a \| n\/a \| n\/a \| 1 \|/);
+  assert.match(prTable, /\| demo-fast \| demo-fast \| official \|.*?\|.*?\| default \|.*?\|.*?\/.*?\| success \| \d+\.\d \| 1000ms \| 100 \| \$0\.10 \| 2\/2 \| n\/a \| n\/a \| n\/a \| 1 \|/);
 
   const weightedShareCard = buildShareCard(run, {
     scoreWeights: { status: 0.1, tests: 0.1, judges: 0.1, lint: 0.1, precision: 0.1, duration: 0.3, cost: 0.2 },

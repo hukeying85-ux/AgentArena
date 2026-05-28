@@ -1,10 +1,23 @@
 import {
   type AgentResolvedRuntime,
+  logger,
   normalizePath,
   portableRelativePath,
   uniqueSorted
 } from "@agentarena/core";
 import { safeNumber } from "./process-utils.js";
+
+/**
+ * Narrow an unknown JSON.parse result to a non-null object with optional `type` discriminant.
+ * Returns null when the parsed value isn't a plain object — protects downstream code
+ * from arrays, primitives, or null that pass `JSON.parse` but break property access.
+ */
+function asJsonObject(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  return value as Record<string, unknown>;
+}
 
 /** Strip ANSI escape sequences from a string (color codes, cursor movements, etc.) */
 function stripAnsi(input: string): string {
@@ -109,13 +122,18 @@ export function parseCodexEvents(stdout: string, workspacePath: string): {
 
     let parsed: CodexJsonEvent;
     try {
-      parsed = JSON.parse(line) as CodexJsonEvent;
+      const raw: unknown = JSON.parse(line);
+      const obj = asJsonObject(raw);
+      if (!obj) {
+        // Array/primitive/null parse result — not a valid event
+        continue;
+      }
+      parsed = obj as CodexJsonEvent;
     } catch {
       parseErrorCount += 1;
       // Only log first few parse errors to avoid flooding
       if (parseErrorCount <= 3) {
-        // biome-ignore lint/suspicious/noConsole: parse error diagnostic
-        console.warn(`parseCodexEvents: Failed to parse JSON line: ${line.slice(0, 100)}...`);
+        logger.warn("adapter", "codex.parse_failed", `parseCodexEvents: Failed to parse JSON line: ${line.slice(0, 100)}...`);
       }
       if (parseErrorCount > MAX_PARSE_ERRORS) {
         // After too many errors, stop parsing to avoid performance impact
@@ -167,8 +185,7 @@ export function parseCodexEvents(stdout: string, workspacePath: string): {
   }
 
   if (parseErrorCount > MAX_PARSE_ERRORS) {
-    // biome-ignore lint/suspicious/noConsole: parse error diagnostic
-    console.warn(`parseCodexEvents: Skipped ${parseErrorCount} unparseable lines in total.`);
+    logger.warn("adapter", "codex.parse_skipped", `parseCodexEvents: Skipped ${parseErrorCount} unparseable lines in total.`);
   }
 
   return {
@@ -193,6 +210,22 @@ export function parseCodexEvents(stdout: string, workspacePath: string): {
  * Handles the shared pattern used by both Claude Code and Gemini CLI:
  * - Strip ANSI, parse JSON lines
  * - Extract session ID, message content, usage tokens, cost, errors
+ *
+ * STRING-BASED CONTRACT WARNING:
+ * This parser depends on undocumented output formats from external CLI tools.
+ * If any CLI tool changes field names or event types, the parser silently
+ * produces zero results (tokenUsage: 0, empty changedFiles) with no warning.
+ *
+ * Known field dependencies (as of 2025-01):
+ * - Claude Code: parsed.type === "result" for final event
+ * - parsed.usage.input_tokens, output_tokens, cache_creation_input_tokens,
+ *   cache_read_input_tokens (token counting)
+ * - parsed.message.content as Array<{type: "text", text: string}>
+ * - parsed.cost_usd (cost extraction)
+ *
+ * Codex: parsed.type === "turn.completed" for final event
+ * - item.type === "agent_message", "file_change" (content extraction)
+ * - model/modelSlug/modelName fields (runtime resolution)
  *
  * @param stdout - Raw stdout from the CLI process
  * @param callerName - Label used in diagnostic warnings (e.g. "parseClaudeEvents")
@@ -225,12 +258,14 @@ export function parseStreamJsonEvents(
 
     let parsed: ClaudeJsonEvent;
     try {
-      parsed = JSON.parse(line) as ClaudeJsonEvent;
+      const raw: unknown = JSON.parse(line);
+      const obj = asJsonObject(raw);
+      if (!obj) continue;
+      parsed = obj as ClaudeJsonEvent;
     } catch {
       parseErrorCount += 1;
       if (parseErrorCount <= 3) {
-        // biome-ignore lint/suspicious/noConsole: parse error diagnostic
-        console.warn(`${callerName}: Failed to parse JSON line: ${line.slice(0, 100)}...`);
+        logger.warn("adapter", "stream_json.parse_failed", `${callerName}: Failed to parse JSON line: ${line.slice(0, 100)}...`);
       }
       continue;
     }
@@ -288,8 +323,7 @@ export function parseStreamJsonEvents(
   }
 
   if (parseErrorCount > MAX_PARSE_ERRORS) {
-    // biome-ignore lint/suspicious/noConsole: parse error diagnostic
-    console.warn(`${callerName}: Skipped ${parseErrorCount} unparseable lines in total.`);
+    logger.warn("adapter", "stream_json.parse_skipped", `${callerName}: Skipped ${parseErrorCount} unparseable lines in total.`);
   }
 
   return {

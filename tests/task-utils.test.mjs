@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  taskIntentSummary,
-  summarizeTaskPrompt,
   statusClass,
+  summarizeTaskPrompt,
+  taskIntentSummary,
 } from "../apps/web-report/src/task-utils.js";
 
 // --- taskIntentSummary ---

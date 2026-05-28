@@ -1,7 +1,11 @@
 import { execFileSync, spawn } from "node:child_process";
+import { access, constants as fsConstants } from "node:fs";
 import path from "node:path";
+import { promisify } from "node:util";
 import { BenchmarkCancelledError, MAX_PROCESS_OUTPUT_BYTES, pathExists, resolveTimeoutMs } from "@agentarena/core";
 import { adapterWarn } from "./adapter-diagnostics.js";
+
+const accessAsync = promisify(access);
 
 export { MAX_PROCESS_OUTPUT_BYTES, pathExists };
 
@@ -67,14 +71,24 @@ export async function sleep(durationMs: number, signal?: AbortSignal): Promise<v
     throw new BenchmarkCancelledError();
   }
 
-  await new Promise((resolve, reject) => {
-    const timeoutHandle = setTimeout(() => {
+  await new Promise<void>((resolve, reject) => {
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+
+    const cleanup = () => {
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+        timeoutHandle = undefined;
+      }
       signal.removeEventListener("abort", onAbort);
-      resolve(undefined);
+    };
+
+    timeoutHandle = setTimeout(() => {
+      cleanup();
+      resolve();
     }, durationMs);
 
     const onAbort = () => {
-      clearTimeout(timeoutHandle);
+      cleanup();
       reject(new BenchmarkCancelledError());
     };
 
@@ -91,8 +105,12 @@ export async function findExecutableOnPath(names: string[]): Promise<string | un
   for (const entry of pathEntries) {
     for (const name of names) {
       const candidate = path.join(entry, name);
-      if (await pathExists(candidate)) {
+      try {
+        // Check both existence and execute permission (on Unix)
+        await accessAsync(candidate, fsConstants.X_OK);
         return candidate;
+      } catch {
+        // Not found or not executable — continue searching
       }
     }
   }
@@ -110,14 +128,35 @@ export async function runProcess(
 ): Promise<ProcessResult> {
   return await new Promise((resolve) => {
     let child: ReturnType<typeof spawn> | null = null;
-    let stdout = "";
-    let stderr = "";
+    // Accumulate chunks as Buffers and concat once at finish.
+    // This avoids the O(n²) `stdout += chunk.toString()` pattern that
+    // grows quadratically with output size (each concat reallocates the
+    // entire prefix). It also lets us count bytes from `chunk.length`
+    // directly instead of round-tripping through `.toString().byteLength`.
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
     let timedOut = false;
     let resolved = false;
+    /**
+     * cleanedUp guards the cleanup() helper against re-entry. Without it, a
+     * race between onAbort and onTimeout could create two SIGKILL timers, and
+     * the second would orphan when finish() clears only the first reference.
+     */
+    let cleanedUp = false;
     let closeSignal: NodeJS.Signals | undefined;
     let processError: string | undefined;
     let timeoutHandle: NodeJS.Timeout | undefined;
     let sigkillHandle: NodeJS.Timeout | undefined;
+
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
+    let stdoutTruncated = false;
+    let stderrTruncated = false;
+    const truncateMarker = (label: "stdout" | "stderr") =>
+      Buffer.from(`\n[${label} truncated at ${MAX_PROCESS_OUTPUT_BYTES} bytes]`);
+
+    const buildStdout = (): string => Buffer.concat(stdoutChunks).toString("utf8");
+    const buildStderr = (): string => Buffer.concat(stderrChunks).toString("utf8");
 
     const finish = (result: ProcessResult) => {
       if (resolved) return;
@@ -129,16 +168,16 @@ export async function runProcess(
     };
 
     const cleanup = () => {
+      if (cleanedUp) return;
+      cleanedUp = true;
       if (child && !child.killed && child.pid) {
         const pid = child.pid;
         try {
-          // Clear any existing SIGKILL timer to prevent duplicates
           if (sigkillHandle) {
             clearTimeout(sigkillHandle);
             sigkillHandle = undefined;
           }
           if (process.platform !== "win32") {
-            // Kill the entire process group on Unix
             try {
               process.kill(-pid, "SIGTERM");
             } catch (e) {
@@ -155,7 +194,6 @@ export async function runProcess(
               sigkillHandle = undefined;
             }, SIGKILL_GRACE_MS);
           } else {
-            // Use taskkill to kill the process tree on Windows
             if (pid === undefined) return;
             try {
               execFileSync("taskkill", ["/F", "/T", "/PID", String(pid)], { stdio: "ignore" });
@@ -174,8 +212,8 @@ export async function runProcess(
       cleanup();
       finish({
         exitCode: null,
-        stdout,
-        stderr: `${stderr}\nProcess cancelled.`.trim(),
+        stdout: buildStdout(),
+        stderr: `${buildStderr()}\nProcess cancelled.`.trim(),
         timedOut: false,
         signal: "SIGTERM",
         error: "cancelled"
@@ -216,43 +254,29 @@ export async function runProcess(
 
     timeoutHandle = setTimeout(onTimeout, timeoutMs);
 
-    let stdoutBytes = 0;
-    let stderrBytes = 0;
-    let stdoutTruncated = false;
-    let stderrTruncated = false;
-
     child.stdout?.on("data", (chunk: Buffer) => {
       if (stdoutTruncated) return;
-      const str = chunk.toString("utf8");
-      const chunkBytes = Buffer.byteLength(str, "utf8");
-      stdoutBytes += chunkBytes;
+      stdoutBytes += chunk.length;
       if (stdoutBytes > MAX_PROCESS_OUTPUT_BYTES) {
-        const prevBytes = stdoutBytes - chunkBytes;
-        const remaining = MAX_PROCESS_OUTPUT_BYTES - prevBytes;
-        // Use TextDecoder for safe multi-byte truncation (avoids splitting UTF-8 sequences)
-        const decoder = new TextDecoder("utf8", { fatal: false });
-        stdout += decoder.decode(Buffer.from(str, "utf8").slice(0, remaining));
-        stdout += `\n[stdout truncated at ${MAX_PROCESS_OUTPUT_BYTES} bytes]`;
+        const remaining = MAX_PROCESS_OUTPUT_BYTES - (stdoutBytes - chunk.length);
+        if (remaining > 0) stdoutChunks.push(chunk.subarray(0, remaining));
+        stdoutChunks.push(truncateMarker("stdout"));
         stdoutTruncated = true;
       } else {
-        stdout += str;
+        stdoutChunks.push(chunk);
       }
     });
 
     child.stderr?.on("data", (chunk: Buffer) => {
       if (stderrTruncated) return;
-      const str = chunk.toString("utf8");
-      const chunkBytes = Buffer.byteLength(str, "utf8");
-      stderrBytes += chunkBytes;
+      stderrBytes += chunk.length;
       if (stderrBytes > MAX_PROCESS_OUTPUT_BYTES) {
-        const prevBytes = stderrBytes - chunkBytes;
-        const remaining = MAX_PROCESS_OUTPUT_BYTES - prevBytes;
-        const decoder = new TextDecoder("utf8", { fatal: false });
-        stderr += decoder.decode(Buffer.from(str, "utf8").slice(0, remaining));
-        stderr += `\n[stderr truncated at ${MAX_PROCESS_OUTPUT_BYTES} bytes]`;
+        const remaining = MAX_PROCESS_OUTPUT_BYTES - (stderrBytes - chunk.length);
+        if (remaining > 0) stderrChunks.push(chunk.subarray(0, remaining));
+        stderrChunks.push(truncateMarker("stderr"));
         stderrTruncated = true;
       } else {
-        stderr += chunk.toString("utf8");
+        stderrChunks.push(chunk);
       }
     });
 
@@ -260,8 +284,8 @@ export async function runProcess(
       processError = error.message;
       finish({
         exitCode: error.exitCode ?? -1,
-        stdout,
-        stderr: `${stderr}\nProcess error: ${error.message}`.trim(),
+        stdout: buildStdout(),
+        stderr: `${buildStderr()}\nProcess error: ${error.message}`.trim(),
         timedOut: false,
         signal: error.signal,
         error: error.message
@@ -274,8 +298,8 @@ export async function runProcess(
       const errorSuffix = processError ? `\nProcess error: ${processError}` : "";
       finish({
         exitCode,
-        stdout,
-        stderr: `${stderr}${timeoutSuffix}${errorSuffix}`.trim(),
+        stdout: buildStdout(),
+        stderr: `${buildStderr()}${timeoutSuffix}${errorSuffix}`.trim(),
         timedOut,
         signal: closeSignal
       });
@@ -283,7 +307,7 @@ export async function runProcess(
 
     child.on("disconnect", () => {
       if (!resolved) {
-        stderr += "\nProcess disconnected unexpectedly.";
+        stderrChunks.push(Buffer.from("\nProcess disconnected unexpectedly."));
       }
     });
   });

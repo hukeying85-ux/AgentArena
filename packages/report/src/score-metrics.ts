@@ -78,7 +78,8 @@ export function failToPassScore(result: BenchmarkRun["results"][number]): number
 
 /**
  * pass-to-pass score (Issue Resolution mode).
- * Returns 0 when no test judge data exists.
+ * Only uses explicit patch-validation data to avoid double-counting with testPassRatio.
+ * Returns 0 when no explicit pass-to-pass data exists.
  */
 export function passToPassScore(result: BenchmarkRun["results"][number]): number {
   const patchValidation = result.sweBench?.patchValidationResult;
@@ -86,11 +87,7 @@ export function passToPassScore(result: BenchmarkRun["results"][number]): number
     const passed = patchValidation.passToPassResults.filter(r => r.status === "pass").length;
     return passed / patchValidation.passToPassResults.length;
   }
-  const judge = findJudgeByType(result, "test-result");
-  if (!judge || typeof judge.totalCount !== "number" || judge.totalCount === 0) {
-    return 0;
-  }
-  return (judge.passedCount ?? 0) / judge.totalCount;
+  return 0;
 }
 
 /**
@@ -111,7 +108,8 @@ export function lintQualityScore(result: BenchmarkRun["results"][number]): numbe
 export function durationEfficiencyScore(result: BenchmarkRun["results"][number], run: BenchmarkRun): number {
   const durations = run.results.map((entry) => entry.durationMs).filter((value) => value > 0);
   if (durations.length === 0) {
-    return 0;
+    // All results completed instantly — everyone is equally efficient
+    return 1;
   }
   const fastest = Math.min(...durations);
   return fastest / Math.max(result.durationMs, fastest);

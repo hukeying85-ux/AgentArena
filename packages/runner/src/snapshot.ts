@@ -1,15 +1,41 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { type DiffPrecisionSummary, metrics, uniqueSorted } from "@agentarena/core";
+import { type DiffPrecisionSummary, logger, metrics, uniqueSorted } from "@agentarena/core";
 import picomatch from "picomatch";
 
 const execFileAsync = promisify(execFile);
 
+/**
+ * Tagged result of attempting to enumerate changed files.
+ *
+ * When `reliable: false`, downstream consumers (diff precision, scoring) must
+ * skip metrics derived from `files` — empty `files` here means "unknown",
+ * NOT "no changes". This distinction is the difference between an unscored run
+ * and a zero-scored run, which directly affects benchmark fairness.
+ */
+/**
+ * @see {@link ChangedFilesHintResult} in packages/adapters/src/adapter-helpers.ts — identical shape, kept separate to avoid cross-package import.
+ */
+export interface ChangedFilesResult {
+  files: string[];
+  reliable: boolean;
+  /** Reason the result is unreliable; only present when `reliable === false`. */
+  reason?: string;
+}
+
+const GIT_DIFF_TIMEOUT_MS = 10_000;
+
 export function buildDiffPrecision(
   expectedChangedPaths: string[] | undefined,
-  changedFiles: string[]
+  changedFiles: string[],
+  options: { reliable?: boolean } = {}
 ): DiffPrecisionSummary | undefined {
   if (!expectedChangedPaths || expectedChangedPaths.length === 0) {
+    return undefined;
+  }
+  // If the upstream snapshot or git enumeration was unreliable, refuse to score —
+  // returning `0` would silently corrupt the composite score with bogus data.
+  if (options.reliable === false) {
     return undefined;
   }
 
@@ -26,24 +52,29 @@ export function buildDiffPrecision(
   };
 }
 
-export async function collectChangedFiles(workspacePath: string): Promise<string[]> {
+export async function collectChangedFiles(workspacePath: string): Promise<ChangedFilesResult> {
   const startTime = Date.now();
   let status = "success";
   try {
     const { stdout } = await execFileAsync("git", ["diff", "--name-only", "HEAD"], {
       cwd: workspacePath,
-      timeout: 10000
+      timeout: GIT_DIFF_TIMEOUT_MS
     });
-    return stdout.trim().split("\n").filter(Boolean);
+    return { files: stdout.trim().split("\n").filter(Boolean), reliable: true };
   } catch (error: unknown) {
     status = "failure";
-    const stderr = (error as { stderr?: string }).stderr ?? "";
-    const code = (error as { code?: number }).code;
-    if (stderr.includes("not a git repository") || code === 128) {
-      return [];
+    const stderr = (error instanceof Error && "stderr" in error) ? String((error as NodeJS.ErrnoException & { stderr?: string }).stderr ?? "") : "";
+    const rawCode = (error instanceof Error && "code" in error) ? (error as Record<string, unknown>).code : undefined;
+    // Not-a-git-repository is a legitimate "no diff information" case, not an error.
+    // git exits 128 with stderr like "fatal: not a git repository (or any of the parent directories)".
+    // Match case-insensitively so different locales/wrappings still classify correctly.
+    const lowerStderr = stderr.toLowerCase();
+    if (rawCode === 128 || rawCode === "128" || lowerStderr.includes("not a git repository") || lowerStderr.includes("not a git")) {
+      return { files: [], reliable: true };
     }
-    console.warn(`[agentarena] git diff failed in ${workspacePath}: ${error instanceof Error ? error.message : String(error)}`);
-    return [];
+    const message = error instanceof Error ? error.message : String(error);
+    logger.warn("runner", "git.diff_failed", `git diff failed in ${workspacePath}: ${message}`);
+    return { files: [], reliable: false, reason: `git diff failed: ${message}` };
   } finally {
     const durationSeconds = (Date.now() - startTime) / 1000;
     metrics.gitOperationTotal.inc({ operation: "diff", status });

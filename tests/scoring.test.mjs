@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { DEFAULT_SCORE_WEIGHTS, computeScoreComponents as frontendComputeScoreComponents, normalizeApplicableWeights as frontendNormalizeApplicableWeights, getCompositeScoreDetails, getScoreWeightPreset } from "../apps/web-report/src/view-model/scoring.js";
 import { getDefaultWeights } from "../packages/core/dist/index.js";
-import { computeScoreComponents as backendComputeScoreComponents, normalizeApplicableWeights as backendNormalizeApplicableWeights, CRITICAL_FAIL_SCORE_BAND, computeCompositeScore, FAILED_SCORE_BAND } from "../packages/report/dist/index.js";
+import { computeScoreComponents as backendComputeScoreComponents, normalizeApplicableWeights as backendNormalizeApplicableWeights, CRITICAL_FAIL_SCORE_BAND, computeCompositeScore, enrichRunWithScores, FAILED_SCORE_BAND } from "../packages/report/dist/index.js";
 
 function createResult(overrides = {}) {
   return {
@@ -576,4 +576,61 @@ test("Successful run with no critical judge failures scores above CRITICAL_FAIL_
 
   const score = computeCompositeScore(result, run);
   assert.ok(score > CRITICAL_FAIL_SCORE_BAND.max, `Fully successful run should score > ${CRITICAL_FAIL_SCORE_BAND.max}, got ${score}`);
+});
+
+// --- enrichRunWithScores ---
+
+test("enrichRunWithScores defaults scoreMode to practical when missing", () => {
+  const run = createRun({});
+  delete run.scoreMode;
+  const enriched = enrichRunWithScores(run);
+  assert.equal(enriched.scoreMode, "practical");
+});
+
+test("enrichRunWithScores validates scoreMode and rejects invalid values", () => {
+  const run = createRun({ scoreMode: "invalid-mode" });
+  const enriched = enrichRunWithScores(run);
+  assert.equal(enriched.scoreMode, "practical", "Invalid scoreMode should default to practical");
+});
+
+test("enrichRunWithScores preserves valid scoreMode", () => {
+  const run = createRun({ scoreMode: "balanced" });
+  const enriched = enrichRunWithScores(run);
+  assert.equal(enriched.scoreMode, "balanced");
+});
+
+test("enrichRunWithScores provides default scoreWeights when missing", () => {
+  const run = createRun({});
+  delete run.scoreWeights;
+  const enriched = enrichRunWithScores(run);
+  assert.ok(enriched.scoreWeights, "should provide default weights");
+  assert.equal(typeof enriched.scoreWeights, "object");
+});
+
+test("enrichRunWithScores provides default scoreScope", () => {
+  const run = createRun({});
+  const enriched = enrichRunWithScores(run);
+  assert.equal(enriched.scoreScope, "run-local");
+});
+
+test("enrichRunWithScores provides default scoreValidityNote", () => {
+  const run = createRun({});
+  const enriched = enrichRunWithScores(run);
+  assert.ok(enriched.scoreValidityNote);
+  assert.ok(enriched.scoreValidityNote.includes("local rankings"));
+});
+
+test("enrichRunWithScores computes compositeScore for each result", () => {
+  const result = createResult({ durationMs: 100, estimatedCostUsd: 0.001, costKnown: true });
+  const run = createRun({ results: [result] });
+  const enriched = enrichRunWithScores(run);
+  assert.equal(typeof enriched.results[0].compositeScore, "number");
+  assert.ok(!Number.isNaN(enriched.results[0].compositeScore));
+});
+
+test("enrichRunWithScores computes scoreReasons for each result", () => {
+  const result = createResult();
+  const run = createRun({ results: [result] });
+  const enriched = enrichRunWithScores(run);
+  assert.ok(Array.isArray(enriched.results[0].scoreReasons));
 });

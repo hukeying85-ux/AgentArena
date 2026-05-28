@@ -26,17 +26,17 @@ export function summarizeRun(run) {
 export function runtimeIdentity(result) {
   return {
     provider: result.resolvedRuntime?.providerProfileName ?? result.requestedConfig?.providerProfileId ?? "official",
-    providerKind: result.resolvedRuntime?.providerKind ?? "unknown",
-    providerSource: result.resolvedRuntime?.providerSource ?? "unknown",
-    model: result.resolvedRuntime?.effectiveModel ?? result.requestedConfig?.model ?? "unknown",
+    providerKind: result.resolvedRuntime?.providerKind ?? "",
+    providerSource: result.resolvedRuntime?.providerSource ?? "",
+    model: result.resolvedRuntime?.effectiveModel ?? result.requestedConfig?.model ?? "",
     reasoning:
       result.resolvedRuntime?.effectiveReasoningEffort ??
       result.requestedConfig?.reasoningEffort ??
       "default",
-    version: result.resolvedRuntime?.effectiveAgentVersion ?? "unknown",
-    versionSource: result.resolvedRuntime?.agentVersionSource ?? "unknown",
-    source: result.resolvedRuntime?.source ?? "unknown",
-    verification: result.resolvedRuntime?.verification ?? "unknown"
+    version: result.resolvedRuntime?.effectiveAgentVersion ?? "",
+    versionSource: result.resolvedRuntime?.agentVersionSource ?? "",
+    source: result.resolvedRuntime?.source ?? "",
+    verification: result.resolvedRuntime?.verification ?? ""
   };
 }
 

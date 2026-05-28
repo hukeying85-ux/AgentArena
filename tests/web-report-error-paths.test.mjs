@@ -101,8 +101,9 @@ test("getRunVerdict handles run with all failed results", () => {
 
   const verdict = getRunVerdict(run);
   assert.ok(verdict);
-  // bestAgent may be null or the least-bad option
-  assert.ok(typeof verdict === "object");
+  assert.equal(typeof verdict, "object");
+  // With all failed results, bestAgent should still be determined (least-bad)
+  assert.ok(verdict.bestAgent || verdict.fastest, "should identify a best agent or fastest even with all failed");
 });
 
 test("getRunVerdict handles run with single result", () => {
@@ -110,13 +111,16 @@ test("getRunVerdict handles run with single result", () => {
   const verdict = getRunVerdict(run);
   assert.ok(verdict);
   assert.ok(verdict.bestAgent || verdict.fastest);
+  // Single result should be both best and fastest
+  if (verdict.bestAgent) assert.equal(verdict.bestAgent.agentId, "test-agent");
 });
 
 test("getRunTrustSummary handles run with no results", () => {
   const run = makeMockRun({ results: [] });
   const summary = getRunTrustSummary(run);
   assert.ok(summary);
-  assert.ok(typeof summary === "object");
+  assert.equal(summary.totalAgents, 0);
+  assert.equal(summary.failedAgents, 0);
 });
 
 test("getRunTrustSummary handles run with missing cost data", () => {
@@ -139,7 +143,8 @@ test("getSelectionTrustSummary handles empty comparable runs", () => {
     runs: []
   });
   assert.ok(summary);
-  assert.ok(typeof summary === "object");
+  assert.equal(summary.comparableRuns, 0);
+  assert.equal(summary.excludedRuns, 0);
 });
 
 test("getScoreWeightPreset returns valid weights for all modes", () => {

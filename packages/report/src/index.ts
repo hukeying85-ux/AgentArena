@@ -7,10 +7,23 @@ import { renderMarkdown, renderPrComment } from "./markdown-template.js";
 import { buildBadgePayload, type Locale, sanitizeRun } from "./report-helpers.js";
 import { enrichRunWithScores } from "./scoring.js";
 
-async function atomicWriteFile(filePath: string, content: string): Promise<void> {
+async function atomicWriteFile(filePath: string, content: string, retries = 3, delayMs = 100): Promise<void> {
   const tmpPath = `${filePath}.tmp`;
   await fs.writeFile(tmpPath, content, "utf8");
-  await fs.rename(tmpPath, filePath);
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      await fs.rename(tmpPath, filePath);
+      return;
+    } catch (err: unknown) {
+      if (attempt < retries && err instanceof Error && "code" in err && (err.code === "EBUSY" || err.code === "EPERM" || err.code === "EACCES")) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        continue;
+      }
+      // Clean up temp file on final failure
+      await fs.unlink(tmpPath).catch(() => {});
+      throw err;
+    }
+  }
 }
 
 export { getDefaultWeights } from "@agentarena/core";
@@ -59,7 +72,7 @@ export {
 
 export interface WriteReportOptions {
   locale?: Locale;
-  /** 用于生成历史排行榜的其他 runs */
+  /** Additional runs used to build the historical leaderboard. */
   allRuns?: BenchmarkRun[];
 }
 
@@ -73,7 +86,7 @@ export async function writeReport(
   await ensureDirectory(run.outputPath);
   const publicRun = sanitizeRun(enrichRunWithScores(run));
 
-  // 生成历史排行榜数据
+  // Build historical leaderboard from prior runs.
   const leaderboard = buildLeaderboard(allRuns, run);
 
   const jsonPath = path.join(run.outputPath, "summary.json");
@@ -82,7 +95,7 @@ export async function writeReport(
   const badgePath = path.join(run.outputPath, "badge.json");
   const prCommentPath = path.join(run.outputPath, "pr-comment.md");
 
-  // 导出带 leaderboard 的 JSON
+  // Export JSON that includes leaderboard data alongside the run.
   const exportData = {
     ...publicRun,
     leaderboard: {

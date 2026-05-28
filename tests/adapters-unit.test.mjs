@@ -42,46 +42,46 @@ test("formatTimeoutMessage produces human-readable message", () => {
 
 test("terminateProcessTree handles invalid PID gracefully", async () => {
   // Should not throw for invalid PID
-  await terminateProcessTree(0);
-  await terminateProcessTree(-1);
+  await assert.doesNotReject(() => terminateProcessTree(0));
+  await assert.doesNotReject(() => terminateProcessTree(-1));
 });
 
 test("terminateProcessTree handles non-existent PID gracefully", async () => {
   // Use a PID that's very unlikely to exist
-  await terminateProcessTree(999999999);
+  await assert.doesNotReject(() => terminateProcessTree(999999999));
 });
 
 // Test event parsing
 test("parseClaudeEvents handles empty input", () => {
   const result = parseClaudeEvents("");
-  assert.ok(typeof result === "object");
-  assert.ok(typeof result.tokenUsage === "number");
-  assert.ok(typeof result.estimatedCostUsd === "number");
-  assert.ok(typeof result.costKnown === "boolean");
+  assert.equal(result.tokenUsage, 0);
+  assert.equal(result.estimatedCostUsd, 0);
+  assert.equal(result.costKnown, false);
 });
 
 test("parseClaudeEvents parses valid JSON events", () => {
   const input = JSON.stringify({ type: "assistant", message: { content: "hello" } });
   const result = parseClaudeEvents(input);
-  assert.ok(typeof result === "object");
-  assert.ok(typeof result.tokenUsage === "number");
+  assert.equal(typeof result.tokenUsage, "number");
+  assert.ok(result.tokenUsage >= 0);
 });
 
 test("parseCodexEvents handles empty input", () => {
   const result = parseCodexEvents("");
-  assert.ok(typeof result === "object");
-  assert.ok(typeof result.tokenUsage === "number");
+  assert.equal(result.tokenUsage, 0);
+  assert.ok(Array.isArray(result.changedFilesHint));
 });
 
 test("parseGeminiEvents handles empty input", () => {
   const result = parseGeminiEvents("");
-  assert.ok(typeof result === "object");
-  assert.ok(typeof result.tokenUsage === "number");
+  assert.equal(result.tokenUsage, 0);
+  assert.equal(result.estimatedCostUsd, 0);
+  assert.equal(result.costKnown, false);
 });
 
 // Test runtime resolution
 test("readCodexConfigDefaults returns an object", async () => {
   const defaults = await readCodexConfigDefaults();
-  assert.ok(typeof defaults === "object");
   assert.ok(defaults !== null);
+  assert.equal(typeof defaults, "object");
 });

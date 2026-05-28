@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { type BenchmarkRun, formatDuration } from "@agentarena/core";
 import type { LeaderboardData } from "./leaderboard.js";
 import {
@@ -297,13 +298,17 @@ function renderLeaderboardSection(_run: BenchmarkRun, leaderboard: LeaderboardDa
 
 export function renderHtml(run: BenchmarkRun, locale: Locale, leaderboard?: LeaderboardData): string {
   const copy = getReportCopy(locale);
+  // Generate a cryptographically secure nonce for inline styles
+  const styleNonce = randomBytes(16).toString("base64url");
+
   return `<!doctype html>
 <html lang="${escapeHtml(locale)}">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="Content-Security-Policy" content="style-src 'nonce-${styleNonce}' 'unsafe-inline'" />
     <title>${escapeHtml(copy.htmlReportTitlePrefix)} ${escapeHtml(run.task.title)}</title>
-    <style>
+    <style nonce="${styleNonce}">
       :root {
         color-scheme: light dark;
         --bg: #f5f1e8;

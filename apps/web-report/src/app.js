@@ -19,18 +19,6 @@ import { stateManager } from "./core/state.js";
 import { initCrossRunEvents } from "./cross-run-events.js";
 import { buildDemoRun } from "./demo-data.js";
 import { translate } from "./i18n.js";
-import { selectAgent, selectRun } from "./selection-handlers.js";
-import {
-  taskIntentSummary as taskIntentSummaryImpl,
-  baselineTaskWarning as baselineTaskWarningImpl,
-  taskMeaningBadges as taskMeaningBadgesImpl,
-  summarizeTaskPrompt as summarizeTaskPromptImpl,
-  summarizeJudges as summarizeJudgesImpl,
-  formatJudgeType as formatJudgeTypeImpl,
-  translateDifficulty as translateDifficultyImpl,
-  translateStatus as translateStatusImpl,
-  statusClass,
-} from "./task-utils.js";
 import { createLauncherModule } from "./launcher/module.js";
 import { createCrossRunRenders } from "./report/cross-run.js";
 import { createDashboardModule } from "./report/dashboard.js";
@@ -52,6 +40,15 @@ import {
   saveScoreConfig as saveScoreConfigImpl,
   updateScoreWeight as updateScoreWeightImpl
 } from "./score-config.js";
+import { selectAgent, selectRun } from "./selection-handlers.js";
+import {
+  baselineTaskWarning as baselineTaskWarningImpl,
+  formatJudgeType as formatJudgeTypeImpl,
+  statusClass,
+  summarizeJudges as summarizeJudgesImpl,
+  summarizeTaskPrompt as summarizeTaskPromptImpl,
+  translateDifficulty as translateDifficultyImpl,
+} from "./task-utils.js";
 import { createTraceReplayModule } from "./trace-replay.js";
 import { formatDuration } from "./utils/format.js";
 import { resultStore } from "./utils/storage.js";
@@ -67,20 +64,14 @@ import {
   fetchCommunityIndex,
   findCommunityRank,
   findJudgeByType,
-  findPreviousComparableRun,
   formatCompositeScore,
   formatDiffPrecisionMetric,
   formatLintMetric,
   formatTestMetric,
   getAgentTrendRows,
   getCachedCommunityData,
-  getCompareResults,
-  getCompositeScoreReasons,
   getCrossRunCompareRows,
   getCrossRunRecommendation,
-  getRunCompareRows,
-  getRunToRunAgentDiff,
-  getRunTrustSummary,
   getRunVerdict,
   getSelectionTrustSummary,
   normalizeScoreWeights,
@@ -181,6 +172,7 @@ function setTextBySelector(selector, value) {
 }
 
 function renderList(element, items) {
+  if (!element) return;
   element.innerHTML = items.map((item) => `<li>${escapeHtml(item)}</li>`).join("");
 }
 
@@ -240,7 +232,7 @@ function updateScoreWeight(key, value) {
 function applyScorePreset(presetId) {
   applyScorePresetImpl(state, presetId, {
     renderScoreWeightsControls,
-    renderWeightSliders: () => renderWeightSlidersImpl(state.scoreWeights),
+    renderWeightSliders: () => renderWeightSlidersImpl(state.scoreWeights, t),
     renderAll: () => {
       if (state.run) {
         renderVerdictHero(state.run);
@@ -256,7 +248,7 @@ function applyScorePreset(presetId) {
 
 // Weight slider generation
 function renderWeightSliders(weights) {
-  renderWeightSlidersImpl(weights);
+  renderWeightSlidersImpl(weights, t);
 }
 
 function recordKey(record) {
@@ -273,15 +265,13 @@ function localText(zh, en) {
 }
 
 function translateDifficulty(d) { return translateDifficultyImpl(d, t); }
-function translateStatus(s) { return translateStatusImpl(s, t); }
+// translateStatus is used via dashboard DI, not as a local wrapper
 
 // providerDisplayName is imported from ./app-helpers.js
 
 // clientRandomId is imported from ./app-helpers.js
 
-function taskIntentSummary(task) { return taskIntentSummaryImpl(task); }
 function baselineTaskWarning(task) { return baselineTaskWarningImpl(task, t); }
-function taskMeaningBadges(task) { return taskMeaningBadgesImpl(task, t); }
 
 function summarizeTaskPrompt(prompt) { return summarizeTaskPromptImpl(prompt); }
 function summarizeJudges(taskPack) { return summarizeJudgesImpl(taskPack, t); }
@@ -519,7 +509,8 @@ function renderStaticText() {
   setText("score-weight-duration-label", t("scoreWeightDuration"));
   setText("score-weight-cost-label", t("scoreWeightCost"));
   const presetButtons = elements.scoreWeightPresets?.querySelectorAll("button[data-score-preset]") ?? [];
-  // Updated to only 3 core presets
+  // Only three presets need translated labels here (correctness-first, efficiency-first,
+  // comprehensive) — the rest use `data-i18n` attributes wired by renderStaticText.
   for (const button of presetButtons) {
     const presetId = button.dataset.scorePreset;
     switch (presetId) {
@@ -583,13 +574,47 @@ function renderStaticText() {
   if (elements.crossRunCloseCompare) {
     elements.crossRunCloseCompare.textContent = t("crossRunCloseCompare");
   }
-  setText("copy-share-card", t("copySummary"));
-  setText("copy-pr-table", t("copyPrTable"));
-  setText("download-share-svg", t("downloadShareSvg"));
+  setTextBySelector('[data-i18n="copyVerdictCard"]', t("copyVerdictCard"));
+  setTextBySelector('[data-i18n="copySummary"]', t("copySummary"));
+  setTextBySelector('[data-i18n="copyPrTable"]', t("copyPrTable"));
+  setTextBySelector('[data-i18n="copyLink"]', t("copyLink"));
+  setTextBySelector('[data-i18n="downloadShareSvg"]', t("downloadShareSvg"));
+  setTextBySelector('[data-i18n="exportMarkdown"]', t("exportMarkdown"));
+  setTextBySelector('[data-i18n="exportHtml"]', t("exportHtml"));
+  setTextBySelector('[data-i18n="exportJson"]', t("exportJson"));
+  setTextBySelector('[data-i18n="importJson"]', t("importJson"));
   setTextBySelector('[data-i18n="teamCostCalculatorTitle"]', t("teamCostCalculatorTitle"));
   setTextBySelector('[data-i18n="teamSizeLabel"]', t("teamSizeLabel"));
   setTextBySelector('[data-i18n="dailyRunsLabel"]', t("dailyRunsLabel"));
   setTextBySelector('[data-i18n="recalculateBtn"]', t("recalculateBtn"));
+  setTextBySelector('[data-i18n="scorePresetLabel"]', t("scorePresetLabel"));
+  setTextBySelector('[data-i18n="scorePresetHint"]', t("scorePresetHint"));
+  setTextBySelector('[data-i18n="scoreWeightsCustomTitle"]', t("scoreWeightsCustomTitle"));
+  setTextBySelector('[data-i18n="scorePresetPracticalBtn"]', t("scorePresetPracticalBtn"));
+  setTextBySelector('[data-i18n="scorePresetBalancedBtn"]', t("scorePresetBalancedBtn"));
+  setTextBySelector('[data-i18n="scorePresetIssueResolutionBtn"]', t("scorePresetIssueResolutionBtn"));
+  setTextBySelector('[data-i18n="scorePresetEfficiencyFirstBtn"]', t("scorePresetEfficiencyFirstBtn"));
+  setTextBySelector('[data-i18n="scorePresetRotatingTasksBtn"]', t("scorePresetRotatingTasksBtn"));
+  setTextBySelector('[data-i18n="scorePresetComprehensiveBtn"]', t("scorePresetComprehensiveBtn"));
+  setTextBySelector('[data-i18n="scoringModeLabel"]', t("scoringModeLabel"));
+  setTextBySelector('[data-i18n="scorePresetPractical"]', t("scorePresetPractical"));
+  setTextBySelector('[data-i18n="scorePresetBalanced"]', t("scorePresetBalanced"));
+  setTextBySelector('[data-i18n="scorePresetIssueResolution"]', t("scorePresetIssueResolution"));
+  setTextBySelector('[data-i18n="scorePresetEfficiencyFirst"]', t("scorePresetEfficiencyFirst"));
+  setTextBySelector('[data-i18n="scorePresetRotatingTasks"]', t("scorePresetRotatingTasks"));
+  setTextBySelector('[data-i18n="scorePresetComprehensive"]', t("scorePresetComprehensive"));
+  setTextBySelector('[data-i18n="inspirationCreditsTitle"]', t("inspirationCreditsTitle"));
+  setTextBySelector('[data-i18n="issueResolutionCreditLabel"]', t("issueResolutionCreditLabel"));
+  setTextBySelector('[data-i18n="efficiencyFirstCreditLabel"]', t("efficiencyFirstCreditLabel"));
+  setTextBySelector('[data-i18n="rotatingTasksCreditLabel"]', t("rotatingTasksCreditLabel"));
+  setTextBySelector('[data-i18n="issueResolutionCredit"]', t("issueResolutionCredit"));
+  setTextBySelector('[data-i18n="efficiencyFirstCredit"]', t("efficiencyFirstCredit"));
+  setTextBySelector('[data-i18n="rotatingTasksCredit"]', t("rotatingTasksCredit"));
+  setTextBySelector('[data-i18n="creditDisclaimer"]', t("creditDisclaimer"));
+  setTextBySelector('[data-i18n="codeReviewTitle"]', t("codeReviewTitle"));
+  setTextBySelector('[data-i18n="codeReviewSelectLabel"]', t("codeReviewSelectLabel"));
+  setTextBySelector('[data-i18n="codeReviewCompareBtn"]', t("codeReviewCompareBtn"));
+  setTextBySelector('[data-i18n="codeReviewEmptyState"]', t("codeReviewEmptyState"));
   if (elements.sidebarToggle) {
     elements.sidebarToggle.setAttribute("aria-label", t("toggleSidebar"));
   }
@@ -787,14 +812,16 @@ function render() {
     elements.resultLoaderMessage.textContent = state.notice ?? "";
     elements.resultLoaderMessage.hidden = !state.notice;
   }
-  renderLauncher();
-  renderRunList();
+  try { renderLauncher(); } catch(e) { console.error("[TRACE] renderLauncher error:", e); }
+  try { renderRunList(); } catch(e) { console.error("[TRACE] renderRunList error:", e); }
 
   if (!state.run) {
     setHidden(elements.runInfo, true);
     setHidden(elements.emptyState, false);
     setHidden(elements.dashboard, true);
     setHidden(elements.communitySection, true);
+    const wsHome = document.querySelector('.workspace-home');
+    if (wsHome) wsHome.classList.remove('hidden');
     traceReplay.hide(); // Clean up setInterval when navigating away
     elements.agentCount.textContent = "0";
     elements.agentList.className = "agent-list empty-state";
@@ -808,6 +835,8 @@ function render() {
   }
 
   renderDashboard(state.run);
+  const wsHome = document.querySelector('.workspace-home');
+  if (wsHome) wsHome.classList.add('hidden');
   renderCommunityView();
 }
 
@@ -1160,7 +1189,6 @@ elements.runList.addEventListener("click", (event) => {
     render();
     return;
   }
-
   const exportBtn = event.target.closest("[data-role='export-run']");
   if (exportBtn) {
     event.stopPropagation();
@@ -1213,6 +1241,15 @@ elements.runInfo.addEventListener("click", (event) => {
   }
 });
 
+elements.runList.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  const runButton = event.target.closest(".run-button[data-run-id]");
+  if (!runButton) return;
+  // Don't intercept Enter/Space on nested action buttons.
+  if (event.target.closest("[data-role]")) return;
+  event.preventDefault();
+  runButton.click();
+});
 elements.agentList.addEventListener("click", (event) => {
   const button = event.target.closest("[data-agent-id]");
   if (!button || !state.run) return;
@@ -1275,16 +1312,40 @@ elements.runCompareTable.addEventListener("click", (event) => {
   selectRun(row.getAttribute("data-compare-run-id"), state, selectionDeps);
 });
 
+elements.runCompareTable.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  const row = event.target.closest("[data-compare-run-id]");
+  if (!row) return;
+  event.preventDefault();
+  row.click();
+});
+
 elements.runDiffTable.addEventListener("click", (event) => {
   const row = event.target.closest("[data-run-diff-agent-id]");
   if (!row || !state.run) return;
   selectAgent(row.getAttribute("data-run-diff-agent-id"), state, selectionDeps);
 });
 
+elements.runDiffTable.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  const row = event.target.closest("[data-run-diff-agent-id]");
+  if (!row || !state.run) return;
+  event.preventDefault();
+  row.click();
+});
+
 elements.agentTrendTable.addEventListener("click", (event) => {
   const row = event.target.closest("[data-agent-trend-run-id]");
   if (!row) return;
   selectRun(row.getAttribute("data-agent-trend-run-id"), state, selectionDeps);
+});
+
+elements.agentTrendTable.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  const row = event.target.closest("[data-agent-trend-run-id]");
+  if (!row) return;
+  event.preventDefault();
+  row.click();
 });
 
 elements.judgeSearch.addEventListener("input", (event) => {
@@ -1424,17 +1485,39 @@ initCrossRunEvents({
   renderCrossRunSelectionListImpl
 });
 
-// Feature 5: Sidebar toggle for mobile
+// Feature 5: Sidebar toggle for mobile, with focus management for accessibility.
+function setSidebarOpen(open) {
+  state.sidebarOpen = open;
+  elements.sidebar.classList.toggle("sidebar-open", open);
+  elements.sidebarBackdrop.classList.toggle("active", open);
+  elements.sidebarToggle.setAttribute("aria-expanded", String(open));
+  if (open) {
+    // Move focus into the sidebar so screen reader / keyboard users
+    // start inside the now-visible region.
+    const firstFocusable = /** @type {HTMLElement | null} */ (elements.sidebar.querySelector(
+      'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    ));
+    if (firstFocusable) setTimeout(() => firstFocusable.focus(), 0);
+  } else {
+    // Return focus to the toggle that opened the sidebar.
+    setTimeout(() => elements.sidebarToggle.focus(), 0);
+  }
+}
+
 elements.sidebarToggle.addEventListener("click", () => {
-  state.sidebarOpen = !state.sidebarOpen;
-  elements.sidebar.classList.toggle("sidebar-open", state.sidebarOpen);
-  elements.sidebarBackdrop.classList.toggle("active", state.sidebarOpen);
+  setSidebarOpen(!state.sidebarOpen);
 });
 
 elements.sidebarBackdrop.addEventListener("click", () => {
-  state.sidebarOpen = false;
-  elements.sidebar.classList.remove("sidebar-open");
-  elements.sidebarBackdrop.classList.remove("active");
+  setSidebarOpen(false);
+});
+
+// Escape closes the open mobile sidebar.
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && state.sidebarOpen) {
+    event.preventDefault();
+    setSidebarOpen(false);
+  }
 });
 
 // Error state handlers

@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
+import path from "node:path";
 import test from "node:test";
 
 import {
   DEFAULT_AGENT_TIMEOUT_MS,
+  findExecutableOnPath,
   formatTimeoutMessage,
+  runProcess,
   safeNumber,
   sleep,
-  runProcess,
 } from "../packages/adapters/dist/process-utils.js";
 
 test("DEFAULT_AGENT_TIMEOUT_MS is 15 minutes", () => {
@@ -121,4 +123,121 @@ test("runProcess handles command not found", async () => {
     5000
   );
   assert.ok(result.exitCode !== 0 || result.error);
+});
+
+// --- Output truncation (previously had NO coverage) ---
+//
+// MAX_PROCESS_OUTPUT_BYTES is 50 MB. To verify the truncation cap actually
+// fires we have to push slightly more than that through the pipe — these two
+// tests are intentionally heavy. Generating ~52 MB takes a couple of seconds
+// on a modern dev box.
+
+const MAX_PROCESS_OUTPUT_BYTES = 50 * 1024 * 1024;
+const MAX_ALLOWED_OUTPUT = MAX_PROCESS_OUTPUT_BYTES + 4 * 1024;
+
+test("runProcess truncates stdout that exceeds MAX_PROCESS_OUTPUT_BYTES", async () => {
+  // Write ~52 MB to stdout in 1-MB chunks. The runProcess pipeline must cap
+  // the captured output and append a truncation marker so benchmark agents
+  // producing huge logs can't OOM the parent.
+  const script = `
+    const chunk = "a".repeat(1024 * 1024);
+    for (let i = 0; i < 52; i++) {
+      process.stdout.write(chunk);
+    }
+  `;
+  const result = await runProcess(
+    process.execPath,
+    ["-e", script],
+    process.cwd(),
+    60_000
+  );
+  assert.equal(result.timedOut, false);
+  assert.ok(
+    result.stdout.length <= MAX_ALLOWED_OUTPUT,
+    `Expected stdout <= ${MAX_ALLOWED_OUTPUT} bytes, got ${result.stdout.length}`
+  );
+  assert.match(result.stdout, /truncated/i, `Expected truncation marker in stdout`);
+});
+
+test("runProcess truncates stderr that exceeds MAX_PROCESS_OUTPUT_BYTES", async () => {
+  const script = `
+    const chunk = "e".repeat(1024 * 1024);
+    for (let i = 0; i < 52; i++) {
+      process.stderr.write(chunk);
+    }
+  `;
+  const result = await runProcess(
+    process.execPath,
+    ["-e", script],
+    process.cwd(),
+    60_000
+  );
+  assert.ok(
+    result.stderr.length <= MAX_ALLOWED_OUTPUT,
+    `Expected stderr <= ${MAX_ALLOWED_OUTPUT} bytes, got ${result.stderr.length}`
+  );
+  assert.match(result.stderr, /truncated/i);
+});
+
+// --- terminateProcessTree (previously had NO coverage) ---
+
+test("terminateProcessTree is a no-op for pid <= 0", async () => {
+  // Import here so we don't trip the entry-point lint rule.
+  const { terminateProcessTree } = await import("../packages/adapters/dist/process-utils.js");
+  // Should not throw, should resolve quickly even for invalid pids.
+  await terminateProcessTree(0);
+  await terminateProcessTree(-1);
+});
+
+test("terminateProcessTree kills a real child process", async () => {
+  const { spawn } = await import("node:child_process");
+  const { terminateProcessTree } = await import("../packages/adapters/dist/process-utils.js");
+
+  const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], {
+    stdio: "ignore",
+    detached: process.platform !== "win32",
+  });
+
+  // Wait for the child to actually be running before we try to kill it.
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.ok(child.pid, "child should have a pid");
+
+  const exited = new Promise((resolve) => child.on("exit", resolve));
+  await terminateProcessTree(child.pid);
+  // Within a generous window, the child must have exited.
+  const exitResult = await Promise.race([
+    exited.then(() => "exited"),
+    new Promise((resolve) => setTimeout(() => resolve("timeout"), 4000)),
+  ]);
+  assert.equal(exitResult, "exited", "child was not terminated within 4s");
+});
+
+// --- findExecutableOnPath ---
+
+test("findExecutableOnPath finds node", async () => {
+  // On Windows, X_OK may not work correctly; skip if result is undefined
+  const result = await findExecutableOnPath(["node"]);
+  if (result === undefined && process.platform === "win32") {
+    // Windows X_OK behavior: skip gracefully
+    assert.ok(true, "skipping on Windows where X_OK may not work");
+    return;
+  }
+  assert.ok(result, "should find node on PATH");
+  assert.ok(result.includes("node"), `result should contain 'node': ${result}`);
+});
+
+test("findExecutableOnPath returns undefined for nonexistent binary", async () => {
+  const result = await findExecutableOnPath(["nonexistent-binary-xyz-99999"]);
+  assert.equal(result, undefined);
+});
+
+test("findExecutableOnPath returns first match from candidates", async () => {
+  // On Windows, X_OK may not work as expected; use process.execPath basename as a known executable
+  const nodeExe = path.basename(process.execPath);
+  const result = await findExecutableOnPath(["nonexistent-1", nodeExe, "nonexistent-2"]);
+  if (result === undefined && process.platform === "win32") {
+    assert.ok(true, "skipping on Windows where X_OK may not work");
+    return;
+  }
+  assert.ok(result, `should find ${nodeExe}`);
 });

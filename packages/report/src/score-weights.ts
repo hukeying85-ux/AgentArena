@@ -49,6 +49,8 @@ export function filterApplicableWeights(
   const hasTokenEfficiency = typeof result.tokenEfficiencyScore === "number";
   const hasResolutionRate = typeof result.sweBench?.resolutionRate === "number";
   const hasAcceptanceRate = typeof result.cursorBench?.acceptanceRate === "number";
+  const hasPatchValidation = typeof result.sweBench?.patchValidationResult === "object"
+    && result.sweBench?.patchValidationResult !== null;
 
   const applicable: Record<string, number> = {};
   for (const [key, weight] of Object.entries(weights)) {
@@ -56,8 +58,8 @@ export function filterApplicableWeights(
     if (key === "tokenEfficiency" && !hasTokenEfficiency) continue;
     if (key === "resolutionRate" && !hasResolutionRate) continue;
     if (key === "acceptanceRate" && !hasAcceptanceRate) continue;
-    if (key === "failToPassTests" && !hasResolutionRate) continue;
-    if (key === "passToPassTests" && !hasResolutionRate) continue;
+    if (key === "failToPassTests" && !hasPatchValidation) continue;
+    if (key === "passToPassTests" && !hasPatchValidation) continue;
     applicable[key] = weight;
   }
   return applicable;

@@ -378,7 +378,7 @@ export class QwenCodeAdapter implements AgentAdapter {
       resolvedRuntime.effectiveModel
     );
 
-    const changedFilesHint = await getChangedFilesFromGit(context.workspacePath);
+    const changedFilesHint = (await getChangedFilesFromGit(context.workspacePath)).files;
 
     let summary: string;
     if (execution.error) {
@@ -394,7 +394,7 @@ export class QwenCodeAdapter implements AgentAdapter {
     }
 
     await context.trace({
-      type: "adapter.qwen-code.result",
+      type: "adapter.qwen.result",
       message: execution.exitCode === 0 ? "Qwen Code CLI finished successfully" : "Qwen Code CLI failed",
       metadata: {
         exitCode: execution.exitCode,

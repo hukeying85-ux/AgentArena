@@ -1,17 +1,17 @@
+import { escapeHtml, formatRelativeTime, setHidden } from "../app-helpers.js";
 import { renderBarChart, renderComparisonBarChart, renderRadarChart } from "../components/charts.js";
-import { escapeHtml, setHidden } from "../app-helpers.js";
-import {
-  summarizeRun, runtimeIdentity, resultLabel, baseAgentLabel,
-  getRunVerdict, getRunCompareRows, getCompareResults,
-  findPreviousComparableRun, getRunToRunAgentDiff, getAgentTrendRows,
-  getRunTrustSummary, getSelectionTrustSummary
-} from "../view-model/comparison.js";
-import { formatCompositeScore, getCompositeScoreReasons } from "../view-model/scoring.js";
-import {
-  taskIntentSummary, baselineTaskWarning, taskMeaningBadges,
-  formatJudgeType, translateStatus, statusClass
+import {baselineTaskWarning, 
+  formatJudgeType, statusClass, 
+  taskIntentSummary, taskMeaningBadges,translateStatus 
 } from "../task-utils.js";
 import { createVirtualList } from "../utils/virtual-list.js";
+import {baseAgentLabel,
+  findPreviousComparableRun, getAgentTrendRows,getCompareResults,getRunCompareRows, getRunToRunAgentDiff, 
+  getRunTrustSummary, 
+  getRunVerdict, getSelectionTrustSummary, resultLabel, runtimeIdentity, 
+  summarizeRun 
+} from "../view-model/comparison.js";
+import { formatCompositeScore, getCompositeScoreReasons } from "../view-model/scoring.js";
 
 const VIRTUAL_LIST_THRESHOLD = 50;
 let runListVirtual = null;
@@ -19,9 +19,27 @@ let runListVirtual = null;
 /**
  * Create the dashboard module.
  *
+ * DI CONTRACT (untyped — plain JS, no interface):
+ * The `deps` object must contain ALL of the following properties. Missing
+ * properties will be `undefined` at runtime, causing silent failures in
+ * render functions. The corresponding construction site is app.js lines 388-418.
+ *
+ * Required deps:
+ *   state, elements, judgeFilters, compareFilters, runCompareFilters,
+ *   t, localText, formatDuration, formatCost, recordKey,
+ *   runtimeVerificationLabel, getArchivedScoreModeLabel, getScoreModeLabel,
+ *   runFocusLine, formatDiffPrecisionMetric, formatTestMetric, formatLintMetric,
+ *   findJudgeByType, diffPrecisionScore, renderStepCards, renderJudgeCards,
+ *   renderDiff, renderMarkdownBlock, renderInlineAgentDetail,
+ *   renderCodeReviewSection, renderTeamCostCalculator, setupShareActions,
+ *   buildShareCard, buildLeaderboard
+ *
  * Note: Pure utility functions (escapeHtml, formatDuration, statusClass, etc.)
  * are imported directly to reduce the DI surface. Only state, elements,
  * and render callbacks need to be injected.
+ *
+ * RENDER ORDER: renderDashboard() reads DOM elements created by renderRunList()
+ * in app.js. See app.js lines 797-808 for the ordering constraint.
  */
 export function createDashboardModule(deps) {
   const {
@@ -56,6 +74,13 @@ export function createDashboardModule(deps) {
     buildLeaderboard
   } = deps;
 
+  // Shared helper: format a delta value with +/- sign and optional unit
+  const formatDelta = (value, unit = "") => {
+    if (value === null || value === undefined) return "-";
+    const sign = value > 0 ? "+" : "";
+    return `${sign}${typeof value === "number" && unit === "$" ? value.toFixed(4) : value}${unit}`;
+  };
+
 /**
  * Render an enhanced empty state with icon, title, message, and optional CTA button
  * @param {Object} options
@@ -82,9 +107,9 @@ function renderRunInfo(run) {
   elements.runInfo.innerHTML = `
     <div class="panel-header">
       <h2>${escapeHtml(t("runInfoTitle"))}</h2>
-      <span class="muted">${escapeHtml(run.runId)}</span>
+      <span class="muted">#${escapeHtml(run.runId.slice(-4))}</span>
     </div>
-    <p class="muted">${escapeHtml(t("createdAt"))} ${escapeHtml(run.createdAt)}</p>
+    <p class="muted">${escapeHtml(t("createdAt"))} ${escapeHtml(formatRelativeTime(run.createdAt, localText))}</p>
     <p class="muted">${escapeHtml(t("taskSchema"))} ${escapeHtml(run.task.schemaVersion)}</p>
     <p class="muted"><strong>${escapeHtml(localText("归档评分模式", "Archived Score Mode"))}:</strong> ${escapeHtml(archivedScoreMode)}</p>
     <p class="muted"><strong>${escapeHtml(localText("当前评分模式", "Active Score Mode"))}:</strong> ${escapeHtml(activeScoreMode)}</p>
@@ -99,7 +124,7 @@ function renderRunInfo(run) {
     </div>
     <p class="muted"><strong>${escapeHtml(localText("目标", "Objective"))}:</strong> ${escapeHtml(intent.objective || "n/a")}</p>
     <p class="muted"><strong>${escapeHtml(localText("Judge 依据", "Judge Rationale"))}:</strong> ${escapeHtml(intent.rationale || "n/a")}</p>
-    <p class="warning-text">${escapeHtml(baselineTaskWarning(run.task))}</p>
+    <p class="warning-text">${escapeHtml(baselineTaskWarning(run.task, t))}</p>
   `;
   setHidden(elements.runInfo, false);
 }
@@ -110,7 +135,7 @@ function renderTaskBrief(run) {
   const repoTypes = intent.repoTypes && intent.repoTypes !== "generic" ? intent.repoTypes : "generic";
   const resultCount = run.results.length;
   const variantLabels = run.results.map((result) => resultLabel(result)).join(", ");
-  const badges = taskMeaningBadges(run.task);
+  const badges = taskMeaningBadges(run.task, t);
 
   elements.taskBrief.innerHTML = `
     <div class="panel-header">
@@ -142,7 +167,7 @@ function renderTaskBrief(run) {
         <p>${escapeHtml(variantLabels || "n/a")}</p>
       </article>
     </div>
-    <p class="warning-text">${escapeHtml(baselineTaskWarning(run.task))}</p>
+    <p class="warning-text">${escapeHtml(baselineTaskWarning(run.task, t))}</p>
   `;
 }
 
@@ -153,10 +178,6 @@ function renderRunListItem(run) {
 
   return `
     <div class="run-button ${active}" role="button" tabindex="0" data-run-id="${escapeHtml(run.runId)}" aria-label="${escapeHtml(run.task.title)}">
-      <strong>${escapeHtml(run.task.title)}</strong>
-      <div class="meta">${escapeHtml(run.createdAt)}</div>
-      <div class="meta">${successCount}/${run.results.length} ${localText("成功", "success")} | ${escapeHtml(run.runId)}</div>
-      <div class="meta">${hasMarkdown ? escapeHtml(t("linkedMarkdown")) : escapeHtml(t("jsonOnly"))}</div>
       <div class="run-actions">
         <button type="button" class="run-select-btn" data-role="select-run" data-run-id="${escapeHtml(run.runId)}" title="${escapeHtml(localText("打开这个 run", "Open this run"))}" aria-label="${escapeHtml(localText("打开这个 run", "Open this run"))}">
           <svg class="icon"><use href="#icon-open"/></svg>
@@ -171,6 +192,10 @@ function renderRunListItem(run) {
           ${escapeHtml(localText("移除", "Remove"))}
         </button>
       </div>
+      <strong>${escapeHtml(run.task.title)}</strong>
+      <div class="meta">${escapeHtml(formatRelativeTime(run.createdAt, localText))}</div>
+      <div class="meta">${successCount}/${run.results.length} ${localText("成功", "success")}</div>
+      <div class="meta">${hasMarkdown ? escapeHtml(t("linkedMarkdown")) : escapeHtml(t("jsonOnly"))}</div>
     </div>
   `;
 }
@@ -317,14 +342,14 @@ function renderRunCompareTable() {
           .map(({ run, summary }) => {
             const isActive = run.runId === state.selectedRunId ? "active" : "";
             return `
-              <tr class="${isActive}" data-compare-run-id="${escapeHtml(run.runId)}">
-                <td><code>${escapeHtml(run.runId)}</code></td>
+              <tr class="${isActive}" data-compare-run-id="${escapeHtml(run.runId)}" tabindex="0" role="button" aria-label="${escapeHtml(localText("打开 run", "Open run") + " " + run.runId)}">
+                <td><code>#${escapeHtml(run.runId.slice(-4))}</code></td>
                 <td>${escapeHtml(run.task.title)}</td>
-                <td>${escapeHtml(run.createdAt)}</td>
-                <td>${summary.successCount}/${summary.totalAgents}</td>
-                <td>${summary.totalAgents}</td>
-                <td>${summary.totalTokens}</td>
-                <td>$${summary.knownCost.toFixed(2)}</td>
+                <td>${escapeHtml(formatRelativeTime(run.createdAt, localText))}</td>
+                <td>${escapeHtml(String(summary.successCount))}/${escapeHtml(String(summary.totalAgents))}</td>
+                <td>${escapeHtml(String(summary.totalAgents))}</td>
+                <td>${escapeHtml(String(summary.totalTokens))}</td>
+                <td>$${escapeHtml(summary.knownCost.toFixed(2))}</td>
                 <td>${state.markdownByRunId.has(run.runId) ? escapeHtml(t("linkedMarkdown")) : escapeHtml(localText("无", "none"))}</td>
               </tr>
             `;
@@ -352,12 +377,6 @@ function renderRunDiffTableV2() {
     return;
   }
 
-  const formatDelta = (value, unit = "") => {
-    if (value === null || value === undefined) return "-";
-    const sign = value > 0 ? "+" : "";
-    return `${sign}${typeof value === "number" && unit === "$" ? value.toFixed(4) : value}${unit}`;
-  };
-
   elements.runDiffTable.innerHTML = `
     <p class="muted">${escapeHtml(localText("对比", "Compared to"))}: <code>${escapeHtml(previousRun.runId)}</code></p>
     <table class="compare-table">
@@ -374,7 +393,7 @@ function renderRunDiffTableV2() {
       </thead>
       <tbody>
         ${rows.map((row) => `
-          <tr data-run-diff-agent-id="${escapeHtml(row.agentId)}" class="${row.agentId === state.selectedAgentId ? "active" : ""}">
+          <tr data-run-diff-agent-id="${escapeHtml(row.agentId)}" class="${row.agentId === state.selectedAgentId ? "active" : ""}" tabindex="0" role="button" aria-label="${escapeHtml(localText("选择 agent", "Select agent") + " " + (row.currentResult?.displayLabel ?? row.previousResult?.displayLabel ?? row.agentId))}">
             <td>${escapeHtml(row.currentResult?.displayLabel ?? row.previousResult?.displayLabel ?? row.agentId)}</td>
             <td>${escapeHtml(row.versionChange ?? "-")}</td>
             <td>${escapeHtml(row.statusChange)}</td>
@@ -405,12 +424,6 @@ function renderAgentTrendTableV2(run) {
     return;
   }
 
-  const formatDelta = (value, unit = "") => {
-    if (value === null || value === undefined) return "-";
-    const sign = value > 0 ? "+" : "";
-    return `${sign}${typeof value === "number" && unit === "$" ? value.toFixed(4) : value}${unit}`;
-  };
-
   elements.agentTrendTable.innerHTML = `
     <table class="compare-table">
       <thead>
@@ -426,12 +439,12 @@ function renderAgentTrendTableV2(run) {
       </thead>
       <tbody>
         ${rows.map((row) => `
-          <tr data-agent-trend-run-id="${escapeHtml(row.run.runId)}" class="${row.run.runId === state.selectedRunId ? "active" : ""}">
-            <td><code>${escapeHtml(row.run.runId.slice(0, 16))}</code></td>
-            <td>${escapeHtml(row.runtime?.version ?? "unknown")}</td>
-            <td><span class="status-badge ${row.result.status === "success" ? "status-success" : "status-failed"}">${escapeHtml(translateStatus(row.result.status))}</span></td>
+          <tr data-agent-trend-run-id="${escapeHtml(row.run.runId)}" class="${row.run.runId === state.selectedRunId ? "active" : ""}" tabindex="0" role="button" aria-label="${escapeHtml(localText("打开 run", "Open run") + " " + row.run.runId)}">
+            <td><code>#${escapeHtml(row.run.runId.slice(-4))}</code></td>
+            <td>${escapeHtml(row.runtime?.version ?? "—")}</td>
+            <td><span class="status-badge ${row.result.status === "success" ? "status-success" : "status-failed"}">${escapeHtml(translateStatus(row.result.status, t))}</span></td>
             <td>${escapeHtml(formatDuration(row.result.durationMs))}</td>
-            <td>${row.result.tokenUsage.toLocaleString()}</td>
+            <td>${typeof row.result.tokenUsage === "number" && !Number.isNaN(row.result.tokenUsage) ? row.result.tokenUsage.toLocaleString() : "—"}</td>
             <td>${row.result.costKnown ? "$" + row.result.estimatedCostUsd.toFixed(4) : "n/a"}</td>
             <td>${row.judgeDelta !== null ? escapeHtml(formatDelta(row.judgeDelta)) : "-"}</td>
           </tr>
@@ -449,7 +462,7 @@ function renderPreflights(run) {
         <article class="preflight-card ${escapeHtml(preflight.status)}">
           <div class="panel-header">
             <h3>${escapeHtml(resultLabel(preflight))}</h3>
-            <span class="status-badge ${statusClass(preflight.status)}">${escapeHtml(translateStatus(preflight.status))}</span>
+            <span class="status-badge ${statusClass(preflight.status)}">${escapeHtml(translateStatus(preflight.status, t))}</span>
           </div>
           <p>${escapeHtml(preflight.summary)}</p>
           <p class="muted">${escapeHtml(localText("基础 Agent", "Base Agent"))}: ${escapeHtml(baseAgentLabel(preflight))}</p>
@@ -509,7 +522,7 @@ function renderAgentList(run) {
         <button class="agent-button ${active}" type="button" data-agent-id="${escapeHtml(recordKey(result))}" style="width:100%;height:100%;text-align:left;">
           <div class="row">
             <strong>${escapeHtml(resultLabel(result))}</strong>
-            <span class="status-badge ${statusClass(result.status)}">${escapeHtml(translateStatus(result.status))}</span>
+            <span class="status-badge ${statusClass(result.status)}">${escapeHtml(translateStatus(result.status, t))}</span>
           </div>
           <div class="meta">
             ${escapeHtml(runtime.provider)} | ${escapeHtml(runtime.model)} | ${escapeHtml(runtime.version)} | ${escapeHtml(formatDuration(result.durationMs))} | ${escapeHtml(formatCost(result))}
@@ -527,7 +540,7 @@ function renderAgentList(run) {
           <button class="agent-button ${active}" type="button" data-agent-id="${escapeHtml(recordKey(result))}">
             <div class="row">
               <strong>${escapeHtml(resultLabel(result))}</strong>
-              <span class="status-badge ${statusClass(result.status)}">${escapeHtml(translateStatus(result.status))}</span>
+              <span class="status-badge ${statusClass(result.status)}">${escapeHtml(translateStatus(result.status, t))}</span>
             </div>
             <div class="meta">
               ${escapeHtml(runtime.provider)} | ${escapeHtml(runtime.model)} | ${escapeHtml(runtime.version)} | ${escapeHtml(formatDuration(result.durationMs))} | ${escapeHtml(formatCost(result))}
@@ -548,7 +561,7 @@ function populateJudgeFilters(run) {
   const currentType = judgeFilters.type;
   elements.judgeTypeFilter.innerHTML = [
     `<option value="all">${escapeHtml(t("judgeTypeAll"))}</option>`,
-    ...judgeTypes.map((type) => `<option value="${escapeHtml(type)}">${escapeHtml(formatJudgeType(type))}</option>`)
+    ...judgeTypes.map((type) => `<option value="${escapeHtml(type)}">${escapeHtml(formatJudgeType(type, t))}</option>`)
   ].join("");
   elements.judgeTypeFilter.value = judgeTypes.includes(currentType) ? currentType : "all";
 }
@@ -632,7 +645,7 @@ function renderVerdictHero(run) {
   const best = verdict.bestAgent;
   const fastest = verdict.fastest;
   const cheapest = verdict.lowestKnownCost;
-  const badges = taskMeaningBadges(run.task);
+  const badges = taskMeaningBadges(run.task, t);
   const verdictText = generateVerdictSummary(run);
 
   const badgeHtml = badges.map((b) => `<span class="meaning-badge">${escapeHtml(b)}</span>`).join("");
@@ -673,9 +686,12 @@ function renderVerdictHero(run) {
 
     winnerHtml = `
       <div class="winner-card">
-        <span class="winner-eyebrow">${escapeHtml(localText("综合最佳 Agent", "Overall Best Agent"))}</span>
+        <span class="winner-eyebrow">
+          <svg class="icon" aria-hidden="true"><use href="#icon-trophy"/></svg>
+          ${escapeHtml(localText("综合最佳 Agent", "Overall Best Agent"))}
+        </span>
         <span class="winner-name">${escapeHtml(resultLabel(best))}</span>
-        <span class="winner-model">${escapeHtml(runtime.model)} · ${escapeHtml(runtime.reasoning)}</span>
+        ${runtime.model ? `<span class="winner-model">${escapeHtml(runtime.model)} · ${escapeHtml(runtime.reasoning)}</span>` : ""}
         <div class="winner-stats">
           <div class="winner-stat">
             <span class="winner-stat-label">${escapeHtml(localText("综合分", "Composite Score"))}</span>
@@ -699,7 +715,7 @@ function renderVerdictHero(run) {
           </div>
           <div class="winner-stat">
             <span class="winner-stat-label">${escapeHtml(localText("令牌数", "Tokens"))}</span>
-            <span class="winner-stat-value">${best.tokenUsage}</span>
+            <span class="winner-stat-value">${escapeHtml(String(best.tokenUsage ?? "N/A"))}</span>
           </div>
         </div>
         ${scoreReasons.length > 0 ? `<p class="muted">${escapeHtml(localText("领先原因", "Why it leads"))}: ${escapeHtml(scoreReasons.join(" · "))}</p>` : ""}
@@ -737,11 +753,11 @@ function renderVerdictHero(run) {
           </div>
           <div class="stat-item">
             <span class="stat-label">${escapeHtml(localText("令牌数", "Tokens"))}</span>
-            <span class="stat-value">${summary.totalTokens.toLocaleString()}</span>
+            <span class="stat-value">${typeof summary.totalTokens === "number" && !Number.isNaN(summary.totalTokens) ? summary.totalTokens.toLocaleString() : "—"}</span>
           </div>
           <div class="stat-item">
             <span class="stat-label">${escapeHtml(t("metrics.knownCost"))}</span>
-            <span class="stat-value">$${summary.knownCost.toFixed(2)}</span>
+            <span class="stat-value">${typeof summary.knownCost === "number" && !Number.isNaN(summary.knownCost) ? "$" + summary.knownCost.toFixed(2) : "—"}</span>
           </div>
         </div>
       </div>
@@ -1011,13 +1027,13 @@ function renderCompareTableV2(run) {
             const barColor = passPercent === 100 ? "var(--success)" : passPercent >= 50 ? "var(--warning)" : "var(--danger)";
 
             return `
-              <tr class="${rowClass}" data-compare-agent-id="${escapeHtml(key)}" tabindex="0">
+              <tr class="${rowClass}" data-compare-agent-id="${escapeHtml(key)}" tabindex="0" role="button" aria-label="${escapeHtml(localText("选择 agent", "Select agent") + " " + resultLabel(result))}">
                 <td class="compare-rank">${medal || index + 1}</td>
                 <td><strong>${escapeHtml(resultLabel(result))}</strong><br /><code>${escapeHtml(baseAgentLabel(result))}</code></td>
                 <td><span class="compare-model">${escapeHtml(runtime.model)}</span><br /><span class="muted" style="font-size:0.75rem">${escapeHtml(runtime.reasoning)}</span></td>
                 <td>${escapeHtml(runtime.version)}</td>
                 <td>${escapeHtml(runtimeVerificationLabel(result))}</td>
-                <td><span class="status-badge ${statusClass(result.status)}">${escapeHtml(translateStatus(result.status))}</span></td>
+                <td><span class="status-badge ${statusClass(result.status)}">${escapeHtml(translateStatus(result.status, t))}</span></td>
                 <td>${escapeHtml(formatCompositeScore(result, run, state.scoreWeights))}</td>
                 <td>
                   <div class="judge-bar-wrap">
@@ -1026,12 +1042,12 @@ function renderCompareTableV2(run) {
                   <span class="judge-bar-label">${passedJudges}/${totalJudges} (${passPercent}%)</span>
                 </td>
                 <td>${escapeHtml(formatDuration(result.durationMs))}</td>
-                <td>${result.tokenUsage}</td>
+                <td>${escapeHtml(String(result.tokenUsage ?? "N/A"))}</td>
                 <td>${escapeHtml(formatCost(result))}</td>
                 <td>${escapeHtml(formatTestMetric(result))}</td>
                 <td>${escapeHtml(formatLintMetric(result))}</td>
                 <td>${escapeHtml(formatDiffPrecisionMetric(result))}</td>
-                <td>${result.changedFiles.length}</td>
+                <td>${escapeHtml(String(result.changedFiles.length))}</td>
                 <td>${tags.join(" ")}</td>
               </tr>
               ${key === state.expandedCompareAgentId ? `<tr class="compare-detail-row"><td colspan="16">${renderInlineAgentDetail(result)}</td></tr>` : ""}
@@ -1040,14 +1056,17 @@ function renderCompareTableV2(run) {
           .join("")}
       </tbody>
     </table>
-    ${!showAll ? `<div class="compare-show-more"><button class="btn-link" onclick="window.__showAllCompare && window.__showAllCompare()">${escapeHtml(localText(`显示全部 ${results.length} 个变体`, `Show all ${results.length} variants`))}</button></div>` : ""}
+    ${!showAll ? `<div class="compare-show-more"><button class="btn-link" data-action="show-all-compare">${escapeHtml(localText(`显示全部 ${results.length} 个变体`, `Show all ${results.length} variants`))}</button></div>` : ""}
   `;
 
-  // Set up show-all handler
-  window.__showAllCompare = () => {
-    state._compareShowAll = true;
-    renderCompareTableV2(run);
-  };
+  // Set up show-all handler via event delegation (avoids global namespace pollution)
+  const showAllBtn = container.querySelector('[data-action="show-all-compare"]');
+  if (showAllBtn) {
+    showAllBtn.addEventListener('click', () => {
+      state._compareShowAll = true;
+      renderCompareTableV2(run);
+    });
+  }
 
   // Render radar charts for expanded agent detail panels
   const radarContainers = elements.compareTable?.querySelectorAll?.('.agent-radar-chart') || [];
@@ -1088,7 +1107,7 @@ function renderSelectedAgentV2() {
   const testJudge = findJudgeByType(result, "test-result");
   const lintJudge = findJudgeByType(result, "lint-check");
   const judgeKinds =
-    Array.from(new Set(result.judgeResults.map((judge) => formatJudgeType(judge.type)))).join(", ") ||
+    Array.from(new Set(result.judgeResults.map((judge) => formatJudgeType(judge.type, t)))).join(", ") ||
     localText("无", "None");
 
   elements.resultSummary.innerHTML = `
@@ -1101,15 +1120,15 @@ function renderSelectedAgentV2() {
       <div class="summary-row"><span>${escapeHtml(localText("推理", "Reasoning"))}</span><strong>${escapeHtml(runtime.reasoning)}</strong></div>
       <div class="summary-row"><span>${escapeHtml(localText("版本", "Version"))}</span><strong>${escapeHtml(runtime.version)}</strong></div>
       <div class="summary-row"><span>${escapeHtml(localText("可信度", "Verification"))}</span><strong>${escapeHtml(runtimeVerificationLabel(result))}</strong></div>
-      <div class="summary-row"><span>${escapeHtml(localText("状态", "Status"))}</span><strong>${escapeHtml(translateStatus(result.status))}</strong></div>
+      <div class="summary-row"><span>${escapeHtml(localText("状态", "Status"))}</span><strong>${escapeHtml(translateStatus(result.status, t))}</strong></div>
       <div class="summary-row"><span>${escapeHtml(localText("综合分", "Composite Score"))}</span><strong>${escapeHtml(formatCompositeScore(result, state.run, state.scoreWeights))}</strong></div>
       <div class="summary-row"><span>${escapeHtml(localText("耗时", "Duration"))}</span><strong>${escapeHtml(formatDuration(result.durationMs))}</strong></div>
-      <div class="summary-row"><span>${escapeHtml(t("metrics.tokens"))}</span><strong>${result.tokenUsage}</strong></div>
+      <div class="summary-row"><span>${escapeHtml(t("metrics.tokens"))}</span><strong>${escapeHtml(String(result.tokenUsage ?? "N/A"))}</strong></div>
       <div class="summary-row"><span>${escapeHtml(localText("成本", "Cost"))}</span><strong>${escapeHtml(formatCost(result))}</strong></div>
       <div class="summary-row"><span>${escapeHtml(localText("测试结果", "Test Result"))}</span><strong>${escapeHtml(formatTestMetric(result))}</strong></div>
       <div class="summary-row"><span>${escapeHtml(localText("Lint 结果", "Lint Result"))}</span><strong>${escapeHtml(formatLintMetric(result))}</strong></div>
       <div class="summary-row"><span>${escapeHtml(localText("Diff 精准度", "Diff Precision"))}</span><strong>${escapeHtml(formatDiffPrecisionMetric(result))}</strong></div>
-      <div class="summary-row"><span>${escapeHtml(localText("改动文件", "Changed Files"))}</span><strong>${result.changedFiles.length}</strong></div>
+      <div class="summary-row"><span>${escapeHtml(localText("改动文件", "Changed Files"))}</span><strong>${escapeHtml(String(result.changedFiles.length))}</strong></div>
       <div class="summary-row"><span>${escapeHtml(localText("Judge 类型", "Judge Types"))}</span><strong>${escapeHtml(judgeKinds)}</strong></div>
       ${testJudge ? `<div class="summary-row"><span>${escapeHtml(localText("测试解析器", "Test Parser"))}</span><strong>${escapeHtml(testJudge.parser ?? "auto")}</strong></div>` : ""}
       ${lintJudge ? `<div class="summary-row"><span>${escapeHtml(localText("Lint 解析器", "Lint Parser"))}</span><strong>${escapeHtml(lintJudge.parser ?? "auto")}</strong></div>` : ""}
@@ -1189,10 +1208,14 @@ function renderRecommendationCard(run) {
   if (!el) return;
   const card = document.createElement("div");
   card.className = "recommendation-hero";
+  const reasonTags = reasons.map((r) => `<span class="rec-tag">${escapeHtml(r)}</span>`).join("");
+  const modelTag = runtime.model ? `<span class="rec-tag rec-tag-model">${escapeHtml(runtime.model)}</span>` : "";
+  const durationTag = `<span class="rec-tag rec-tag-duration">⚡ ${escapeHtml(formatDuration(best.durationMs))}</span>`;
+  const costTag = `<span class="rec-tag rec-tag-cost">💰 ${escapeHtml(formatCost(best))}</span>`;
   card.innerHTML = `
     <span class="recommendation-eyebrow">💡 ${escapeHtml(localText("推荐", "Recommendation"))}</span>
     <span class="recommendation-agent">${escapeHtml(localText("对于你的仓库，推荐使用", "For your repo, we recommend"))} <strong>${escapeHtml(resultLabel(best))}</strong></span>
-    <span class="recommendation-reason">${escapeHtml(localText("原因", "Because"))}: ${escapeHtml(reasons.join(" · "))} · ${escapeHtml(runtime.model)} · ${escapeHtml(formatDuration(best.durationMs))} · ${escapeHtml(formatCost(best))}</span>
+    <div class="recommendation-tags">${reasonTags}${modelTag}${durationTag}${costTag}</div>
   `;
   el.parentNode.insertBefore(card, el);
 }
@@ -1327,7 +1350,7 @@ function renderDashboard(run) {
   setHidden(elements.dashboard, false);
 
   elements.taskTitle.textContent = run.task.title;
-  elements.taskMeta.textContent = `${run.task.id} | ${run.createdAt}`;
+  elements.taskMeta.textContent = `${run.task.id} | ${formatRelativeTime(run.createdAt, localText)}`;
 
   // 首屏推荐卡片
   renderRecommendationCard(run);

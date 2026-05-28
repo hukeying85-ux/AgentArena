@@ -13,8 +13,15 @@
  * 3. Metric formatting helpers (findJudgeByType, formatTestMetric, etc.)
  *
  * The scoring logic (component computation, band rules, normalization) is
- * intentionally kept in sync with the backend. When the backend changes,
- * this module must be updated accordingly.
+ * intentionally kept in sync with the backend (packages/report/src/scoring.ts).
+ * When the backend changes, this module must be updated accordingly.
+ *
+ * CRITICAL SYNC POINTS (frontend must match backend exactly):
+ * - FAILED_EFFICIENCY_SCALE = 100 (used in Rule 1 failed band)
+ * - CRITICAL_FAIL_SCORE_BAND = { min: 50, max: 70 } (Rule 2 critical-fail band)
+ * - Rule 2 uses normalizeApplicableWeights with user's active weights, NOT hardcoded multipliers
+ * - Rule 3 uses normalizeApplicableWeights with the full weight set
+ * - All band constants come from @agentarena/core (FAILED_SCORE_BAND, CRITICAL_FAIL_SCORE_BAND)
  */
 
 /**
@@ -324,10 +331,12 @@ export function computeScoreComponents(result, run) {
   // failToPassScore
   const failToPassScoreVal = patchJudges.length === 0 ? 0 : patchJudges.filter(j => j.success).length / patchJudges.length;
 
-  // passToPassScore
+  // passToPassScore — uses explicit patch-validation data (matches backend score-metrics.ts)
+  const patchValidation = result.sweBench?.patchValidationResult;
   let passToPassScoreVal = 0;
-  if (testJudge && typeof testJudge.totalCount === "number" && testJudge.totalCount > 0) {
-    passToPassScoreVal = (testJudge.passedCount ?? 0) / testJudge.totalCount;
+  if (patchValidation?.passToPassResults && patchValidation.passToPassResults.length > 0) {
+    const passed = patchValidation.passToPassResults.filter(r => r.status === "pass").length;
+    passToPassScoreVal = passed / patchValidation.passToPassResults.length;
   }
 
   return {
@@ -377,14 +386,16 @@ export function normalizeApplicableWeights(weights, result, run) {
   const hasTokenEfficiency = result.tokenEfficiencyScore !== undefined;
   const hasResolutionRate = result.sweBench?.resolutionRate !== undefined;
   const hasAcceptanceRate = result.cursorBench?.acceptanceRate !== undefined;
+  const hasPatchValidation = typeof result.sweBench?.patchValidationResult === "object"
+    && result.sweBench?.patchValidationResult !== null;
 
   for (const [key, weight] of Object.entries(migratedWeights)) {
     if (key === "precision" && !isPrecisionApplicable) continue;
     if (key === "tokenEfficiency" && !hasTokenEfficiency) continue;
     if (key === "resolutionRate" && !hasResolutionRate) continue;
     if (key === "acceptanceRate" && !hasAcceptanceRate) continue;
-    if (key === "failToPassTests" && !hasResolutionRate) continue;
-    if (key === "passToPassTests" && !hasResolutionRate) continue;
+    if (key === "failToPassTests" && !hasPatchValidation) continue;
+    if (key === "passToPassTests" && !hasPatchValidation) continue;
     applicableWeights[key] = weight;
   }
 
@@ -418,21 +429,32 @@ export function getCompositeScoreDetails(result, run, weights = DEFAULT_SCORE_WE
   if (result.status !== "success") {
     const baseScore = FAILED_SCORE_BAND.min;
     const efficiencyBonus = components.duration * 0.3 + components.cost * 0.2;
+    // MUST match backend FAILED_EFFICIENCY_SCALE = 100
     return {
-      total: Math.round(Math.min(FAILED_SCORE_BAND.max, baseScore + efficiencyBonus * 10) * 10) / 10,
+      total: Math.round(Math.min(FAILED_SCORE_BAND.max, baseScore + efficiencyBonus * 100) * 10) / 10,
       weights: normalizeScoreWeights(weights),
       components
     };
   }
 
-  // Rule 2: Critical judge failure → partial band
+  // Rule 2: Critical judge failure → partial band (use only applicable non-critical weights)
   if (components._hasCriticalFailure) {
-    const baseScore = CRITICAL_FAIL_SCORE_BAND.min + (
-      components.tests * 10 +
-      components.nonCriticalJudges * 5 +
-      components.lint * 3 +
-      components.duration * 2
-    );
+    // MUST match backend: normalize applicable weights, compute weighted partial, map to band range
+    const partialWeightKeys = ["tests", "nonCriticalJudges", "lint", "precision", "duration", "cost"];
+    const rawPartialWeights = {};
+    for (const key of partialWeightKeys) {
+      if (weights[key] !== undefined) rawPartialWeights[key] = weights[key];
+    }
+    const n = normalizeApplicableWeights(rawPartialWeights, result, run);
+    const weightedPartial =
+      components.tests * (n.tests ?? 0) +
+      components.nonCriticalJudges * (n.nonCriticalJudges ?? 0) +
+      components.lint * (n.lint ?? 0) +
+      components.precision * (n.precision ?? 0) +
+      components.duration * (n.duration ?? 0) +
+      components.cost * (n.cost ?? 0);
+    const bandRange = CRITICAL_FAIL_SCORE_BAND.max - CRITICAL_FAIL_SCORE_BAND.min;
+    const baseScore = CRITICAL_FAIL_SCORE_BAND.min + weightedPartial * bandRange;
     return {
       total: Math.round(Math.min(CRITICAL_FAIL_SCORE_BAND.max, baseScore) * 10) / 10,
       weights: normalizeScoreWeights(weights),

@@ -2,46 +2,13 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import test from "node:test";
 
-// We need to import the compiled module. Since validateRunPayload is not exported,
-// we test it indirectly through the UI server integration tests.
-// Instead, we test the validation logic by duplicating the checks here as a contract test.
+// Import the real implementation that ships with the CLI. Previously this file
+// duplicated the function in-tree; that "mirror" silently diverged from the
+// shipped code. Now any drift between the test expectations and the production
+// path produces a real test failure.
+import { validateRunPayload } from "../packages/cli/dist/commands/run-payload-validator.js";
 
 const CWD = process.cwd();
-
-/**
- * Mirror of validateRunPayload from ui.ts.
- * If this test diverges from the actual implementation, the test should be updated.
- * This serves as a regression test for the path-traversal prevention logic.
- */
-function validateRunPayload(runPayload) {
-  if (!runPayload.repoPath || typeof runPayload.repoPath !== "string") {
-    return "repoPath is required and must be a string.";
-  }
-  if (!runPayload.taskPath || typeof runPayload.taskPath !== "string") {
-    return "taskPath is required and must be a string.";
-  }
-  const resolvedRepoPath = path.resolve(runPayload.repoPath);
-  const resolvedTaskPath = path.resolve(runPayload.taskPath);
-  if (!resolvedRepoPath.startsWith(CWD + path.sep) && resolvedRepoPath !== CWD) {
-    return "repoPath must be within the current working directory.";
-  }
-  if (!resolvedTaskPath.startsWith(CWD + path.sep) && resolvedTaskPath !== CWD) {
-    return "taskPath must be within the current working directory.";
-  }
-  if (runPayload.maxConcurrency !== undefined) {
-    const parsed = Number(runPayload.maxConcurrency);
-    if (!Number.isFinite(parsed) || parsed < 1) {
-      return "maxConcurrency must be a positive integer.";
-    }
-  }
-  if (runPayload.tokenBudget !== undefined) {
-    const parsed = Number(runPayload.tokenBudget);
-    if (!Number.isFinite(parsed) || parsed <= 0) {
-      return "tokenBudget must be a positive number.";
-    }
-  }
-  return null;
-}
 
 // --- Path validation ---
 
@@ -83,6 +50,13 @@ test("accepts cwd itself as repoPath", () => {
     repoPath: CWD,
     taskPath: path.join(CWD, "task.yaml"),
   }), null);
+});
+
+test("rejects path-traversal attempt via ../ segments resolving outside cwd", () => {
+  assert.ok(validateRunPayload({
+    repoPath: path.join(CWD, "..", "evil"),
+    taskPath: path.join(CWD, "task.yaml"),
+  }));
 });
 
 // --- Numeric validation ---
@@ -143,4 +117,13 @@ test("rejects undefined repoPath", () => {
 
 test("rejects null repoPath", () => {
   assert.ok(validateRunPayload({ repoPath: null, taskPath: "task.yaml" }));
+});
+
+test("explicit cwd parameter is honored for path containment", () => {
+  const altCwd = path.join(CWD, "subdir");
+  // Repo path that is inside altCwd but outside CWD's parent
+  assert.equal(validateRunPayload({
+    repoPath: path.join(altCwd, "nested"),
+    taskPath: path.join(altCwd, "task.yaml"),
+  }, altCwd), null);
 });

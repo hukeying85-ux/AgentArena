@@ -1,14 +1,29 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type {
-  AdapterCapability,
-  AdapterExecutionContext,
-  AdapterPreflightOptions,
-  AdapterPreflightResult,
-  AgentResolvedRuntime
+import {
+  type AdapterCapability,
+  type AdapterExecutionContext,
+  type AdapterPreflightOptions,
+  type AdapterPreflightResult,
+  type AgentResolvedRuntime,
+  logger
 } from "@agentarena/core";
 
 const execFileAsync = promisify(execFile);
+
+/**
+ * Tagged result mirroring runner/snapshot.ts ChangedFilesResult, but adapter-local
+ * to avoid a cross-package import. When `reliable === false`, callers (adapters
+ * that build `changedFilesHint`) must NOT treat empty `files` as "agent changed
+ * nothing" — the data is missing, not empty.
+ *
+ * @see {@link ChangedFilesResult} in packages/runner/src/snapshot.ts — identical shape, kept separate to avoid cross-package import.
+ */
+export interface ChangedFilesHintResult {
+  files: string[];
+  reliable: boolean;
+  reason?: string;
+}
 
 export function buildAgentPrompt(context: AdapterExecutionContext): string {
   return [
@@ -32,15 +47,22 @@ export function buildAgentPrompt(context: AdapterExecutionContext): string {
   ].join("\n");
 }
 
-export async function getChangedFilesFromGit(workspacePath: string): Promise<string[]> {
+export async function getChangedFilesFromGit(workspacePath: string): Promise<ChangedFilesHintResult> {
   try {
     const { stdout } = await execFileAsync("git", ["diff", "--name-only", "HEAD"], {
       cwd: workspacePath,
       encoding: "utf8"
     });
-    return stdout.trim().split("\n").filter(Boolean);
-  } catch {
-    return [];
+    return { files: stdout.trim().split("\n").filter(Boolean), reliable: true };
+  } catch (error: unknown) {
+    const stderr = (error instanceof Error && "stderr" in error) ? String((error as NodeJS.ErrnoException & { stderr?: string }).stderr ?? "") : "";
+    const rawCode = (error instanceof Error && "code" in error) ? (error as Record<string, unknown>).code : undefined;
+    if (stderr.includes("not a git repository") || rawCode === 128 || rawCode === "128") {
+      return { files: [], reliable: true };
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    logger.warn("adapter", "git.diff_failed", `getChangedFilesFromGit failed in ${workspacePath}: ${message}`);
+    return { files: [], reliable: false, reason: message };
   }
 }
 

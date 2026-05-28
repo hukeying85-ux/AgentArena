@@ -1,17 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-
-import { wrapWithTimeout } from "../packages/runner/dist/timeout-utils.js";
 import { normalizeSelections } from "../packages/runner/dist/normalize-selections.js";
 import {
-  formatErrorMessage,
-  formatErrorDetails,
-} from "../packages/runner/dist/workspace.js";
-import {
-  createBaseResult,
   createCancelledRunResult,
   createSkippedRunResult,
 } from "../packages/runner/dist/result-builder.js";
+import { wrapWithTimeout } from "../packages/runner/dist/timeout-utils.js";
+import {
+  formatErrorDetails,
+  formatErrorMessage,
+} from "../packages/runner/dist/workspace.js";
 
 // --- wrapWithTimeout ---
 

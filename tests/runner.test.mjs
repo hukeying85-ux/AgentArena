@@ -1,3 +1,7 @@
+// Allow inline node -e in test fixture task packs. Production task packs
+// should use script files; tests use inline scripts for brevity.
+process.env.AGENTARENA_ALLOW_EVAL_IN_JUDGES = "1";
+
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";

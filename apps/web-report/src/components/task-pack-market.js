@@ -216,44 +216,118 @@ export class TaskPackMarket {
   }
 
   /**
-   * Show import dialog
+   * Show import dialog.
+   *
+   * Accessibility:
+   * - aria-modal + aria-labelledby + focus trap so screen readers and
+   *   keyboard users can't tab out into the background page
+   * - Escape closes
+   * - Focus moves into the dialog on open, returns to the opener on close
+   * - Inline status region replaces alert() (which interrupts screen-reader flow)
    */
   showImportDialog() {
-    const dialog = h('div', { className: 'market-dialog-overlay', role: 'dialog', 'aria-modal': 'true' },
-      h('div', { className: 'market-dialog' },
-        h('h4', {}, this.t('marketDialogTitle')),
-        h('p', { className: 'market-dialog-hint' }, this.t('marketDialogHint')),
-        h('input', {
-          type: 'text',
-          className: 'market-dialog-input',
-          placeholder: 'https://github.com/user/repo',
-          id: 'market-import-url'
-        }),
-        h('div', { className: 'market-dialog-actions' },
-          h('button', {
-            className: 'market-dialog-cancel',
-            onclick: () => dialog.remove()
-          }, this.t('marketDialogCancel')),
-          h('button', {
-            className: 'market-dialog-confirm',
-            onclick: async () => {
-              const input = dialog.querySelector('#market-import-url');
-              const url = input.value.trim();
-              if (!url) return;
+    const previouslyFocused = document.activeElement;
+    const dialogNonce = crypto.randomUUID();
+    const titleId = `market-dialog-title-${dialogNonce}`;
+    const statusId = `market-dialog-status-${dialogNonce}`;
 
-              const result = await this.importFromUrl(url);
-              if (result.success) {
-                dialog.remove();
-                alert(this.t('marketImportSuccess', result.pack.name));
-              } else {
-                alert(this.t('marketImportFailed', result.error));
-              }
-            }
-          }, this.t('marketDialogConfirm'))
+    const titleEl = h('h4', { id: titleId }, this.t('marketDialogTitle'));
+    const statusEl = h('div', {
+      id: statusId,
+      className: 'market-dialog-status',
+      role: 'status',
+      'aria-live': 'polite'
+    });
+    const input = h('input', {
+      type: 'text',
+      className: 'market-dialog-input',
+      placeholder: 'https://github.com/user/repo',
+      id: 'market-import-url',
+      'aria-label': this.t('marketDialogTitle')
+    });
+
+    const closeDialog = () => {
+      document.removeEventListener('keydown', onKeydown, true);
+      dialog.remove();
+      const opener = /** @type {HTMLElement | null} */ (previouslyFocused);
+      if (opener && typeof opener.focus === 'function') {
+        opener.focus();
+      }
+    };
+
+    const cancelBtn = h('button', {
+      type: 'button',
+      className: 'market-dialog-cancel',
+      onclick: closeDialog
+    }, this.t('marketDialogCancel'));
+
+    const confirmBtn = h('button', {
+      type: 'button',
+      className: 'market-dialog-confirm',
+      onclick: async () => {
+        const url = input.value.trim();
+        if (!url) {
+          statusEl.textContent = this.t('marketDialogHint');
+          return;
+        }
+        confirmBtn.disabled = true;
+        const result = await this.importFromUrl(url);
+        confirmBtn.disabled = false;
+        if (result.success) {
+          statusEl.textContent = this.t('marketImportSuccess', result.pack.name);
+          setTimeout(closeDialog, 800);
+        } else {
+          statusEl.textContent = this.t('marketImportFailed', result.error);
+        }
+      }
+    }, this.t('marketDialogConfirm'));
+
+    const dialog = h('div', {
+        className: 'market-dialog-overlay',
+        role: 'dialog',
+        'aria-modal': 'true',
+        'aria-labelledby': titleId
+      },
+      h('div', { className: 'market-dialog' },
+        titleEl,
+        h('p', { className: 'market-dialog-hint' }, this.t('marketDialogHint')),
+        input,
+        statusEl,
+        h('div', { className: 'market-dialog-actions' },
+          cancelBtn,
+          confirmBtn
         )
       )
     );
 
+    // Focus trap: cycle Tab/Shift+Tab within dialog focusables; Escape closes.
+    const focusables = () => /** @type {HTMLElement[]} */ (Array.from(dialog.querySelectorAll(
+      'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    )));
+
+    function onKeydown(e) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeDialog();
+        return;
+      }
+      if (e.key === 'Tab') {
+        const items = focusables();
+        if (items.length === 0) return;
+        const first = items[0];
+        const last = items[items.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    }
+    document.addEventListener('keydown', onKeydown, true);
+
     document.body.appendChild(dialog);
+    setTimeout(() => input.focus(), 0);
   }
 }

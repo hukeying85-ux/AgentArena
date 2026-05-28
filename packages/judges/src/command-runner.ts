@@ -3,6 +3,7 @@ import {
   BenchmarkCancelledError,
   type CommandExecutionSpec,
   type CommandStepResult,
+  logger,
 } from "@agentarena/core";
 import {
   buildStepEnvironment,
@@ -13,69 +14,88 @@ import {
   throwIfCancelled,
 } from "./shared.js";
 
-export function parseCommand(command: string): [string, string[]] {
+/**
+ * Allowlist: only known-safe commands may be executed in judge steps.
+ *
+ * DESIGN PRINCIPLES (evolved from incident response, not formal threat modeling):
+ *
+ * 1. Blocklist → Allowlist migration: The previous blocklist was bypassable via
+ *    absolute paths, whitespace variants, and alias expansion. The allowlist
+ *    approach is fundamentally more secure but requires explicit enumeration.
+ *
+ * 2. "Read-only or text-processing" principle: Commands are included if they
+ *    primarily read/inspect rather than modify. However, this is ASPIRATIONAL,
+ *    not enforced:
+ *    - curl can POST, upload files, write to disk with -o
+ *    - sed can modify files with -i flag
+ *    - awk can write files with > redirection
+ *    The allowlist trusts that task pack authors are not malicious.
+ *
+ * 3. Shell exclusion: sh/bash are intentionally EXCLUDED because they can
+ *    execute arbitrary code from script files, bypassing the allowlist entirely.
+ *    Task packs needing shell scripts must use `node script.js` or `python script.py`.
+ *
+ * 4. Interpreter escape hatch: node -e, python -c, bun -e are blocked by a
+ *    separate regex check (not the allowlist) because they can execute arbitrary
+ *    code. The AGENTARENA_ALLOW_EVAL_IN_JUDGES=1 env var disables this for
+ *    test harnesses that legitimately use inline code in fixture task packs.
+ *
+ * 5. Adding a new command: Consider whether the command can execute arbitrary
+ *    code, write files, or make network requests. If it can, document the risk
+ *    in this comment and explain why the risk is acceptable.
+ *
+ * THREAT MODEL: Task packs from the community/task-pack-market are the primary
+ * attack surface. The allowlist prevents malicious task packs from executing
+ * arbitrary commands. However, any command that can read files or make network
+ * requests can still exfiltrate data — the allowlist does not provide data
+ * isolation, only command execution control.
+ */
+const SAFE_COMMANDS = new Set([
+  // Package managers
+  "node", "npm", "npx", "pnpm", "pnpx", "yarn", "bun",
+  // Languages
+  "python", "python3", "go", "cargo", "rustc", "ruby", "bundle", "rake",
+  // Build tools
+  "make", "cmake", "gradle", "mvn", "sbt",
+  // Version control
+  "git",
+  // Shell utilities (safe for read-only inspection)
+  "grep", "rg", "find", "fd", "ls", "cat", "echo", "printf", "printenv",
+  "test", "diff", "wc", "head", "tail", "sort", "uniq", "tr", "cut",
+  "sed", "awk", "tee", "env", "type", "which", "where", "date",
+  // Data processing
+  "jq", "yq",
+  // Network (read-only)
+  "curl", "wget",
+  // Archive
+  "tar", "gzip", "gunzip", "unzip", "zip",
+  // Python ecosystem
+  "pip", "pip3", "poetry", "uv", "pytest", "unittest", "flake8", "ruff",
+  "mypy", "pylint", "black", "isort",
+  // JS ecosystem
+  "eslint", "biome", "prettier", "tsc", "vitest", "jest", "mocha",
+  "playwright", "ava", "tap",
+  // Go ecosystem
+  "gofmt", "golint", "staticcheck", "golangci-lint",
+  // Rust ecosystem
+  "clippy", "rustfmt",
+  // Ruby ecosystem
+  "rubocop", "rspec",
+  // NOTE: sh/bash are intentionally excluded from the allowlist.
+  // They can execute arbitrary code from script files, bypassing the allowlist.
+  // Task packs that need shell scripts must use a specific interpreter (e.g., node, python).
+]);
+
+const COMMANDS_USING_E_FLAG = new Set(["echo", "printf", "type", "which", "where"]);
+
+/**
+ * Tokenize a shell-style command into [command, args]. Handles single/double quotes
+ * and backslash escapes. Returns the raw argv without any allowlist validation.
+ */
+function tokenizeCommand(command: string): string[] {
   const trimmed = command.trim();
   if (!trimmed) {
     throw new Error("Command string is empty.");
-  }
-
-  const DANGEROUS_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
-    { pattern: /(?:^|\s)(?:curl|wget)\s+.*[|-].*(?:base64|xxd|hexdump)/i, reason: "Command appears to exfiltrate data via network with encoding" },
-    { pattern: /(?:^|\s)(?:nc|ncat|netcat)\s+/i, reason: "Netcat is not allowed in judge commands" },
-    { pattern: /(?:^|\s)(?:sh|bash|zsh|fish|dash|ksh|csh|tcsh)\s+(-c|-i)/i, reason: "Interactive or eval shell invocation is not allowed in judge commands" },
-    { pattern: /(?:^|\s)(?:python|python3|perl|ruby)\s+(-c|-e)\s+/i, reason: "Eval-style interpreter invocation is not allowed in judge commands" },
-    { pattern: /(?:^|\s)(?:chmod|chown|chgrp)\s+/i, reason: "Permission modification commands are not allowed in judge commands" },
-    { pattern: /(?:^|\s)(?:sudo|su|doas|pkexec)\s+/i, reason: "Privilege escalation commands are not allowed in judge commands" },
-    { pattern: /(?:^|\s)(?:rm|rmdir)\s+.*-rf\s+\//i, reason: "Recursive root deletion is not allowed in judge commands" },
-    { pattern: /(?:^|\s)(?:mkfifo|mknod)\s+/i, reason: "FIFO/device creation is not allowed in judge commands" },
-    { pattern: />\s*\/dev\//i, reason: "Direct writes to /dev are not allowed in judge commands" }
-  ];
-
-  const commandToken = trimmed.split(/\s+/)[0].replace(/^["']|["']$/g, "");
-  const DANGEROUS_COMMANDS = new Set([
-    "nc", "ncat", "netcat", "sudo", "su", "doas", "pkexec",
-    "chmod", "chown", "chgrp", "mkfifo", "mknod"
-  ]);
-  if (DANGEROUS_COMMANDS.has(commandToken)) {
-    throw new Error(
-      `Command rejected for security: "${commandToken}" is not allowed in judge commands. ` +
-      `Suggestion: If you need this functionality, use a script file instead (e.g., ./run-tests.sh).`
-    );
-  }
-
-  for (const { pattern, reason } of DANGEROUS_PATTERNS) {
-    if (pattern.test(trimmed)) {
-      const commandPart = trimmed.split(/\s+/)[0];
-      if (commandPart === "echo" || commandPart === "printf" || commandPart === "printenv" || commandPart === "type" || commandPart === "which" || commandPart === "where") {
-        continue;
-      }
-      throw new Error(
-        `${reason}. Suggestion: Use a script file (e.g., ./run-check.sh) instead of inline commands. ` +
-        `Command: "${trimmed.slice(0, 100)}"`
-      );
-    }
-  }
-
-  if (commandToken === "node" && trimmed.includes(" -e ")) {
-    const DANGEROUS_NODE_MODULES = [
-      "child_process", "require('fs'", 'require("fs"',
-      "require('net'", 'require("net"',
-      "require('http'", 'require("http"',
-      "require('https'", 'require("https"',
-      "require('dgram'", 'require("dgram"',
-      "require('cluster'", 'require("cluster"',
-      "require('os'", 'require("os"',
-      "process.binding"
-    ];
-    for (const pattern of DANGEROUS_NODE_MODULES) {
-      if (trimmed.includes(pattern)) {
-        throw new Error(
-          `Command rejected for security: node -e with "${pattern}" is not allowed. ` +
-          `Suggestion: Use a script file (e.g., ./run-check.js) instead of inline code with system module access. ` +
-          `Command: "${trimmed.slice(0, 100)}"`
-        );
-      }
-    }
   }
 
   const args: string[] = [];
@@ -129,7 +149,62 @@ export function parseCommand(command: string): [string, string[]] {
     throw new Error(`Invalid command string: "${command}"`);
   }
 
-  return [args[0], args.slice(1)];
+  return args;
+}
+
+/**
+ * Reduce an absolute or relative command path to its basename for allowlist lookup.
+ * Strips trailing `.exe`/`.cmd`/`.bat` so Windows paths like `node.exe` match `node`.
+ */
+function commandBasenameForAllowlist(commandToken: string): string {
+  const basename = commandToken.includes("/") || commandToken.includes("\\")
+    ? commandToken.split(/[/\\]/).pop() ?? commandToken
+    : commandToken;
+  // Strip Windows executable suffixes so `node.exe`, `python.cmd`, `git.bat` are matched
+  return basename.replace(/\.(exe|cmd|bat)$/i, "");
+}
+
+export function parseCommand(command: string): [string, string[]] {
+  const trimmed = command.trim();
+  const args = tokenizeCommand(command);
+  const commandToken = args[0];
+  const commandBasename = commandBasenameForAllowlist(commandToken);
+
+  if (!SAFE_COMMANDS.has(commandBasename)) {
+    throw new Error(
+      `Command "${commandBasename}" is not in the allowed command list for judge commands. ` +
+      `Allowed commands include: node, npm, npx, pnpm, python, go, cargo, git, etc. ` +
+      `Suggestion: Use a script file (e.g., ./run-check.sh) instead. ` +
+      `Command: "${trimmed.slice(0, 100)}"`
+    );
+  }
+
+  // Block eval-style invocations that could bypass the allowlist
+  // by running arbitrary code inside an allowed interpreter.
+  // Detects: node -e, node --eval, python -c, ruby -e, perl -e, etc.
+  //
+  // node/bun used to have a carve-out blocking only a fixed list of
+  // dangerous module names (child_process, fs, etc). That list was
+  // bypassable via dynamic `import("child_process")`, the `vm` module,
+  // `worker_threads`, string concatenation, and indirect references.
+  // We now deny node -e / bun -e unconditionally — task packs that need
+  // inline JS must use a script file.
+  //
+  // AGENTARENA_ALLOW_EVAL_IN_JUDGES=1 disables this check for test
+  // harnesses that legitimately use inline node -e in fixture task packs.
+  const allowEval = process.env.AGENTARENA_ALLOW_EVAL_IN_JUDGES === "1";
+  if (!allowEval && (/\s-(?:e|c)\s/.test(trimmed) || /\s--eval[\s=]/.test(trimmed))) {
+    // Allow echo/printf/type/which/where — they use -e for their own flags
+    if (!COMMANDS_USING_E_FLAG.has(commandBasename)) {
+      throw new Error(
+        `Eval-style invocation (-e/-c/--eval) is not allowed for "${commandBasename}" in judge commands. ` +
+        `Suggestion: Use a script file (e.g., ./run-check.sh or ./run-check.js) instead of inline code. ` +
+        `Command: "${trimmed.slice(0, 100)}"`
+      );
+    }
+  }
+
+  return [commandToken, args.slice(1)];
 }
 
 export async function executeCommand(
@@ -161,8 +236,8 @@ export async function executeCommand(
       stdio: ["ignore", "pipe", "pipe"]
     });
 
-    let stdout = "";
-    let stderr = "";
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
     let timedOut = false;
     let cancelled = false;
     let settled = false;
@@ -170,6 +245,10 @@ export async function executeCommand(
     let stderrBytes = 0;
     let stdoutTruncated = false;
     let stderrTruncated = false;
+    const truncateMarker = (label: "stdout" | "stderr") =>
+      Buffer.from(`\n[${label} truncated at ${MAX_PROCESS_OUTPUT_BYTES} bytes]`);
+    const buildStdout = (): string => Buffer.concat(stdoutChunks).toString("utf8");
+    const buildStderr = (): string => Buffer.concat(stderrChunks).toString("utf8");
 
     const settle = () => {
       if (settled) return false;
@@ -196,7 +275,9 @@ export async function executeCommand(
               child.kill("SIGKILL");
             }
           } catch (killError) {
-            console.warn(`[agentarena] Failed to SIGKILL process ${child.pid}: ${killError instanceof Error ? killError.message : String(killError)}`);
+            logger.warn("judge", "process.sigkill_failed", `Failed to SIGKILL process ${child.pid}: ${killError instanceof Error ? killError.message : String(killError)}`, {
+              metadata: { pid: child.pid }
+            });
           }
         }
       }, 3_000);
@@ -224,11 +305,12 @@ export async function executeCommand(
       if (stdoutTruncated) return;
       stdoutBytes += chunk.length;
       if (stdoutBytes > MAX_PROCESS_OUTPUT_BYTES) {
-        stdout += chunk.toString("utf8").slice(0, MAX_PROCESS_OUTPUT_BYTES - (stdoutBytes - chunk.length));
-        stdout += `\n[stdout truncated at ${MAX_PROCESS_OUTPUT_BYTES} bytes]`;
+        const remaining = MAX_PROCESS_OUTPUT_BYTES - (stdoutBytes - chunk.length);
+        if (remaining > 0) stdoutChunks.push(chunk.subarray(0, remaining));
+        stdoutChunks.push(truncateMarker("stdout"));
         stdoutTruncated = true;
       } else {
-        stdout += chunk.toString("utf8");
+        stdoutChunks.push(chunk);
       }
     });
 
@@ -236,11 +318,12 @@ export async function executeCommand(
       if (stderrTruncated) return;
       stderrBytes += chunk.length;
       if (stderrBytes > MAX_PROCESS_OUTPUT_BYTES) {
-        stderr += chunk.toString("utf8").slice(0, MAX_PROCESS_OUTPUT_BYTES - (stderrBytes - chunk.length));
-        stderr += `\n[stderr truncated at ${MAX_PROCESS_OUTPUT_BYTES} bytes]`;
+        const remaining = MAX_PROCESS_OUTPUT_BYTES - (stderrBytes - chunk.length);
+        if (remaining > 0) stderrChunks.push(chunk.subarray(0, remaining));
+        stderrChunks.push(truncateMarker("stderr"));
         stderrTruncated = true;
       } else {
-        stderr += chunk.toString("utf8");
+        stderrChunks.push(chunk);
       }
     });
 
@@ -253,8 +336,8 @@ export async function executeCommand(
       }
       resolve({
         exitCode,
-        stdout: stdout.trim(),
-        stderr: `${stderr}${timedOut ? `\n${timeoutLabel} timed out after ${timeoutMs}ms.` : ""}`.trim(),
+        stdout: buildStdout().trim(),
+        stderr: `${buildStderr()}${timedOut ? `\n${timeoutLabel} timed out after ${timeoutMs}ms.` : ""}`.trim(),
         durationMs: Date.now() - startedAt,
         cwd
       });
@@ -269,8 +352,8 @@ export async function executeCommand(
       }
       resolve({
         exitCode: -1,
-        stdout,
-        stderr: `${stderr}\n${error.message}`.trim(),
+        stdout: buildStdout(),
+        stderr: `${buildStderr()}\n${error.message}`.trim(),
         durationMs: Date.now() - startedAt,
         cwd
       });

@@ -34,7 +34,7 @@ export function aggregateMultiRuns(runs: BenchmarkRun[]): MultiRunComparison {
 
   const agents: AggregatedAgentStats[] = [];
   for (const [agentId, results] of agentRuns) {
-    const scores = results.map((result) => result.compositeScore ?? 0).filter((score) => score > 0);
+    const scores = results.map((result) => result.compositeScore).filter((score): score is number => typeof score === "number");
     const durations = results.map((result) => result.durationMs).filter((duration) => duration > 0);
     const costs = results.map((result) => result.estimatedCostUsd).filter((cost) => cost >= 0);
     const successes = results.filter((result) => result.status === "success").length;

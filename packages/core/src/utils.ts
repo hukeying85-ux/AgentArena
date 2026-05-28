@@ -89,11 +89,33 @@ export function validateTaskPackId(id: string): boolean {
 }
 
 function isPrivateIp(ip: string): boolean {
-  if (ip === "127.0.0.1" || ip === "0.0.0.0") return true;
+  if (ip === "0.0.0.0") return true;
+  // Full 127.0.0.0/8 loopback range
+  if (ip.startsWith("127.")) return true;
   if (ip.startsWith("10.")) return true;
   if (ip.startsWith("192.168.")) return true;
   if (/^172\.(1[6-9]|2\d|3[01])\./.test(ip)) return true;
   if (ip.startsWith("169.254.")) return true;
+  // RFC 6598 Carrier-Grade NAT / shared address space
+  if (/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(ip)) return true;
+  // RFC 2544 benchmark testing
+  if (/^198\.1[89]\./.test(ip)) return true;
+  // Multicast
+  if (/^(22[4-9]|23\d)\./.test(ip)) return true;
+  return false;
+}
+
+function isPrivateIpv6(ip: string): boolean {
+  // IPv6 loopback
+  if (ip === "::1") return true;
+  // IPv6 ULA (fc00::/7)
+  if (/^f[cd][0-9a-f]{2}:/i.test(ip)) return true;
+  // IPv6 link-local (fe80::/10)
+  if (/^fe80:/i.test(ip)) return true;
+  // IPv6 multicast (ff00::/8)
+  if (/^ff00:/i.test(ip)) return true;
+  // Unspecified
+  if (ip === "::") return true;
   return false;
 }
 
@@ -105,7 +127,7 @@ export function isInternalUrl(urlString: string): boolean {
     if (hostname.startsWith("[") && hostname.endsWith("]")) {
       hostname = hostname.slice(1, -1);
     }
-    if (hostname === "::1" || hostname === "::" || hostname === "[::]") return true;
+    if (isPrivateIpv6(hostname)) return true;
     const ipv4Mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i;
     const match = hostname.match(ipv4Mapped);
     if (match) {

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+// randomUUID removed — generateRunId now delegates to utils.ts
 
 export type LogLevel = "DEBUG" | "INFO" | "WARN" | "ERROR";
 
@@ -37,11 +37,11 @@ const SENSITIVE_KEYS = new Set([
   "token",
   "secret",
   "password",
-  "apiKey",
+  "apikey",
   "api_key",
-  "authToken",
+  "authtoken",
   "auth_token",
-  "privateKey",
+  "privatekey",
   "private_key",
   "bearer",
   "authorization",
@@ -51,10 +51,7 @@ function redactSensitiveValue(key: string, value: unknown): unknown {
   const lowerKey = key.toLowerCase();
   
   if (SENSITIVE_KEYS.has(lowerKey) || SENSITIVE_PATTERNS.some(p => p.test(key))) {
-    if (typeof value === "string" && value.length > 4) {
-      return value.slice(0, 4) + "****";
-    }
-    return "***";
+    return "****";
   }
   
   return value;
@@ -168,13 +165,12 @@ export const logger = {
     log("ERROR", component, action, message, options),
 };
 
-export function generateRunId(): string {
-  const date = new Date();
-  const dateStr = date.toISOString().slice(0, 10).replace(/-/g, "");
-  const timeStr = date.toISOString().slice(11, 19).replace(/:/g, "");
-  const random = randomUUID().slice(0, 8);
-  return `run-${dateStr}-${timeStr}-${random}`;
-}
+/**
+ * Generate a unique run ID.
+ * Delegates to createRunId from utils.ts for consistency.
+ * Re-exported here for backward compatibility.
+ */
+export { createRunId as generateRunId } from "./utils.js";
 
 export type AuditAction =
   | "auth_success"

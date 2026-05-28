@@ -980,14 +980,14 @@ export function createLauncherModule(deps) {
 
   async function detectService() {
     try {
-      const [infoResponse, adaptersResponse, taskPacksResponse, runStatusResponse, providerProfilesResponse] = await Promise.all([
+      // Load core endpoints (must all succeed)
+      const [infoResponse, adaptersResponse, taskPacksResponse, runStatusResponse] = await Promise.all([
         apiFetch("/api/ui-info"),
         apiFetch("/api/adapters"),
         apiFetch("/api/taskpacks"),
-        apiFetch("/api/run-status", { cache: "no-store" }),
-        apiFetch("/api/provider-profiles")
+        apiFetch("/api/run-status", { cache: "no-store" })
       ]);
-      if (!infoResponse.ok || !adaptersResponse.ok || !taskPacksResponse.ok || !runStatusResponse.ok || !providerProfilesResponse.ok) {
+      if (!infoResponse.ok || !adaptersResponse.ok || !taskPacksResponse.ok || !runStatusResponse.ok) {
         return;
       }
 
@@ -995,7 +995,17 @@ export function createLauncherModule(deps) {
       state.availableAdapters = await adaptersResponse.json();
       state.availableTaskPacks = await taskPacksResponse.json();
       state.runStatus = await runStatusResponse.json();
-      state.availableProviderProfiles = await providerProfilesResponse.json();
+
+      // Load provider profiles separately (may fail with 401 if no token)
+      try {
+        const providerProfilesResponse = await apiFetch("/api/provider-profiles");
+        if (providerProfilesResponse.ok) {
+          state.availableProviderProfiles = await providerProfilesResponse.json();
+        }
+      } catch {
+        // Provider profiles are optional for initial load
+      }
+
       syncClaudeVariantsWithProfiles();
       state.runInProgress = state.runStatus?.state === "running";
       if (state.runInProgress) {

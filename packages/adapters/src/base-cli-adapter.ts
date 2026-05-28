@@ -147,12 +147,13 @@ class BaseCliAdapterImpl implements AgentAdapter {
       ? this.config.parseSummary(execution.stdout, execution.stderr, execution.exitCode)
       : execution.stdout.trim() || `${this.title} completed the task.`;
 
-    const changedFilesHint = await getChangedFilesFromGit(context.workspacePath);
+    const changedFilesHintResult = await getChangedFilesFromGit(context.workspacePath);
+    const changedFilesHint = changedFilesHintResult.files;
 
     await context.trace({
       type: "adapter.finish",
       message: execution.exitCode === 0 && !execution.error ? `${this.title} finished` : `${this.title} failed`,
-      metadata: { exitCode: execution.exitCode, tokenUsage, changedFilesHint }
+      metadata: { exitCode: execution.exitCode, tokenUsage, changedFilesHint, changedFilesHintReliable: changedFilesHintResult.reliable }
     });
 
     return {

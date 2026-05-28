@@ -1,7 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { listAvailableAdapters } from "@agentarena/adapters";
-import { createAgentSelection } from "@agentarena/core";
+import { createAgentSelection, type ScoreMode } from "@agentarena/core";
 import type { Locale as ReportLocale, writeReport } from "@agentarena/report";
 import type { BenchmarkProgressEvent } from "@agentarena/runner";
 import type { ParsedArgs } from "../args.js";
@@ -39,7 +39,7 @@ export interface UiRunPayload {
   updateSnapshots?: boolean;
   cleanupWorkspaces?: boolean;
   maxConcurrency?: number;
-  scoreMode?: string;
+  scoreMode?: ScoreMode;
   tokenBudget?: number;
 }
 
@@ -158,6 +158,72 @@ export interface UiRunStatus {
     report: Awaited<ReturnType<typeof writeReport>>;
   };
   error?: string;
+}
+
+/**
+ * Map UiRunStatus (the live in-memory shape with optional `result`) into the
+ * persisted UiRunState shape. Replaces unsafe `as import("@agentarena/core").UiRunState`
+ * casts at multiple callsites — those would silently bypass any future drift between
+ * the two interfaces. The `result` blob is intentionally dropped because the
+ * persisted state file should stay small.
+ */
+export function toUiRunState(status: UiRunStatus): import("@agentarena/core").UiRunState {
+  // Phase narrowing: UiRunStatus.phase includes "starting"|"preflight"|"report"
+  // which UiRunState.phase also accepts; the union is compatible at runtime
+  // but TS doesn't always infer through the `|` alias, so we narrow explicitly.
+  const phase: import("@agentarena/core").UiRunPhase =
+    status.phase === "idle" || status.phase === "starting" ||
+    status.phase === "preflight" || status.phase === "benchmark" ||
+    status.phase === "report" ? status.phase : "idle";
+
+  return {
+    state: status.state,
+    phase,
+    logs: status.logs.map((l) => ({
+      timestamp: l.timestamp,
+      phase: l.phase as import("@agentarena/core").UiRunPhase,
+      message: l.message,
+      ...(l.agentId !== undefined ? { agentId: l.agentId } : {}),
+      ...(l.variantId !== undefined ? { variantId: l.variantId } : {}),
+      ...(l.displayLabel !== undefined ? { displayLabel: l.displayLabel } : {}),
+    })),
+    updatedAt: status.updatedAt,
+    ...(status.startedAt !== undefined ? { startedAt: status.startedAt } : {}),
+    ...(status.repoPath !== undefined ? { repoPath: status.repoPath } : {}),
+    ...(status.taskPath !== undefined ? { taskPath: status.taskPath } : {}),
+    ...(status.runId !== undefined ? { runId: status.runId } : {}),
+    ...(status.outputPath !== undefined ? { outputPath: status.outputPath } : {}),
+    ...(status.currentAgentId !== undefined ? { currentAgentId: status.currentAgentId } : {}),
+    ...(status.currentVariantId !== undefined ? { currentVariantId: status.currentVariantId } : {}),
+    ...(status.currentDisplayLabel !== undefined ? { currentDisplayLabel: status.currentDisplayLabel } : {}),
+    ...(status.error !== undefined ? { error: status.error } : {}),
+  };
+}
+
+/** Inverse of toUiRunState — rebuild a UiRunStatus from persisted state. */
+export function fromUiRunState(state: import("@agentarena/core").UiRunState): UiRunStatus {
+  return {
+    state: state.state,
+    phase: state.phase,
+    logs: state.logs.map((l) => ({
+      timestamp: l.timestamp,
+      phase: l.phase as UiRunPhase,
+      message: l.message,
+      ...(l.agentId !== undefined ? { agentId: l.agentId } : {}),
+      ...(l.variantId !== undefined ? { variantId: l.variantId } : {}),
+      ...(l.displayLabel !== undefined ? { displayLabel: l.displayLabel } : {}),
+    })),
+    updatedAt: state.updatedAt,
+    ...(state.startedAt !== undefined ? { startedAt: state.startedAt } : {}),
+    ...(state.repoPath !== undefined ? { repoPath: state.repoPath } : {}),
+    ...(state.taskPath !== undefined ? { taskPath: state.taskPath } : {}),
+    ...(state.runId !== undefined ? { runId: state.runId } : {}),
+    ...(state.outputPath !== undefined ? { outputPath: state.outputPath } : {}),
+    ...(state.currentAgentId !== undefined ? { currentAgentId: state.currentAgentId } : {}),
+    ...(state.currentVariantId !== undefined ? { currentVariantId: state.currentVariantId } : {}),
+    ...(state.currentDisplayLabel !== undefined ? { currentDisplayLabel: state.currentDisplayLabel } : {}),
+    ...(state.error !== undefined ? { error: state.error } : {}),
+  };
 }
 
 export function getTierEmoji(tier: string): string {

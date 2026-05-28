@@ -49,15 +49,17 @@ test("whitespace-only string throws error", () => {
 });
 
 test("single quotes preserve literal content including spaces", () => {
-  const [cmd, args] = parseCommand("node -e 'console.log(1 + 1)'");
-  assert.equal(cmd, "node");
-  assert.deepEqual(args, ["-e", "console.log(1 + 1)"]);
+  // Use `echo -e` (echo is in COMMANDS_USING_E_FLAG) to test quote handling
+  // without triggering the eval-style guard that now blocks `node -e`.
+  const [cmd, args] = parseCommand("echo -e 'hello world inside quotes'");
+  assert.equal(cmd, "echo");
+  assert.deepEqual(args, ["-e", "hello world inside quotes"]);
 });
 
 test("double quotes preserve literal content including spaces", () => {
-  const [cmd, args] = parseCommand('node -e "console.log(2 + 2)"');
-  assert.equal(cmd, "node");
-  assert.deepEqual(args, ["-e", "console.log(2 + 2)"]);
+  const [cmd, args] = parseCommand('echo -e "hello world inside quotes"');
+  assert.equal(cmd, "echo");
+  assert.deepEqual(args, ["-e", "hello world inside quotes"]);
 });
 
 test("backslash escapes characters outside quotes", () => {
@@ -91,15 +93,17 @@ test("command with spaced path parses correctly", () => {
 });
 
 test("command with spaced path in single quotes parses correctly", () => {
-  const [cmd, args] = parseCommand("'/usr/local/bin/my tool' run");
-  assert.equal(cmd, "/usr/local/bin/my tool");
-  assert.deepEqual(args, ["run"]);
+  // Single-quoted path with spaces; basename ("node") must still be allowlisted.
+  const [cmd, args] = parseCommand("'/opt/with spaces/node' --version");
+  assert.equal(cmd, "/opt/with spaces/node");
+  assert.deepEqual(args, ["--version"]);
 });
 
 test("mixed quoted and unquoted arguments", () => {
-  const [cmd, args] = parseCommand('node -e "console.log(1)" --flag value');
-  assert.equal(cmd, "node");
-  assert.deepEqual(args, ["-e", "console.log(1)", "--flag", "value"]);
+  // echo permits `-e` (in COMMANDS_USING_E_FLAG); node would now be blocked.
+  const [cmd, args] = parseCommand('echo -e "hello world" --flag value');
+  assert.equal(cmd, "echo");
+  assert.deepEqual(args, ["-e", "hello world", "--flag", "value"]);
 });
 
 test("multiple spaces between arguments are collapsed", () => {
@@ -121,8 +125,8 @@ test("argument array boundary: empty args list when only command", () => {
 });
 
 test("argument array boundary: many arguments", () => {
-  const [cmd, args] = parseCommand("a 1 2 3 4 5 6 7 8 9 10");
-  assert.equal(cmd, "a");
+  const [cmd, args] = parseCommand("git 1 2 3 4 5 6 7 8 9 10");
+  assert.equal(cmd, "git");
   assert.deepEqual(args, ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]);
 });
 
@@ -145,15 +149,16 @@ test("unclosed double quote is treated as literal until end", () => {
 });
 
 test("dangerous command: netcat is rejected", () => {
-  assert.throws(() => parseCommand("nc -l 8080"), /rejected for security/i);
+  assert.throws(() => parseCommand("nc -l 8080"), /not in the allowed command list/i);
 });
 
 test("dangerous command: sudo is rejected", () => {
-  assert.throws(() => parseCommand("sudo rm -rf /"), /rejected for security.*sudo/i);
+  assert.throws(() => parseCommand("sudo rm -rf /"), /not in the allowed command list/i);
 });
 
 test("dangerous command: bash -c is rejected", () => {
-  assert.throws(() => parseCommand("bash -c 'echo pwned'"), /not allowed/i);
+  // bash is now blocked by the allowlist (not in SAFE_COMMANDS), not by the eval check
+  assert.throws(() => parseCommand("bash -c 'echo pwned'"), /not in the allowed command list/i);
 });
 
 test("dangerous command: python -c is rejected", () => {
@@ -161,11 +166,11 @@ test("dangerous command: python -c is rejected", () => {
 });
 
 test("dangerous command: chmod is rejected", () => {
-  assert.throws(() => parseCommand("chmod 777 /tmp"), /rejected for security.*chmod/i);
+  assert.throws(() => parseCommand("chmod 777 /tmp"), /not in the allowed command list/i);
 });
 
 test("dangerous command: mkfifo is rejected", () => {
-  assert.throws(() => parseCommand("mkfifo /tmp/pipe"), /rejected for security.*mkfifo/i);
+  assert.throws(() => parseCommand("mkfifo /tmp/pipe"), /not in the allowed command list/i);
 });
 
 test("safe command: echo with dangerous words is allowed", () => {
@@ -173,9 +178,19 @@ test("safe command: echo with dangerous words is allowed", () => {
   assert.equal(cmd, "echo");
 });
 
-test("safe command: node -e is allowed", () => {
-  const [cmd, _args] = parseCommand('node -e "console.log(1)"');
-  assert.equal(cmd, "node");
+test("dangerous command: node -e is rejected", () => {
+  // node -e was previously allowed with a blocklist; the blocklist was
+  // bypassable via dynamic import(), vm, worker_threads, etc. node -e is
+  // now denied outright — task packs must use a script file.
+  assert.throws(() => parseCommand('node -e "console.log(1)"'), /not allowed/i);
+});
+
+test("dangerous command: node --eval is rejected", () => {
+  assert.throws(() => parseCommand('node --eval "console.log(1)"'), /not allowed/i);
+});
+
+test("dangerous command: bun -e is rejected", () => {
+  assert.throws(() => parseCommand('bun -e "console.log(1)"'), /not allowed/i);
 });
 
 test("safe command: npm test is allowed", () => {
@@ -190,4 +205,56 @@ test("rejected command includes suggestion", () => {
   } catch (err) {
     assert.ok(err.message.includes("Suggestion") || err.message.includes("script file"), `Error message should include suggestion: ${err.message}`);
   }
+});
+
+test("sh is rejected by allowlist", () => {
+  assert.throws(() => parseCommand("sh ./run-tests.sh"), /not in the allowed command list/i);
+});
+
+test("bash is rejected by allowlist", () => {
+  assert.throws(() => parseCommand("bash ./script.sh"), /not in the allowed command list/i);
+});
+
+test("AGENTARENA_ALLOW_EVAL_IN_JUDGES bypass is not set by default", () => {
+  // Verify the env var is not set in this test context (it should only be set
+  // explicitly by test harnesses that need inline node -e)
+  const original = process.env.AGENTARENA_ALLOW_EVAL_IN_JUDGES;
+  try {
+    delete process.env.AGENTARENA_ALLOW_EVAL_IN_JUDGES;
+    assert.throws(() => parseCommand('node -e "console.log(1)"'), /not allowed/i);
+  } finally {
+    if (original !== undefined) {
+      process.env.AGENTARENA_ALLOW_EVAL_IN_JUDGES = original;
+    }
+  }
+});
+
+// --- commandBasenameForAllowlist Windows extension stripping ---
+
+test("node.exe is matched as node via Windows extension stripping", () => {
+  const [cmd, args] = parseCommand("node.exe --version");
+  assert.equal(cmd, "node.exe");
+  assert.deepEqual(args, ["--version"]);
+});
+
+test("python.cmd is matched as python via Windows extension stripping", () => {
+  const [cmd, args] = parseCommand("python.cmd script.py");
+  assert.equal(cmd, "python.cmd");
+  assert.deepEqual(args, ["script.py"]);
+});
+
+test("git.bat is matched as git via Windows extension stripping", () => {
+  const [cmd, args] = parseCommand("git.bat status");
+  assert.equal(cmd, "git.bat");
+  assert.deepEqual(args, ["status"]);
+});
+
+test("absolute path to node is allowed", () => {
+  const [cmd, args] = parseCommand("/usr/bin/node --version");
+  assert.equal(cmd, "/usr/bin/node");
+  assert.deepEqual(args, ["--version"]);
+});
+
+test("unallowed command with .exe extension is still rejected", () => {
+  assert.throws(() => parseCommand("malware.exe --payload"), /not in the allowed command list/i);
 });

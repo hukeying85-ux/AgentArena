@@ -1,41 +1,16 @@
-const CACHE_NAME = "agentarena-report-v9";
+const CACHE_NAME = "agentarena-report-v11";
 const serviceWorker = /** @type {typeof globalThis & { clients: { claim(): Promise<void> }, skipWaiting(): void | Promise<void> }} */ (globalThis);
-const CORE_ASSETS = [
-  "./",
-  "./index.html",
-  "./app.js",
-  "./view-model.js",
-  "./i18n.js",
-  "./styles.css",
-  "./icon.svg",
-  "./manifest.json",
-  "./trace-replay.js",
-  "./trace-replay-bridge.js",
-  "./launcher/module.js",
-  "./report/dashboard.js",
-  "./report/cross-run.js",
-  "./report/detail-fragments.js",
-  "./results/loaders.js",
-  "./view-model/community.js"
-];
 
-// Install: cache all core assets
+// Install: pre-cache core assets for offline resilience on first visit
 serviceWorker.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then(async (cache) => {
-      // Use Promise.allSettled to not fail the entire install if some assets fail
-      const results = await Promise.allSettled(
-        CORE_ASSETS.map((url) => cache.add(url))
-      );
-      const failures = results.filter((r) => r.status === "rejected");
-      if (failures.length > 0) {
-        console.warn(`SW: ${failures.length} assets failed to cache:`, failures.map((r) => r.reason));
-      }
-    })
+    caches.open(CACHE_NAME).then((cache) =>
+      cache.addAll(["./index.html", "./styles.css", "./app.js"])
+    ).then(() => serviceWorker.skipWaiting())
   );
 });
 
-// Activate: delete old caches
+// Activate: delete old caches immediately on update
 serviceWorker.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
@@ -44,17 +19,22 @@ serviceWorker.addEventListener("activate", (event) => {
   );
 });
 
-// Fetch: network-first for HTML/JS, cache-first for static assets
+// Fetch: network-first for ALL requests (no hardcoded asset list).
+// This eliminates stale cache issues when new JS files are added or existing ones change.
 serviceWorker.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
 
-  // Skip API requests
+  // Skip API requests — always go to network
   if (url.pathname.startsWith("/api/")) return;
 
   // Skip non-GET requests
   if (event.request.method !== "GET") return;
 
-  // Community data from GitHub raw: network-first with cache fallback
+  // Community data from GitHub raw: network-first with cache fallback.
+  // Trust model: data from raw.githubusercontent.com is considered trusted
+  // (served over HTTPS from the project's own repository).
+  // No additional integrity check is applied — if the repository is
+  // compromised, the cached data will be stale until the next fetch.
   if (url.hostname === "raw.githubusercontent.com" && url.pathname.includes("/leaderboard-data/")) {
     event.respondWith(
       fetch(event.request)
@@ -65,45 +45,47 @@ serviceWorker.addEventListener("fetch", (event) => {
           }
           return response;
         })
-        .catch(async () => (await caches.match(event.request)) ?? new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }))
-    );
-    return;
-  }
-
-  // For HTML, JS, CSS, and manifest, use network-first strategy so local UI changes
-  // become visible immediately instead of waiting for a cache-first asset refresh.
-  const isNavigational = event.request.destination === "document";
-  const isScript = event.request.destination === "script";
-  const isStyle = event.request.destination === "style";
-  const isManifest = url.pathname.endsWith("/manifest.json") || url.pathname.endsWith("manifest.json");
-
-  if (isNavigational || isScript || isStyle || isManifest) {
-    event.respondWith(
-      fetch(event.request)
-        .then((response) => {
-          if (response.ok) {
-            const clone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
-          }
-          return response;
+        .catch(async () => {
+          // Prefer real cached data when network fails.
+          const cached = await caches.match(event.request);
+          if (cached) return cached;
+          // No cache: surface the failure honestly instead of fabricating a "{}" 200 OK.
+          // The UI must distinguish "fetch failed" from "no leaderboard entries"; a 200 with
+          // empty JSON conflates those and silently degrades community ranking display.
+          return new Response(
+            JSON.stringify({ error: "community-data-unavailable", offline: true }),
+            { status: 503, headers: { "Content-Type": "application/json" } }
+          );
         })
-        .catch(async () => (await caches.match(event.request)) ?? caches.match("./index.html"))
     );
     return;
   }
 
-  // For static assets (CSS, images, etc.), use cache-first strategy
+  // For all local requests: network-first with cache fallback.
+  // Network-first ensures code changes are visible immediately without hard-refresh.
+  // Cache fallback provides offline resilience.
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) return cached;
-      return fetch(event.request).then((response) => {
+    fetch(event.request)
+      .then((response) => {
         if (response.ok) {
           const clone = response.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
         }
         return response;
-      });
-    })
+      })
+      .catch(async () => {
+        const cached = await caches.match(event.request);
+        if (cached) return cached;
+        // Only return index.html for navigation requests. For JS/CSS/image/font
+        // subresource requests, returning HTML would cause a parse error in the
+        // browser; surface the failure as a proper 504 instead.
+        const isNavigation = event.request.mode === "navigate" || event.request.destination === "document";
+        if (isNavigation) {
+          const indexFallback = await caches.match("./index.html");
+          if (indexFallback) return indexFallback;
+        }
+        return new Response("Offline and not cached", { status: 504, headers: { "Content-Type": "text/plain" } });
+      })
   );
 });
 

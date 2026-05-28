@@ -407,9 +407,14 @@ async function hasStoredSecret(profileId: string): Promise<boolean> {
   return (await getSecretFile(profileId)) !== null;
 }
 
+/**
+ * @deprecated Always returns `true`. Profile secret storage now works on every
+ * platform (Windows Credential Manager, macOS Keychain, encrypted file
+ * fallback), so the predicate has no remaining purpose. Callers using this
+ * as a feature gate are dead branches — remove or replace with explicit
+ * platform checks where actually needed.
+ */
 export function supportsWindowsCredentialManager(): boolean {
-  // Legacy public helper kept for compatibility with existing callers/tests.
-  // AgentArena now supports profile secret storage on every platform, even if the backend differs.
   return true;
 }
 

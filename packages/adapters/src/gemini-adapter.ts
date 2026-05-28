@@ -200,7 +200,7 @@ export class GeminiCliAdapter implements AgentAdapter {
       }
     });
 
-    const changedFilesHint = await getChangedFilesFromGit(context.workspacePath);
+    const changedFilesHint = (await getChangedFilesFromGit(context.workspacePath)).files;
 
     return {
       status: execution.exitCode === 0 && !execution.error ? "success" : "failed",

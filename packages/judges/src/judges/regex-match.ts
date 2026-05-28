@@ -48,8 +48,14 @@ export async function runRegexMatchJudge(
 
     let matchCount: number;
     if (regex.global) {
-      const allMatches = [...content.matchAll(regex)];
-      matchCount = allMatches.length;
+      // Cap match counting to prevent memory exhaustion on large files
+      const MAX_MATCH_COUNT = 100_000;
+      let count = 0;
+      for (const _match of content.matchAll(regex)) {
+        count++;
+        if (count >= MAX_MATCH_COUNT) break;
+      }
+      matchCount = count;
     } else {
       matchCount = regex.test(content) ? 1 : 0;
     }

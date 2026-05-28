@@ -4,9 +4,11 @@ import {
   type AgentResolvedRuntime,
   type BenchmarkRun,
   escapeHtml,
+  isScoreMode,
   normalizePath,
   portableBasename,
-  portableRelativePath
+  portableRelativePath,
+  type ScoreMode
 } from "@agentarena/core";
 
 export type Locale = "en" | "zh-CN";
@@ -137,23 +139,31 @@ export type ScoredResult = BenchmarkRun["results"][number] & {
 };
 
 export type ScoredRun = BenchmarkRun & {
-  scoreMode?: string;
+  scoreMode?: ScoreMode;
   scoreWeights?: Record<string, number>;
   results: ScoredResult[];
 };
 
-export function hasScoreMetadata(run: BenchmarkRun): run is BenchmarkRun & { scoreMode?: string; scoreWeights?: Record<string, number> } {
+export function hasScoreMetadata(run: BenchmarkRun): run is BenchmarkRun & { scoreMode?: ScoreMode; scoreWeights?: Record<string, number> } {
   return "scoreMode" in run || "scoreWeights" in run;
 }
 
-export function getRunScoreMode(run: BenchmarkRun): string {
-  return hasScoreMetadata(run) ? (run.scoreMode ?? "balanced") : "balanced";
+/**
+ * Resolve a run's effective scoring mode.
+ *
+ * Historical runs may carry an arbitrary string in `scoreMode` (the field was
+ * `string` before this branch); validate at runtime and fall back to a known
+ * mode so downstream `getDefaultWeights(...)` calls are always type-safe.
+ */
+export function getRunScoreMode(run: BenchmarkRun): ScoreMode {
+  if (!hasScoreMetadata(run) || !run.scoreMode) return "balanced";
+  return isScoreMode(run.scoreMode) ? run.scoreMode : "balanced";
 }
 
 export { escapeHtml };
 
 export function escapeMdCell(value: string): string {
-  return value.replaceAll("|", "\\|").replaceAll("\n", " ");
+  return value.replaceAll("\\", "\\\\").replaceAll("|", "\\|").replaceAll("\n", " ");
 }
 
 export function statusTone(status: AdapterPreflightResult["status"]): string {
@@ -202,7 +212,6 @@ export function sanitizeRun(run: BenchmarkRun): BenchmarkRun {
     outputPath: ".",
     preflights: run.preflights.map((preflight) => ({
       ...preflight,
-      command: undefined
     })),
     results: run.results.map((result) => ({
       ...result,
@@ -213,11 +222,15 @@ export function sanitizeRun(run: BenchmarkRun): BenchmarkRun {
       setupResults: result.setupResults.map((step) => ({
         ...step,
         command: "[redacted]",
+        stdout: "[redacted]",
+        stderr: "[redacted]",
         cwd: sanitizeWorkspaceScopedPath(step.cwd, result.workspacePath, result.agentId)
       })),
       judgeResults: result.judgeResults.map((judge) => ({
         ...judge,
         command: judge.command ? "[redacted]" : undefined,
+        stdout: "[redacted]",
+        stderr: "[redacted]",
         cwd: judge.cwd
           ? sanitizeWorkspaceScopedPath(judge.cwd, result.workspacePath, result.agentId)
           : undefined
@@ -225,6 +238,8 @@ export function sanitizeRun(run: BenchmarkRun): BenchmarkRun {
       teardownResults: result.teardownResults.map((step) => ({
         ...step,
         command: "[redacted]",
+        stdout: "[redacted]",
+        stderr: "[redacted]",
         cwd: sanitizeWorkspaceScopedPath(step.cwd, result.workspacePath, result.agentId)
       })),
       tracePath: sanitizePath(result.tracePath, run.outputPath, "run"),

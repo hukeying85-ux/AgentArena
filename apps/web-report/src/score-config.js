@@ -1,3 +1,4 @@
+import { escapeHtml } from "./app-helpers.js";
 import {
   DEFAULT_SCORE_WEIGHTS,
   getMatchingScorePresetId,
@@ -128,10 +129,10 @@ export function renderScoreWeightsControls(state, elements, t) {
       button.classList.toggle("active", button.dataset.scorePreset === activePreset);
     }
   }
-  renderWeightSliders(state.scoreWeights);
+  renderWeightSliders(state.scoreWeights, t);
 }
 
-export function renderWeightSliders(weights) {
+export function renderWeightSliders(weights, t) {
   const container = document.getElementById('weight-sliders');
   if (!container) return;
   container.innerHTML = '';
@@ -140,9 +141,10 @@ export function renderWeightSliders(weights) {
     const slider = document.createElement('div');
     slider.className = 'weight-slider';
     const label = document.createElement('label');
-    const weightName = WEIGHT_NAMES[key] || key;
+    const i18nKey = WEIGHT_NAMES[key] || key;
+    const displayName = t ? t(i18nKey) : i18nKey;
     const percentage = (value * 100).toFixed(0);
-    label.innerHTML = `${weightName} <span class="weight-value">${percentage}%</span>`;
+    label.innerHTML = `${escapeHtml(displayName)} <span class="weight-value">${percentage}%</span>`;
     const input = document.createElement('input');
     input.type = 'range';
     input.min = '0';

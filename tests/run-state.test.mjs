@@ -84,6 +84,58 @@ describe("run-state", () => {
       const loaded = await loadRunState(tempDir);
       assert.equal(loaded, null);
     });
+
+    it("strips __proto__ keys to prevent prototype pollution", async () => {
+      const statePath = path.join(tempDir, ".agentarena", "ui");
+      await fs.mkdir(statePath, { recursive: true });
+      const malicious = JSON.stringify({
+        state: "running",
+        phase: "benchmark",
+        logs: [{ timestamp: "2024-01-01T00:00:00Z", phase: "benchmark", message: "test", "__proto__": { "isAdmin": true } }],
+        updatedAt: "2024-01-01T00:00:00Z",
+        "__proto__": { "polluted": true }
+      });
+      await fs.writeFile(path.join(statePath, "run-state.json"), malicious);
+
+      const loaded = await loadRunState(tempDir);
+      assert.ok(loaded, "should load state");
+      assert.equal(loaded.polluted, undefined, "__proto__ at top level should be stripped");
+      assert.equal(({}).polluted, undefined, "Object prototype should not be polluted");
+    });
+
+    it("strips constructor keys to prevent prototype pollution", async () => {
+      const statePath = path.join(tempDir, ".agentarena", "ui");
+      await fs.mkdir(statePath, { recursive: true });
+      const malicious = JSON.stringify({
+        state: "running",
+        phase: "benchmark",
+        logs: [],
+        updatedAt: "2024-01-01T00:00:00Z",
+        "constructor": { "prototype": { "polluted": true } }
+      });
+      await fs.writeFile(path.join(statePath, "run-state.json"), malicious);
+
+      const loaded = await loadRunState(tempDir);
+      assert.ok(loaded, "should load state");
+      assert.equal(({}).polluted, undefined, "Object prototype should not be polluted via constructor");
+    });
+
+    it("strips prototype keys to prevent prototype pollution", async () => {
+      const statePath = path.join(tempDir, ".agentarena", "ui");
+      await fs.mkdir(statePath, { recursive: true });
+      const malicious = JSON.stringify({
+        state: "running",
+        phase: "benchmark",
+        logs: [],
+        updatedAt: "2024-01-01T00:00:00Z",
+        "prototype": { "polluted": true }
+      });
+      await fs.writeFile(path.join(statePath, "run-state.json"), malicious);
+
+      const loaded = await loadRunState(tempDir);
+      assert.ok(loaded, "should load state");
+      assert.equal(({}).polluted, undefined, "Object prototype should not be polluted via prototype key");
+    });
   });
 
   describe("clearRunState", () => {

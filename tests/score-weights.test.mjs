@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  migrateLegacyWeights,
   filterApplicableWeights,
-  normalizeWeights,
+  migrateLegacyWeights,
   normalizeApplicableWeights,
+  normalizeWeights,
 } from "../packages/report/dist/score-weights.js";
 
 function makeResult(overrides = {}) {

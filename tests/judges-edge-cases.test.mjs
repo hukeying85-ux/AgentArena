@@ -1,3 +1,7 @@
+// Allow inline node -e in test fixture task packs. Production task packs
+// should use script files; tests use inline scripts for brevity.
+process.env.AGENTARENA_ALLOW_EVAL_IN_JUDGES = "1";
+
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -252,9 +256,9 @@ test("command judge: handles non-UTF-8 stdout gracefully", async () => {
 test("command judge: handles timeout correctly", async () => {
   const tmpDir = await createTempWorkspace();
   try {
-    const command = process.platform === "win32"
-      ? 'timeout /t 10 /nobreak >nul 2>&1'
-      : 'sleep 10';
+    // Cross-platform sleep via node -e (avoids OS-specific `sleep`/`timeout` commands
+    // that are not in the judge command allowlist).
+    const command = 'node -e "setTimeout(()=>process.exit(0), 10000)"';
 
     const result = await runJudge(
       { type: "command", id: "test", label: "Test", command, timeoutMs: 100 },
@@ -321,6 +325,43 @@ test("runJudges: runs multiple judges in correct order", async () => {
     assert.equal(results.length, 2);
     assert.equal(results[0].type, "file-exists");
     assert.equal(results[1].type, "directory-exists");
+  } finally {
+    await cleanupTempWorkspace(tmpDir);
+  }
+});
+
+test("directory-exists rejects path traversal", async () => {
+  const tmpDir = await createTempWorkspace();
+  try {
+    const judge = {
+      type: "directory-exists",
+      id: "de-traversal",
+      label: "Dir Traversal",
+      path: "../../../etc",
+    };
+
+    const result = await runJudge(judge, tmpDir, []);
+    assert.equal(result.success, false, "path traversal should be rejected");
+    assert.ok(result.stderr.includes("outside") || result.stderr.includes("traversal") || result.stderr.includes("Path"), `Error should mention path issue: ${result.stderr}`);
+  } finally {
+    await cleanupTempWorkspace(tmpDir);
+  }
+});
+
+test("compilation judge type is registered", async () => {
+  // Verify the compilation judge can be invoked (even if it fails due to missing setup)
+  const tmpDir = await createTempWorkspace();
+  try {
+    const judge = {
+      type: "compilation",
+      id: "compile-test",
+      label: "Compile Check",
+      command: "node --check nonexistent.js",
+    };
+
+    const result = await runJudge(judge, tmpDir, []);
+    assert.equal(result.type, "compilation");
+    assert.equal(typeof result.success, "boolean");
   } finally {
     await cleanupTempWorkspace(tmpDir);
   }

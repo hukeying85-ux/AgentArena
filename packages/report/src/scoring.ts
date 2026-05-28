@@ -14,30 +14,30 @@
  * Implementation is fully independent with no official affiliation.
  */
 
-import type { BenchmarkRun } from "@agentarena/core";
-import { getDefaultWeights } from "@agentarena/core";
+import type { BenchmarkRun, ScoreMode } from "@agentarena/core";
+import { getDefaultWeights, isScoreMode } from "@agentarena/core";
 import { hasScoreMetadata, type ScoredRun } from "./report-helpers.js";
 import {
-  testPassRatio,
-  criticalJudgePassRatio,
-  nonCriticalJudgePassRatio,
-  hasCriticalJudgeFailure,
-  failToPassScore,
-  passToPassScore,
-  lintQualityScore,
-  durationEfficiencyScore,
-  costEfficiencyScore,
-  precisionScore,
-  resolutionRateScore,
-  tokenEfficiencyScoreComponent,
   acceptanceRateScore,
   categoryScore,
+  costEfficiencyScore,
+  criticalJudgePassRatio,
+  durationEfficiencyScore,
+  failToPassScore,
+  hasCriticalJudgeFailure,
+  lintQualityScore,
+  nonCriticalJudgePassRatio,
+  passToPassScore,
+  precisionScore,
+  resolutionRateScore,
+  testPassRatio,
+  tokenEfficiencyScoreComponent,
 } from "./score-metrics.js";
-import { normalizeApplicableWeights } from "./score-weights.js";
+import { normalizeApplicableWeights, normalizeWeights } from "./score-weights.js";
 
+export { hasCriticalJudgeFailure } from "./score-metrics.js";
 // Re-export for backward compatibility
 export { normalizeApplicableWeights } from "./score-weights.js";
-export { hasCriticalJudgeFailure } from "./score-metrics.js";
 
 // ---------------------------------------------------------------------------
 // Score band constants (used by both backend and frontend)
@@ -144,7 +144,7 @@ export function computeCompositeScore(
   result: BenchmarkRun["results"][number],
   run: BenchmarkRun,
   scoreWeights?: Record<string, number>,
-  scoreMode?: string
+  scoreMode?: ScoreMode
 ): number {
   const weights = scoreWeights ?? getDefaultWeights(scoreMode ?? "practical");
 
@@ -160,9 +160,15 @@ export function computeCompositeScore(
 
   const components = computeScoreComponents(result, run);
 
-  // Rule 2: Critical judge failure → partial band (use user weights)
+  // Rule 2: Critical judge failure → partial band (use only applicable non-critical weights)
   if (hasCriticalJudgeFailure(result)) {
-    const n = normalizeApplicableWeights(weights, result, run);
+    // Build partial weights from only the components used in the partial score
+    const partialWeightKeys = ["tests", "nonCriticalJudges", "lint", "precision", "duration", "cost"];
+    const rawPartialWeights: Record<string, number> = {};
+    for (const key of partialWeightKeys) {
+      if (weights[key] !== undefined) rawPartialWeights[key] = weights[key];
+    }
+    const n = normalizeWeights(rawPartialWeights);
     const weightedPartial =
       components.tests * (n.tests ?? 0) +
       components.nonCriticalJudges * (n.nonCriticalJudges ?? 0) +
@@ -235,7 +241,8 @@ export function computeScoreReasons(result: BenchmarkRun["results"][number], run
  * This is the main entry point called by the report pipeline.
  */
 export function enrichRunWithScores(run: BenchmarkRun): ScoredRun {
-  const scoreMode = hasScoreMetadata(run) ? (run.scoreMode ?? "practical") : "practical";
+  const rawMode = hasScoreMetadata(run) ? run.scoreMode : undefined;
+  const scoreMode: ScoreMode = (rawMode && isScoreMode(rawMode)) ? rawMode : "practical";
   const scoreWeights = (hasScoreMetadata(run) ? run.scoreWeights : undefined) ?? getDefaultWeights(scoreMode);
 
   return {

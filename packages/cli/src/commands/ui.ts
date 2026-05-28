@@ -10,6 +10,7 @@ import {
   createRunId,
   isAbortError,
   loadRunState,
+  logger,
   metrics,
   saveRunState,
 } from "@agentarena/core";
@@ -45,9 +46,12 @@ import {
   handleUiInfo,
   withErrorHandling,
 } from "./api-routes.js";
+import { validateRunPayload } from "./run-payload-validator.js";
 import {
+  fromUiRunState,
   normalizeUiSelections,
   resolveReportLocale,
+  toUiRunState,
   type UiRunLogEntry,
   type UiRunPayload,
   type UiRunStatus,
@@ -56,43 +60,6 @@ import {
 
 const DEFAULT_UI_PORT = 4320;
 const MAX_UI_LOG_ENTRIES = 30;
-
-/**
- * Validate a run payload from the UI. Returns an error message if invalid, or null if valid.
- * This is a pure validation function with no side effects.
- */
-function validateRunPayload(runPayload: UiRunPayload): string | null {
-  if (!runPayload.repoPath || typeof runPayload.repoPath !== "string") {
-    return "repoPath is required and must be a string.";
-  }
-  if (!runPayload.taskPath || typeof runPayload.taskPath !== "string") {
-    return "taskPath is required and must be a string.";
-  }
-  // Path containment checks (security: prevent path traversal)
-  const resolvedRepoPath = path.resolve(runPayload.repoPath);
-  const resolvedTaskPath = path.resolve(runPayload.taskPath);
-  const cwd = process.cwd();
-  if (!resolvedRepoPath.startsWith(cwd + path.sep) && resolvedRepoPath !== cwd) {
-    return "repoPath must be within the current working directory.";
-  }
-  if (!resolvedTaskPath.startsWith(cwd + path.sep) && resolvedTaskPath !== cwd) {
-    return "taskPath must be within the current working directory.";
-  }
-  // Numeric validation
-  if (runPayload.maxConcurrency !== undefined) {
-    const parsed = Number(runPayload.maxConcurrency);
-    if (!Number.isFinite(parsed) || parsed < 1) {
-      return "maxConcurrency must be a positive integer.";
-    }
-  }
-  if (runPayload.tokenBudget !== undefined) {
-    const parsed = Number(runPayload.tokenBudget);
-    if (!Number.isFinite(parsed) || parsed <= 0) {
-      return "tokenBudget must be a positive number.";
-    }
-  }
-  return null;
-}
 
 const WEB_REPORT_DIST_ROOT = path.join(WORKSPACE_ROOT, "apps", "web-report", "dist");
 
@@ -180,13 +147,43 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
         error: "Server restarted while run was in progress. Previous run state was recovered.",
         updatedAt: new Date().toISOString()
       };
-      await saveRunState(process.cwd(), activeRunStatus as import("@agentarena/core").UiRunState);
+      await saveRunState(process.cwd(), toUiRunState(activeRunStatus));
     } else if (persistedState) {
-      activeRunStatus = persistedState as UiRunStatus;
+      activeRunStatus = fromUiRunState(persistedState);
     }
   } catch (error) {
-    console.warn("[agentarena] Failed to restore persisted run state:", error instanceof Error ? error.message : String(error));
+    logger.warn("server", "run_state.restore_failed", `Failed to restore persisted run state: ${error instanceof Error ? error.message : String(error)}`, {
+      error
+    });
   }
+
+  /**
+   * Debounced persistence. Run state can change rapidly during a benchmark
+   * (every preflight, every agent start/finish, every progress event). Without
+   * debouncing, each change fires a JSON.stringify + atomic file write, which
+   * stalls the hot path and saturates disk. A 750ms trailing debounce coalesces
+   * a burst of updates into a single write at the end of the burst.
+   *
+   * We always re-read activeRunStatus inside the timer so the persisted state
+   * reflects the latest mutation, not the snapshot captured when the timer was
+   * scheduled.
+   *
+   * Note: debounced writes are lost on SIGKILL. This is acceptable because run state
+   * is best-effort recovery data, not source of truth.
+   */
+  const RUN_STATE_SAVE_DEBOUNCE_MS = 750;
+  let pendingSaveHandle: ReturnType<typeof setTimeout> | undefined;
+  const scheduleSaveRunState = (): void => {
+    if (pendingSaveHandle) return; // a save is already scheduled; it will pick up latest activeRunStatus
+    pendingSaveHandle = setTimeout(() => {
+      pendingSaveHandle = undefined;
+      saveRunState(process.cwd(), toUiRunState(activeRunStatus)).catch((err: unknown) => {
+        // saveRunState already logs internally, but log here too so the call-site
+        // failure is correlated with the request that triggered it.
+        logger.warn("server", "run_state.persist_failed", `scheduleSaveRunState: ${err instanceof Error ? err.message : String(err)}`);
+      });
+    }, RUN_STATE_SAVE_DEBOUNCE_MS);
+  };
 
   const setRunStatus = (status: Partial<UiRunStatus>): void => {
     activeRunStatus = {
@@ -194,8 +191,7 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
       ...status,
       updatedAt: new Date().toISOString()
     };
-    // Fire-and-forget persistence (don't await, don't block)
-    saveRunState(process.cwd(), activeRunStatus as import("@agentarena/core").UiRunState).catch(() => {});
+    scheduleSaveRunState();
   };
 
   const appendRunLog = (entry: Omit<UiRunLogEntry, "timestamp">): void => {
@@ -208,8 +204,21 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
       logs: [...activeRunStatus.logs, nextEntry].slice(-MAX_UI_LOG_ENTRIES),
       updatedAt: nextEntry.timestamp
     };
-    // Fire-and-forget persistence (don't await, don't block)
-    saveRunState(process.cwd(), activeRunStatus as import("@agentarena/core").UiRunState).catch(() => {});
+    scheduleSaveRunState();
+  };
+
+  /**
+   * Force-flush any pending debounced save. Called at terminal lifecycle moments
+   * (run end, server shutdown) so a debounced write doesn't get lost.
+   */
+  const flushSaveRunState = async (): Promise<void> => {
+    if (pendingSaveHandle) {
+      clearTimeout(pendingSaveHandle);
+      pendingSaveHandle = undefined;
+    }
+    await saveRunState(process.cwd(), toUiRunState(activeRunStatus)).catch((err: unknown) => {
+      logger.warn("server", "run_state.persist_failed", `flushSaveRunState: ${err instanceof Error ? err.message : String(err)}`);
+    });
   };
 
   // Configure proxy trust if requested
@@ -416,7 +425,9 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
           logs: [],
           updatedAt: new Date().toISOString()
         };
-        saveRunState(process.cwd(), activeRunStatus as import("@agentarena/core").UiRunState).catch(() => {});
+        // This is a new-run boundary — flush before resetting so any pending
+        // debounced save from the previous run lands first.
+        await flushSaveRunState();
 
         setRunStatus({
           state: "running",
@@ -634,10 +645,18 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
     }
   });
 
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(port, host, () => resolve());
-  });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(port, host, () => resolve());
+    });
+  } catch (err) {
+    // Clean up the rate-limit cleanup interval if listen() failed (e.g. EADDRINUSE).
+    // Without this, a leaked interval keeps the event loop alive after the
+    // server fails to start.
+    clearInterval(rateLimitCleanupInterval);
+    throw err;
+  }
 
   const url = `http://${host}:${port}`;
   console.log(`\nAgentArena UI server running`);
@@ -646,16 +665,19 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
   const authTokenFilePath = path.join(process.cwd(), ".agentarena", "last-auth-token");
   await fs.mkdir(path.dirname(authTokenFilePath), { recursive: true });
   await fs.writeFile(authTokenFilePath, authToken, { encoding: "utf8", mode: 0o600 });
-  // Attempt to restrict file permissions (best-effort; Windows ACLs differ)
+  // Attempt to restrict file permissions (best-effort; Windows ACLs differ).
   await fs.chmod(authTokenFilePath, 0o600).catch(() => {});
-  console.log(`auth_token=${authToken}`);
+  // Never print the token (or any prefix of it) to stdout — CI logs and terminal
+  // scrollback capture stdout, and even a partial prefix narrows brute force.
+  // Don't include the token in the URL fragment either: browser history persists it.
+  // Operators retrieve the token by reading the file path printed below.
   console.log(`auth_token_file=${authTokenFilePath}`);
   if (!isLocalhost) {
     console.log(`\n  Non-localhost access requires authentication.`);
-    console.log(`  Open in browser: http://${host}:${port}#token=${authToken}`);
-    console.log(`  Token saved to: ${authTokenFilePath}\n`);
+    console.log(`  Token file: ${authTokenFilePath}`);
+    console.log(`  Browser URL: ${url}    (paste the token from the file when prompted)\n`);
   } else {
-    console.log(`  WARNING: This token grants full API access. Do not share it.`);
+    console.log(`  WARNING: The token in ${authTokenFilePath} grants full API access. Do not share it.`);
   }
 
   if (!parsed.noOpen) {
@@ -665,7 +687,10 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
   await new Promise<void>((resolve) => {
     const closeServer = () => {
       clearInterval(rateLimitCleanupInterval);
-      server.close(() => resolve());
+      // Flush any pending debounced run-state write before the process exits.
+      flushSaveRunState()
+        .catch(() => {})
+        .finally(() => server.close(() => resolve()));
     };
 
     process.once("SIGINT", closeServer);

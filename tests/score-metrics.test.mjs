@@ -2,22 +2,22 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  testPassRatio,
-  criticalJudgePassRatio,
-  nonCriticalJudgePassRatio,
-  hasCriticalJudgeFailure,
-  failToPassScore,
-  passToPassScore,
-  lintQualityScore,
-  durationEfficiencyScore,
-  costEfficiencyScore,
-  precisionScore,
-  resolutionRateScore,
-  tokenEfficiencyScoreComponent,
   acceptanceRateScore,
   categoryScore,
+  costEfficiencyScore,
+  criticalJudgePassRatio,
+  durationEfficiencyScore,
+  failToPassScore,
+  hasCriticalJudgeFailure,
   LINT_ERROR_WEIGHT,
   LINT_WARNING_WEIGHT,
+  lintQualityScore,
+  nonCriticalJudgePassRatio,
+  passToPassScore,
+  precisionScore,
+  resolutionRateScore,
+  testPassRatio,
+  tokenEfficiencyScoreComponent,
 } from "../packages/report/dist/score-metrics.js";
 
 function makeResult(overrides = {}) {
@@ -143,9 +143,9 @@ test("lintQualityScore penalizes errors more than warnings", () => {
 
 // --- durationEfficiencyScore ---
 
-test("durationEfficiencyScore returns 0 when no results", () => {
+test("durationEfficiencyScore returns 1 when all results have zero duration (instant completion)", () => {
   const run = makeRun([]);
-  assert.equal(durationEfficiencyScore(makeResult(), run), 0);
+  assert.equal(durationEfficiencyScore(makeResult(), run), 1);
 });
 
 test("durationEfficiencyScore returns 1 when this is the fastest", () => {

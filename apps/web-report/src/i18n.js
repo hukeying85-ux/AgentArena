@@ -57,6 +57,7 @@ const en = {
   judgeFiltersTitle: "Judge Filters",
   markdownSummaryTitle: "Markdown Summary",
   copySummary: "Copy Summary",
+  copyVerdictCard: "Copy Verdict Card",
   copyShareSvg: "Copy Share SVG",
   downloadShareSvg: "Download Share SVG",
   judgeSearchPlaceholder: "Search label, target, expectation",
@@ -295,6 +296,8 @@ const en = {
   // Export buttons
   exportMarkdown: "Export Markdown",
   exportHtml: "Export HTML",
+  exportJson: "Export JSON",
+  importJson: "Import JSON",
   copyLink: "Copy Link",
 
   // Team cost calculator
@@ -321,6 +324,9 @@ const en = {
   customWeightsHint: "Custom weights (advanced)",
 
   // Score preset buttons
+  scorePresetLabel: "Score preset:",
+  scorePresetHint: "Re-scores the current view only. The archived scoring is preserved.",
+  scoreWeightsCustomTitle: "Custom weights (advanced)",
   scorePresetPracticalBtn: "🎯 Practical (Default)",
   scorePresetBalancedBtn: "⚖️ Balanced",
   scorePresetIssueResolutionBtn: "🎯 Issue Resolution",
@@ -371,6 +377,12 @@ const en = {
   issueResolutionCreditLabel: "Issue Resolution Mode",
   efficiencyFirstCreditLabel: "Efficiency First Mode",
   rotatingTasksCreditLabel: "Rotating Tasks Mode",
+
+  // Code review
+  codeReviewTitle: "Code Review (Diff Comparison)",
+  codeReviewSelectLabel: "Select agents to compare:",
+  codeReviewCompareBtn: "Start Comparison",
+  codeReviewEmptyState: "Select at least 2 agents to compare",
 
   // Test connection
   testConnection: "Test",
@@ -498,6 +510,7 @@ const zhCN = {
   judgeFiltersTitle: "Judge 筛选",
   markdownSummaryTitle: "Markdown 摘要",
   copySummary: "复制摘要",
+  copyVerdictCard: "复制结果卡片",
   copyShareSvg: "复制分享 SVG",
   downloadShareSvg: "下载分享 SVG",
   judgeSearchPlaceholder: "搜索 label、target、expectation",
@@ -766,6 +779,9 @@ const zhCN = {
   customWeightsHint: "自定义权重（高级）",
 
   // Score preset buttons
+  scorePresetLabel: "评分预设:",
+  scorePresetHint: "仅重新计算当前视图的得分，归档评分保持不变。",
+  scoreWeightsCustomTitle: "自定义权重（高级）",
   scorePresetPracticalBtn: "🎯 实用模式 (默认)",
   scorePresetBalancedBtn: "⚖️ 平衡模式",
   scorePresetIssueResolutionBtn: "🎯 Issue 解决模式",
@@ -781,6 +797,12 @@ const zhCN = {
   issueResolutionCreditLabel: "Issue Resolution 模式",
   efficiencyFirstCreditLabel: "Efficiency First 模式",
   rotatingTasksCreditLabel: "Rotating Tasks 模式",
+
+  // Code review
+  codeReviewTitle: "代码变更对比 (Code Review)",
+  codeReviewSelectLabel: "选择 Agent 对比:",
+  codeReviewCompareBtn: "开始对比",
+  codeReviewEmptyState: "选择至少 2 个 Agent 进行对比",
 
   // Fair comparison
   runCompareFairOnlyTitle: "公平对比",
@@ -834,6 +856,7 @@ const zhCN = {
   openThisRun: "打开这个 run",
   openLabel: "查看",
   exportJson: "导出 JSON",
+  importJson: "导入 JSON",
   exportLabel: "导出",
   removeFromList: "从列表移除",
   removeLabel: "移除",

@@ -2,7 +2,7 @@ import type {
   JudgeResult,
   TaskJudge,
 } from "@agentarena/core";
-import { judgeTypeRegistry, metrics } from "@agentarena/core";
+import { BenchmarkCancelledError, judgeTypeRegistry, metrics } from "@agentarena/core";
 import { parseCommand, runCommandStep, runCommandSteps } from "./command-runner.js";
 import { runCommandJudge } from "./judges/command.js";
 import { runCompilationJudge } from "./judges/compilation.js";
@@ -132,16 +132,85 @@ export async function runJudge(
         break;
       }
     }
+  } catch (error) {
+    // Cancellation is a control-flow signal, not a judge failure. Re-throw so
+    // the runner's abort handling can short-circuit; otherwise this judge
+    // would silently produce a fake "Judge did not produce a result" fallback
+    // and the benchmark would proceed as if cancellation had been ignored.
+    if (error instanceof BenchmarkCancelledError) {
+      throw error;
+    }
+    // Treat the OS AbortError the same way as BenchmarkCancelledError —
+    // both signal "user asked us to stop, don't pretend you scored anything".
+    if (error instanceof Error && (error.name === "AbortError" || (error as NodeJS.ErrnoException).code === "ABORT_ERR")) {
+      throw error;
+    }
+    // Otherwise surface as a structured judge failure with the error message
+    // so the SPA can render something more useful than "did not produce a result".
+    result = {
+      judgeId: judge.id,
+      type: judge.type,
+      success: false,
+      label: judge.label,
+      exitCode: null,
+      stdout: "",
+      stderr: error instanceof Error ? error.message : String(error),
+      durationMs: Date.now() - startTime,
+    };
   } finally {
     const durationSeconds = (Date.now() - startTime) / 1000;
     const status = result?.success ? "success" : "failure";
     metrics.judgeExecutionTotal.inc({ type: judge.type, status });
     metrics.judgeExecutionDurationSeconds.observe({ type: judge.type }, durationSeconds);
   }
-  return result!;
+  return result ?? { judgeId: judge.id, type: judge.type, success: false, label: judge.label, exitCode: null, stdout: "", stderr: "Judge did not produce a result", durationMs: 0 };
 }
 
 const COMMAND_BASED_TYPES = new Set(["command", "test-result", "lint-check", "compilation", "patch-validation"]);
+/**
+ * Max command-based judges to run in parallel. Each command judge typically
+ * spawns a child process (npm test, eslint, tsc, …). Running them serially
+ * stretched a 5-judge task pack into 5x the total command duration with
+ * minimal CPU saturation. The workspace is effectively read-only between
+ * agent execution and judge phase, so concurrent reads/builds are safe.
+ *
+ * Override at runtime via AGENTARENA_JUDGE_CONCURRENCY.
+ */
+const DEFAULT_JUDGE_CONCURRENCY = 4;
+
+function getJudgeConcurrency(): number {
+  const raw = process.env.AGENTARENA_JUDGE_CONCURRENCY;
+  if (!raw) return DEFAULT_JUDGE_CONCURRENCY;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 1) return DEFAULT_JUDGE_CONCURRENCY;
+  return Math.min(Math.floor(parsed), 16);
+}
+
+async function mapJudgesWithConcurrency(
+  indices: number[],
+  judges: TaskJudge[],
+  workspacePath: string,
+  baseAllowedNames: string[],
+  options: JudgeExecutionOptions,
+  fileList: string[] | undefined,
+  results: (JudgeResult | null)[],
+  concurrency: number
+): Promise<void> {
+  let cursor = 0;
+  const next = async (): Promise<void> => {
+    while (cursor < indices.length) {
+      const at = cursor;
+      cursor += 1;
+      const idx = indices[at];
+      results[idx] = await runJudge(judges[idx], workspacePath, baseAllowedNames, options, fileList);
+    }
+  };
+  const workers: Promise<void>[] = [];
+  for (let w = 0; w < Math.min(concurrency, indices.length); w += 1) {
+    workers.push(next());
+  }
+  await Promise.all(workers);
+}
 
 export async function runJudges(
   judges: TaskJudge[],
@@ -153,26 +222,38 @@ export async function runJudges(
   const results: (JudgeResult | null)[] = new Array(judges.length).fill(null);
 
   const parallelIndices: number[] = [];
-  const sequentialIndices: number[] = [];
+  const commandIndices: number[] = [];
   for (let i = 0; i < judges.length; i++) {
     if (COMMAND_BASED_TYPES.has(judges[i].type)) {
-      sequentialIndices.push(i);
+      commandIndices.push(i);
     } else {
       parallelIndices.push(i);
     }
   }
 
-  const [parallelResults] = await Promise.all([
-    Promise.all(parallelIndices.map((i) => runJudge(judges[i], workspacePath, baseAllowedNames, options, fileList))),
+  // Pure parallel judges (file-exists, glob, json-value, …) run with full
+  // parallelism; command-based judges run with bounded concurrency since
+  // each forks a child process.
+  await Promise.all([
     (async () => {
-      for (const i of sequentialIndices) {
-        results[i] = await runJudge(judges[i], workspacePath, baseAllowedNames, options, fileList);
+      const parallelResults = await Promise.all(
+        parallelIndices.map((i) => runJudge(judges[i], workspacePath, baseAllowedNames, options, fileList))
+      );
+      for (let j = 0; j < parallelIndices.length; j++) {
+        results[parallelIndices[j]] = parallelResults[j];
       }
-    })()
+    })(),
+    mapJudgesWithConcurrency(commandIndices, judges, workspacePath, baseAllowedNames, options, fileList, results, getJudgeConcurrency()),
   ]);
 
-  for (let j = 0; j < parallelIndices.length; j++) {
-    results[parallelIndices[j]] = parallelResults[j];
+  // Validate every slot is populated. A `null` here means a judge throwing
+  // BenchmarkCancelledError above propagated out before its slot was filled —
+  // we should already have unwound from runBenchmark, but guard anyway so
+  // downstream type assertions are not a lie.
+  for (let i = 0; i < results.length; i += 1) {
+    if (results[i] === null) {
+      throw new Error(`runJudges: missing result for judge index ${i} (judge ${judges[i].id} of type ${judges[i].type}). This indicates an internal scheduling bug.`);
+    }
   }
 
   return results as JudgeResult[];
