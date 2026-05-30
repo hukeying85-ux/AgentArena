@@ -392,6 +392,7 @@ const en = {
   testConnectionBlocked: "Blocked",
   testConnectionUnverified: "Unverified",
   testConnectionError: "Test failed",
+  detectAllAgents: "Detect Installed Agents",
 
   // Community leaderboard
   communityEyebrow: "Community",
@@ -1037,6 +1038,7 @@ const zhCN = {
   testConnectionBlocked: "不可用",
   testConnectionUnverified: "未验证",
   testConnectionError: "测试失败",
+  detectAllAgents: "检测已安装的 Agent",
 
   // Community leaderboard
   communityEyebrow: "社区",

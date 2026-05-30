@@ -25,13 +25,13 @@ class StateManager {
   }
 
   /**
-   * 设置单个状态值
+   * 设置单个状态值（不可变更新）
    * @param {string} key - 状态键名
    * @param {any} value - 状态值
    */
   set(key, value) {
     const oldValue = this.state[key];
-    this.state[key] = value;
+    this.state = { ...this.state, [key]: value };
     this.publish(STATE_CHANGE, { key, value, oldValue });
   }
 
@@ -44,16 +44,18 @@ class StateManager {
   }
 
   /**
-   * 批量设置状态
+   * 批量设置状态（不可变更新）
    * @param {Object} partial - 部分状态对象
    */
   setState(partial) {
     const changed = [];
+    const nextState = { ...this.state };
     for (const [key, value] of Object.entries(partial)) {
       const oldValue = this.state[key];
-      this.state[key] = value;
+      nextState[key] = value;
       changed.push({ key, value, oldValue });
     }
+    this.state = nextState;
     if (changed.length > 0) {
       this.publish(STATE_CHANGE, { changed });
     }

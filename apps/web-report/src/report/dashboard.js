@@ -82,20 +82,51 @@ export function createDashboardModule(deps) {
   };
 
 /**
- * Render an enhanced empty state with icon, title, message, and optional CTA button
+ * Render an enhanced empty state with icon, title, message, and dual CTA buttons
  * @param {Object} options
  * @param {string} options.title - Main title text
  * @param {string} options.message - Descriptive message
- * @param {string} [options.ctaText] - Optional CTA button text
- * @param {string} [options.ctaAction] - Optional CTA button action (data attribute)
+ * @param {string} [options.primaryCtaText] - Primary CTA button text (e.g., "Try Demo")
+ * @param {string} [options.primaryCtaAction] - Primary CTA button action (data attribute)
+ * @param {string} [options.secondaryCtaText] - Secondary CTA button text (e.g., "Configure Agents")
+ * @param {string} [options.secondaryCtaAction] - Secondary CTA button action (data attribute)
  * @returns {string} HTML string
  */
-function renderEmptyState({ title, message, ctaText, ctaAction }) {
+function renderEmptyState({ title, message, primaryCtaText, primaryCtaAction, secondaryCtaText, secondaryCtaAction }) {
   return `
     <div class="empty-state-content">
       <h3 class="empty-state-title">${escapeHtml(title)}</h3>
       <p class="empty-state-message">${escapeHtml(message)}</p>
-      ${ctaText ? `<button class="btn btn-primary empty-state-cta" ${ctaAction ? `data-action="${ctaAction}"` : ''}>${escapeHtml(ctaText)}</button>` : ''}
+      <div class="empty-state-actions">
+        ${primaryCtaText ? `<button class="btn btn-primary empty-state-cta" ${primaryCtaAction ? `data-action="${primaryCtaAction}"` : ''}>${escapeHtml(primaryCtaText)}</button>` : ''}
+        ${secondaryCtaText ? `<button class="btn btn-ghost empty-state-cta-secondary" ${secondaryCtaAction ? `data-action="${secondaryCtaAction}"` : ''}>${escapeHtml(secondaryCtaText)}</button>` : ''}
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * Render an error state with warning icon, title, message, and optional retry button
+ * @param {Object} options
+ * @param {string} options.title - Error title text
+ * @param {string} options.message - Error description
+ * @param {string} [options.retryText] - Optional retry button text
+ * @param {string} [options.retryAction] - Optional retry button action (data attribute)
+ * @returns {string} HTML string
+ */
+function renderErrorState({ title, message, retryText, retryAction }) {
+  return `
+    <div class="error-state-content">
+      <div class="error-state-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="12" y1="8" x2="12" y2="12"/>
+          <line x1="12" y1="16" x2="12.01" y2="16"/>
+        </svg>
+      </div>
+      <h3 class="error-state-title">${escapeHtml(title)}</h3>
+      <p class="error-state-message">${escapeHtml(message)}</p>
+      ${retryText ? `<button class="btn btn-danger error-state-retry" ${retryAction ? `data-action="${retryAction}"` : ''}>${escapeHtml(retryText)}</button>` : ''}
     </div>
   `;
 }
@@ -297,7 +328,9 @@ function renderRunCompareTable() {
     elements.runCompareTable.innerHTML = renderEmptyState({
       title: t("noRunsLoaded"),
       message: t("noRunsLoadedHint"),
-      ctaText: t("loadData")
+      primaryCtaText: t("tryDemo"),
+      primaryCtaAction: "load-demo",
+      secondaryCtaText: t("loadData")
     });
     return;
   }
@@ -372,7 +405,8 @@ function renderRunDiffTableV2() {
   if (!previousRun || rows.length === 0) {
     elements.runDiffTable.innerHTML = renderEmptyState({
       title: localText("没有可对比的历史 run。", "No previous comparable run found."),
-      message: localText("尝试加载更多历史运行以进行对比。", "Try loading more historical runs for comparison.")
+      message: localText("尝试加载更多历史运行以进行对比。", "Try loading more historical runs for comparison."),
+      primaryCtaText: t("loadData")
     });
     return;
   }
@@ -419,7 +453,8 @@ function renderAgentTrendTableV2(run) {
   if (rows.length === 0) {
     elements.agentTrendTable.innerHTML = renderEmptyState({
       title: localText("没有趋势数据。", "No trend data available."),
-      message: localText("加载多次运行以查看 agent 性能趋势。", "Load multiple runs to see agent performance trends over time.")
+      message: localText("加载多次运行以查看 agent 性能趋势。", "Load multiple runs to see agent performance trends over time."),
+      primaryCtaText: t("loadData")
     });
     return;
   }
@@ -592,7 +627,9 @@ function renderMarkdownPanel() {
       `
     : renderEmptyState({
         title: localText("先加载一个 run，才能看到摘要亮点。", "Load a run to see summary highlights."),
-        message: localText("选择一个运行记录以查看重点摘要和分享卡片。", "Select a run to see highlights and share card.")
+        message: localText("选择一个运行记录以查看重点摘要和分享卡片。", "Select a run to see highlights and share card."),
+        primaryCtaText: t("tryDemo"),
+        primaryCtaAction: "load-demo"
       });
   elements.markdownContent.innerHTML = renderMarkdownBlock(markdown);
 }
@@ -968,7 +1005,8 @@ function renderCompareTableV2(run) {
   if (results.length === 0) {
     elements.compareTable.innerHTML = renderEmptyState({
       title: localText("没有 variant 符合当前筛选条件。", "No variants match the current compare filters."),
-      message: localText("尝试调整筛选条件或切换排序方式。", "Try adjusting the filter conditions or changing the sort method.")
+      message: localText("尝试调整筛选条件或切换排序方式。", "Try adjusting the filter conditions or changing the sort method."),
+      primaryCtaText: t("loadData")
     });
     return;
   }
@@ -1263,7 +1301,9 @@ function renderLeaderboard(run) {
     elements.leaderboardTitle.textContent = t("leaderboardTitle");
     elements.leaderboardContent.innerHTML = renderEmptyState({
       title: t("leaderboardNoData"),
-      message: t("leaderboardNoDataHint")
+      message: t("leaderboardNoDataHint"),
+      primaryCtaText: t("tryDemo"),
+      primaryCtaAction: "load-demo"
     });
     return;
   }

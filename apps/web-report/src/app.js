@@ -150,11 +150,8 @@ function hideLoading() {
 }
 
 function showError(message) {
-  setHidden(elements.emptyState, true);
-  setHidden(elements.dashboard, true);
-  setHidden(elements.errorState, false);
-  if (elements.errorTitle) elements.errorTitle.textContent = t("failedToLoad");
-  if (elements.errorMessage) elements.errorMessage.textContent = message;
+  state.notice = `⚠️ ${message}`;
+  render();
 }
 
 function setText(id, value) {
@@ -815,6 +812,9 @@ function render() {
   try { renderLauncher(); } catch(e) { console.error("[TRACE] renderLauncher error:", e); }
   try { renderRunList(); } catch(e) { console.error("[TRACE] renderRunList error:", e); }
 
+  // Update sticky bar visibility based on launcher panel visibility
+  updateStickyBarVisibility();
+
   if (!state.run) {
     setHidden(elements.runInfo, true);
     setHidden(elements.emptyState, false);
@@ -838,6 +838,47 @@ function render() {
   const wsHome = document.querySelector('.workspace-home');
   if (wsHome) wsHome.classList.add('hidden');
   renderCommunityView();
+}
+
+// Sticky bar visibility: show when launcher panel is not in viewport
+function updateStickyBarVisibility() {
+  if (!elements.stickyBenchmarkBar || !elements.launcherPanel) return;
+
+  const launcherRect = elements.launcherPanel.getBoundingClientRect();
+  const launcherVisible = launcherRect.top < window.innerHeight && launcherRect.bottom > 0;
+
+  // Update summary text based on configured agents
+  const selectedCount = document.querySelectorAll('#launcher-agents input[type="checkbox"]:checked').length;
+  if (elements.stickyBarSummary) {
+    elements.stickyBarSummary.innerHTML = selectedCount > 0
+      ? `<strong>${selectedCount}</strong> agent${selectedCount === 1 ? '' : 's'} configured`
+      : 'Configure agents and a task to start benchmarking';
+  }
+
+  // Show sticky bar only when launcher is not visible
+  setHidden(elements.stickyBenchmarkBar, launcherVisible);
+}
+
+// Listen to scroll to update sticky bar visibility
+let scrollTimeout;
+window.addEventListener('scroll', () => {
+  if (scrollTimeout) cancelAnimationFrame(scrollTimeout);
+  scrollTimeout = requestAnimationFrame(updateStickyBarVisibility);
+}, { passive: true });
+
+// Sticky bar button click: scroll to launcher and trigger run
+if (elements.stickyBarRunBtn) {
+  elements.stickyBarRunBtn.addEventListener('click', () => {
+    if (elements.launcherPanel) {
+      elements.launcherPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      // Focus the run button after scroll
+      setTimeout(() => {
+        if (elements.launcherRun) {
+          elements.launcherRun.focus();
+        }
+      }, 500);
+    }
+  });
 }
 
 async function handleFileSelection(event) {
@@ -1009,7 +1050,31 @@ elements.launcherScoreMode?.addEventListener("change", (event) => {
   state.launcherScoreMode = event.target.value;
   saveLauncherConfig();
 });
-elements.launcherAgents.addEventListener("change", (event) => {
+elements.launcherAgents?.addEventListener("change", (event) => {
+  const target = event.target;
+  if (target?.id === "launcher-global-model-enabled") {
+    state.launcherGlobalModelEnabled = target.checked;
+    saveLauncherConfig();
+    renderLauncher();
+    return;
+  }
+  if (target?.id === "launcher-global-model") {
+    state.launcherGlobalModelOverride = target.value;
+    saveLauncherConfig();
+    return;
+  }
+  if (target instanceof HTMLElement && target.dataset.globalModelAgentId) {
+    const agentId = target.dataset.globalModelAgentId;
+    if (/** @type {HTMLInputElement} */ (target).checked) {
+      if (!state.launcherGlobalModelAgentIds.includes(agentId)) {
+        state.launcherGlobalModelAgentIds = [...state.launcherGlobalModelAgentIds, agentId];
+      }
+    } else {
+      state.launcherGlobalModelAgentIds = state.launcherGlobalModelAgentIds.filter((id) => id !== agentId);
+    }
+    saveLauncherConfig();
+    return;
+  }
   if (event.target?.id === "launcher-add-codex-variant") {
     return;
   }
@@ -1018,7 +1083,7 @@ elements.launcherAgents.addEventListener("change", (event) => {
 elements.launcherAgents.addEventListener("input", () => {
   syncLauncherStateFromDom();
 });
-elements.launcherAgents.addEventListener("click", (event) => {
+elements.launcherAgents.addEventListener("click", async (event) => {
   const target = event.target;
   if (!(target instanceof HTMLElement)) {
     return;
@@ -1156,6 +1221,62 @@ elements.launcherAgents.addEventListener("click", (event) => {
   const testRole = target.getAttribute("data-role");
   if (testRole?.endsWith("-variant-test") || testRole === "real-agent-test") {
     handleTestConnection(target);
+  }
+
+  // Detect all agents button
+  if (target.id === "detect-all-agents") {
+    const agentCheckboxes = Array.from(
+      elements.launcherAgents.querySelectorAll('[data-role="real-agent"]')
+    );
+
+    target.disabled = true;
+    target.innerHTML = `<span class="spinner"></span> ${escapeHtml(t("testConnectionTesting"))}`;
+
+    const results = [];
+    for (const checkbox of agentCheckboxes) {
+      const agentId = checkbox.value;
+      const agentLabel = checkbox.parentElement?.querySelector("span")?.textContent || agentId;
+
+      try {
+        const response = await apiFetch("/api/preflight", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ baseAgentId: agentId, displayLabel: agentLabel })
+        });
+
+        if (response.ok) {
+          const result = await response.json();
+          results.push({
+            agentId,
+            agentLabel,
+            status: result.status,
+            installed: result.status === "ready" || result.status === "unverified"
+          });
+        } else {
+          results.push({ agentId, agentLabel, status: "error", installed: false });
+        }
+      } catch (error) {
+        results.push({ agentId, agentLabel, status: "error", installed: false });
+      }
+    }
+
+    target.disabled = false;
+    target.textContent = t("detectAllAgents");
+
+    const installed = results.filter(r => r.installed);
+    const notInstalled = results.filter(r => !r.installed);
+
+    let message = "";
+    if (installed.length > 0) {
+      message += `✓ ${installed.map(r => r.agentLabel).join(", ")}\n`;
+    }
+    if (notInstalled.length > 0) {
+      message += `✗ ${notInstalled.map(r => r.agentLabel).join(", ")}`;
+    }
+
+    if (message) {
+      alert(message);
+    }
   }
 });
 elements.launcherRun.addEventListener("click", handleLauncherRun);
@@ -1520,27 +1641,13 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-// Error state handlers
-elements.errorRetry?.addEventListener("click", () => {
-  // Hide error, show empty state again
-  setHidden(elements.errorState, true);
-  setHidden(elements.emptyState, false);
-});
+// Note: Global error state has been removed. Errors now display inline via state.notice
 
-elements.errorBack?.addEventListener("click", () => {
-  // Reset to initial state
-  setHidden(elements.errorState, true);
-  setHidden(elements.emptyState, false);
-  setHidden(elements.dashboard, true);
-  state.run = null;
-  state.runs = [];
-  state.selectedRunId = null;
-  state.selectedAgentId = null;
-  state.notice = null;
-  persistCachedRuns();
-  syncLocationState(state);
-  render();
-});
+// Initial render
+state.notice = null;
+persistCachedRuns();
+syncLocationState(state);
+render();
 
 // Demo button event listener
 if (elements.tryDemoBtn) {
@@ -1558,6 +1665,32 @@ if (elements.tryDemoBtn) {
     }
   });
 }
+
+// Configure Agents button - scroll to launcher panel
+const configureAgentsBtn = document.querySelector("#configure-agents-btn");
+if (configureAgentsBtn) {
+  configureAgentsBtn.addEventListener("click", () => {
+    const launcherSection = document.querySelector("#launcher-section");
+    if (launcherSection) {
+      launcherSection.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  });
+}
+
+// Event delegation for data-action buttons in empty states
+document.addEventListener("click", (event) => {
+  const actionBtn = event.target.closest("[data-action]");
+  if (!actionBtn) return;
+  const action = actionBtn.dataset.action;
+  if (action === "load-demo") {
+    loadDemoData();
+  } else if (action === "scroll-to-launcher") {
+    const launcherSection = document.querySelector("#launcher-section");
+    if (launcherSection) {
+      launcherSection.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }
+});
 
 // Expose for debugging and HTML onclick (localhost only)
 if (location.hostname === "localhost" || location.hostname === "127.0.0.1") {

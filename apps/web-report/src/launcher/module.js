@@ -299,6 +299,9 @@ export function createLauncherModule(deps) {
         outputPath: elements.launcherOutputPath.value,
         probeAuth: elements.launcherProbeAuth.checked,
         scoreMode: state.launcherScoreMode,
+        globalModelOverride: state.launcherGlobalModelOverride,
+        globalModelEnabled: state.launcherGlobalModelEnabled,
+        globalModelAgentIds: state.launcherGlobalModelAgentIds,
         selectedAgentIds: selectedLauncherAgents(),
         ...variantData,
         claudeVariants: state.launcherClaudeVariants.map((v) => ({
@@ -455,13 +458,25 @@ export function createLauncherModule(deps) {
             </label>
           </div>
           <p class="muted">${escapeHtml(localText("Provider", "Provider"))}: ${escapeHtml(profile?.name ?? variant.providerName ?? "Official")} | ${escapeHtml(localText("类型", "Kind"))}: ${escapeHtml(profile?.kind ?? variant.providerKind ?? "official")}</p>
-          <p class="muted">${escapeHtml(localText("密钥状态", "Secret"))}: ${escapeHtml(
-            profile?.kind === "official"
-              ? localText("官方登录态", "Official login")
-              : profile?.secretStored
-                ? localText("已存储", "Stored")
-                : localText("未保存，运行会被阻止", "Missing; runs will be blocked")
-          )}</p>
+          <div class="provider-status-row">
+            <span class="provider-status-label">${escapeHtml(localText("密钥状态", "Secret"))}:</span>
+            ${
+              profile?.kind === "official"
+                ? `<span class="provider-status-badge provider-status-official">
+                    <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                    ${escapeHtml(localText("官方登录态", "Official login"))}
+                   </span>`
+                : profile?.secretStored
+                  ? `<span class="provider-status-badge provider-status-stored">
+                      <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                      ${escapeHtml(localText("已配置", "Configured"))}
+                     </span>`
+                  : `<span class="provider-status-badge provider-status-missing">
+                      <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                      ${escapeHtml(localText("未配置", "Not configured"))}
+                     </span>`
+            }
+          </div>
           ${riskBadges.length > 0 ? `<div class="badge-row">${riskBadges.map((badge) => `<span class="meaning-badge risk-badge">${escapeHtml(badge)}</span>`).join("")}</div>` : ""}
           <div class="inline-actions">
             <button type="button" class="btn-test-connection" data-role="claude-variant-test">${escapeHtml(t("testConnection"))}</button>
@@ -725,6 +740,9 @@ export function createLauncherModule(deps) {
         elements.launcherProbeAuth.checked = Boolean(saved.probeAuth);
         state.launcherSelectedAgentIds = saved.selectedAgentIds ?? [];
         state.launcherScoreMode = saved.scoreMode || "practical";
+        state.launcherGlobalModelOverride = saved.globalModelOverride || "";
+        state.launcherGlobalModelEnabled = saved.globalModelEnabled || false;
+        state.launcherGlobalModelAgentIds = saved.globalModelAgentIds || [];
 
         // Restore generic variants
         for (const config of VARIANT_CONFIGS) {
@@ -821,9 +839,18 @@ export function createLauncherModule(deps) {
     // Real adapters (non-demo, non-variant-managed)
     const variantAgentIds = new Set(VARIANT_CONFIGS.map(c => c.baseAgentId));
     variantAgentIds.add('claude-code');
-    const realAdapters = state.availableAdapters.filter(
+    const allRealAdapters = state.availableAdapters.filter(
       (adapter) => adapter.kind !== "demo" && !variantAgentIds.has(adapter.id)
     );
+
+    // Filter to only show installed agents
+    const realAdapters = state.installedAgents && state.installedAgents.size > 0
+      ? allRealAdapters.filter(adapter => {
+          const checkResult = state.installedAgents.get(adapter.id);
+          return checkResult && checkResult.installed;
+        })
+      : allRealAdapters; // Show all if detection not yet complete
+
     const debugAdapters = state.availableAdapters.filter((adapter) => adapter.kind === "demo");
 
     // Task summary
@@ -874,27 +901,140 @@ export function createLauncherModule(deps) {
     // Generate generic variant sections
     const genericSections = VARIANT_CONFIGS.map(config => renderGenericVariantSection(config)).join('');
 
+    // Build list of enabled variants for global model selector
+    const enabledVariantsForGlobalModel = [];
+
+    // Generic variants
+    for (const config of VARIANT_CONFIGS) {
+      const stateKey = variantStateKey(config.id);
+      for (const variant of state[stateKey].filter(v => v.enabled)) {
+        const variantId = `${config.id}-${variant.id}`;
+        const label = variant.displayLabel.trim() || config.labelKeyEn.replace(' Variants', '');
+        enabledVariantsForGlobalModel.push({ id: variantId, label, baseAgentId: config.baseAgentId });
+      }
+    }
+
+    // Claude variants
+    for (const variant of state.launcherClaudeVariants.filter(v => v.enabled)) {
+      const variantId = `claude-${variant.profileId}`;
+      const label = variant.displayLabel.trim() || `Claude Code · ${variant.providerName ?? "Official"}`;
+      enabledVariantsForGlobalModel.push({ id: variantId, label, baseAgentId: "claude-code" });
+    }
+
+    // Other agents
+    for (const agentId of selectedLauncherAgents()) {
+      const adapter = state.availableAdapters.find(a => a.id === agentId);
+      const label = adapter?.title ?? agentId;
+      enabledVariantsForGlobalModel.push({ id: `agent-${agentId}`, label, baseAgentId: agentId });
+    }
+
+    const globalModelAgentCheckboxes = enabledVariantsForGlobalModel.map(v => {
+      const checked = state.launcherGlobalModelAgentIds.includes(v.id) ? 'checked' : '';
+      return `<label class="field" style="display: flex; align-items: center; gap: 8px; margin: 4px 0;">
+        <input type="checkbox" data-global-model-agent-id="${escapeHtml(v.id)}" ${checked} style="width: auto;" />
+        <span>${escapeHtml(v.label)}</span>
+      </label>`;
+    }).join('');
+
     elements.launcherAgents.innerHTML = `
       ${taskSummary}
       <div class="launcher-section">
+        <h4>${escapeHtml(localText("全局模型覆盖", "Global Model Override"))}</h4>
+        <p class="muted">${escapeHtml(localText("启用后，选中的 Agent 将使用此模型（优先级高于各变体配置）。", "When enabled, selected agents use this model (overrides individual variant configs)."))}</p>
+        <label class="field">
+          <span>${escapeHtml(localText("全局模型", "Global Model"))}</span>
+          <input id="launcher-global-model" type="text" value="${escapeHtml(state.launcherGlobalModelOverride)}" placeholder="${escapeHtml(localText("例如: claude-opus-4-6, gpt-5.4", "e.g. claude-opus-4-6, gpt-5.4"))}" />
+        </label>
+        <label class="field" style="display: flex; align-items: center; gap: 8px;">
+          <input id="launcher-global-model-enabled" type="checkbox" ${state.launcherGlobalModelEnabled ? 'checked' : ''} style="width: auto;" />
+          <span>${escapeHtml(localText("启用全局模型覆盖", "Enable global model override"))}</span>
+        </label>
+        ${state.launcherGlobalModelEnabled && enabledVariantsForGlobalModel.length > 0 ? `
+          <div style="margin-top: 12px; padding: 12px; background: var(--surface-tertiary); border-radius: 6px;">
+            <p style="margin: 0 0 8px; font-weight: 600; font-size: 0.9em;">${escapeHtml(localText("选择应用全局模型的 Agent:", "Select agents to apply global model:"))}</p>
+            ${globalModelAgentCheckboxes}
+          </div>
+        ` : ''}
+      </div>
+      <div class="launcher-section">
         <h4>${escapeHtml(localText("选择参赛 Agent", "Select Agents"))}</h4>
         <p class="muted">${escapeHtml(localText("勾选要参与对比的 Agent。", "Check the agents you want to compare."))}</p>
-        <div class="checkbox-grid">
-          ${realAdapters
-            .map((adapter) => {
-              const checked = state.launcherSelectedAgentIds.includes(adapter.id) ? "checked" : "";
-              return `
-                <div class="checkbox-with-test">
-                  <label class="checkbox">
-                    <input type="checkbox" data-role="real-agent" value="${escapeHtml(adapter.id)}" ${checked} />
-                    <span>${escapeHtml(adapter.title)}</span>
-                  </label>
-                  <button type="button" class="btn-test-connection" data-role="real-agent-test" data-agent-id="${escapeHtml(adapter.id)}">${escapeHtml(t("testConnection"))}</button>
+        ${realAdapters.length === 0
+          ? `<div class="empty-state" style="padding: 20px; text-align: center; background: var(--surface-secondary); border-radius: 8px; margin: 12px 0;">
+              <p style="margin: 0 0 12px; font-size: 1.1em; color: var(--text-secondary);">
+                <strong>${escapeHtml(localText("未检测到已安装的 Agent", "No installed agents detected"))}</strong>
+              </p>
+              <p style="margin: 0 0 16px; font-size: 0.9em; color: var(--text-muted);">
+                ${escapeHtml(localText(
+                  "要运行 Benchmark，你需要先安装至少一个 Agent CLI 工具。",
+                  "To run benchmarks, you need to install at least one Agent CLI tool first."
+                ))}
+              </p>
+              <div style="text-align: left; max-width: 650px; margin: 0 auto; font-size: 0.85em;">
+                <p style="margin: 8px 0; font-weight: 600;">${escapeHtml(localText("支持的 Agent 及安装方式：", "Supported agents and installation:"))}</p>
+                <div style="margin: 12px 0; padding: 12px; background: var(--surface-tertiary); border-radius: 6px;">
+                  <p style="margin: 0 0 8px; font-weight: 600; color: var(--accent);">🚀 ${escapeHtml(localText("推荐（npm 安装，最简单）:", "Recommended (npm install, easiest):"))}</p>
+                  <ul style="margin: 4px 0; padding-left: 20px; line-height: 1.6;">
+                    <li><strong>Claude Code</strong>: <code>npm install -g @anthropic-ai/claude-code</code></li>
+                    <li><strong>Codex CLI</strong>: <code>npm install -g @openai/codex</code></li>
+                    <li><strong>Gemini CLI</strong>: <code>npm install -g @google/gemini-cli</code></li>
+                  </ul>
                 </div>
-              `;
-            })
-            .join("")}
-        </div>
+                <div style="margin: 12px 0; padding: 12px; background: var(--surface-tertiary); border-radius: 6px;">
+                  <p style="margin: 0 0 8px; font-weight: 600;">🐍 ${escapeHtml(localText("Python 安装:", "Python install:"))}</p>
+                  <ul style="margin: 4px 0; padding-left: 20px; line-height: 1.6;">
+                    <li><strong>Aider</strong>: <code>pip install aider-chat</code></li>
+                  </ul>
+                </div>
+                <div style="margin: 12px 0; padding: 12px; background: var(--surface-tertiary); border-radius: 6px;">
+                  <p style="margin: 0 0 8px; font-weight: 600;">💻 ${escapeHtml(localText("IDE 集成（下载桌面应用）:", "IDE Integration (download desktop app):"))}</p>
+                  <ul style="margin: 4px 0; padding-left: 20px; line-height: 1.6;">
+                    <li><strong>Cursor</strong>: <a href="https://cursor.com" target="_blank" rel="noopener">cursor.com</a></li>
+                    <li><strong>Trae</strong>: <a href="https://trae.ai" target="_blank" rel="noopener">trae.ai</a> (${escapeHtml(localText("字节跳动", "ByteDance"))})</li>
+                    <li><strong>Windsurf</strong>: <a href="https://windsurf.com" target="_blank" rel="noopener">windsurf.com</a> (${escapeHtml(localText("暂无 CLI", "No CLI yet"))})</li>
+                  </ul>
+                </div>
+                <div style="margin: 12px 0; padding: 12px; background: var(--surface-tertiary); border-radius: 6px;">
+                  <p style="margin: 0 0 8px; font-weight: 600;">🔧 ${escapeHtml(localText("其他工具:", "Other tools:"))}</p>
+                  <ul style="margin: 4px 0; padding-left: 20px; line-height: 1.6;">
+                    <li><strong>GitHub Copilot</strong>: <code>gh extension install github/gh-copilot</code></li>
+                    <li><strong>OpenCode</strong>: <a href="https://opencode.ai/download" target="_blank" rel="noopener">opencode.ai/download</a></li>
+                    <li><strong>Qwen Code</strong>: <a href="https://github.com/QwenLM/Qwen3.6" target="_blank" rel="noopener">github.com/QwenLM/Qwen3.6</a></li>
+                    <li><strong>Augment Code</strong>: <a href="https://www.augmentcode.com" target="_blank" rel="noopener">augmentcode.com</a> (${escapeHtml(localText("企业版", "Enterprise"))})</li>
+                    <li><strong>Kilo CLI</strong>: ${escapeHtml(localText("查看官方文档", "See official docs"))}</li>
+                  </ul>
+                </div>
+                <p style="margin: 12px 0 8px; color: var(--text-muted); font-size: 0.9em;">
+                  💡 ${escapeHtml(localText(
+                    "安装完成后，点击「重新检测」按钮刷新状态。",
+                    "After installation, click 'Re-detect' to refresh status."
+                  ))}
+                </p>
+              </div>
+              <div class="launcher-actions" style="margin-top: 16px;">
+                <button type="button" class="btn btn-secondary" id="detect-all-agents">${escapeHtml(localText("重新检测", "Re-detect"))}</button>
+              </div>
+            </div>`
+          : `<div class="checkbox-grid">
+              ${realAdapters
+                .map((adapter) => {
+                  const checked = state.launcherSelectedAgentIds.includes(adapter.id) ? "checked" : "";
+                  return `
+                    <div class="checkbox-item">
+                      <label class="checkbox">
+                        <input type="checkbox" data-role="real-agent" value="${escapeHtml(adapter.id)}" ${checked} />
+                        <span>${escapeHtml(adapter.title)}</span>
+                      </label>
+                    </div>
+                  `;
+                })
+                .join("")}
+            </div>
+            <div class="launcher-actions" style="margin-top: 12px;">
+              <button type="button" class="btn btn-secondary" id="detect-all-agents">${escapeHtml(localText("重新检测", "Re-detect"))}</button>
+              <span class="muted" style="font-size: 0.85em;">${escapeHtml(localText("检测新安装的 Agent CLI", "Detect newly installed Agent CLIs"))}</span>
+            </div>`
+        }
       </div>
       <details class="launcher-section">
         <summary class="launcher-section-summary">${escapeHtml(localText("Claude Code 变体", "Claude Code Variants"))} · <span class="muted">${escapeHtml(localText(`${claudeEnabledCount} 个已启用`, `${claudeEnabledCount} enabled`))}</span></summary>
@@ -1013,6 +1153,9 @@ export function createLauncherModule(deps) {
       } else {
         stopRunStatusPolling();
       }
+
+      // Check agent installation status on startup
+      await checkInstalledAgents();
     } catch (error) {
       console.error("detectService failed", error);
       state.notice = localText(
@@ -1029,6 +1172,46 @@ export function createLauncherModule(deps) {
     }
 
     render();
+  }
+
+  async function checkInstalledAgents() {
+    if (!state.availableAdapters || state.availableAdapters.length === 0) {
+      state.installedAgents = new Map();
+      return;
+    }
+
+    // Filter real adapters (non-demo, non-variant-managed)
+    const variantAgentIds = new Set(VARIANT_CONFIGS.map(c => c.baseAgentId));
+    variantAgentIds.add('claude-code');
+    const realAdapters = state.availableAdapters.filter(
+      (adapter) => adapter.kind !== "demo" && !variantAgentIds.has(adapter.id)
+    );
+
+    const results = new Map();
+
+    // Run preflight checks in parallel
+    const checks = realAdapters.map(async (adapter) => {
+      try {
+        const response = await apiFetch("/api/preflight", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ baseAgentId: adapter.id, displayLabel: adapter.title })
+        });
+
+        if (response.ok) {
+          const result = await response.json();
+          const installed = result.status === "ready" || result.status === "unverified";
+          results.set(adapter.id, { installed, status: result.status, summary: result.summary });
+        } else {
+          results.set(adapter.id, { installed: false, status: "error", summary: null });
+        }
+      } catch (error) {
+        results.set(adapter.id, { installed: false, status: "error", summary: null });
+      }
+    });
+
+    await Promise.all(checks);
+    state.installedAgents = results;
   }
 
   async function pollRunStatus() {
@@ -1104,15 +1287,22 @@ export function createLauncherModule(deps) {
   function selectedLauncherVariants() {
     const variants = [];
 
+    // Check if global model override is enabled
+    const globalModel = state.launcherGlobalModelEnabled && state.launcherGlobalModelOverride?.trim()
+      ? state.launcherGlobalModelOverride.trim()
+      : undefined;
+
     // Generic variants from VARIANT_CONFIGS
     for (const config of VARIANT_CONFIGS) {
       const stateKey = variantStateKey(config.id);
       for (const variant of state[stateKey].filter(v => v.enabled)) {
+        const variantId = `${config.id}-${variant.id}`;
+        const useGlobalModel = globalModel && state.launcherGlobalModelAgentIds.includes(variantId);
         const entry = {
           baseAgentId: config.baseAgentId,
           displayLabel: variant.displayLabel.trim() || config.labelKeyEn.replace(' Variants', ''),
           config: {
-            model: variant.model?.trim() || undefined,
+            model: useGlobalModel ? globalModel : (variant.model?.trim() || undefined),
           },
           configSource: "ui"
         };
@@ -1125,11 +1315,13 @@ export function createLauncherModule(deps) {
 
     // Claude variants
     for (const variant of state.launcherClaudeVariants.filter((v) => v.enabled)) {
+      const variantId = `claude-${variant.profileId}`;
+      const useGlobalModel = globalModel && state.launcherGlobalModelAgentIds.includes(variantId);
       variants.push({
         baseAgentId: "claude-code",
         displayLabel: variant.displayLabel.trim() || `Claude Code · ${variant.providerName ?? "Official"}`,
         config: {
-          model: variant.model.trim() || undefined,
+          model: useGlobalModel ? globalModel : (variant.model.trim() || undefined),
           providerProfileId: variant.profileId
         },
         configSource: "ui"
@@ -1137,12 +1329,16 @@ export function createLauncherModule(deps) {
     }
 
     // Other agents
-    const otherAgents = selectedLauncherAgents().map((agentId) => ({
-      baseAgentId: agentId,
-      displayLabel: state.availableAdapters.find((adapter) => adapter.id === agentId)?.title ?? agentId,
-      config: {},
-      configSource: "ui"
-    }));
+    const otherAgents = selectedLauncherAgents().map((agentId) => {
+      const variantId = `agent-${agentId}`;
+      const useGlobalModel = globalModel && state.launcherGlobalModelAgentIds.includes(variantId);
+      return {
+        baseAgentId: agentId,
+        displayLabel: state.availableAdapters.find((adapter) => adapter.id === agentId)?.title ?? agentId,
+        config: useGlobalModel ? { model: globalModel } : {},
+        configSource: "ui"
+      };
+    });
 
     return [...otherAgents, ...variants];
   }
@@ -1153,6 +1349,12 @@ export function createLauncherModule(deps) {
 
   function syncLauncherStateFromDom() {
     state.launcherSelectedAgentIds = selectedLauncherAgents();
+
+    // Global model override
+    const globalModelInput = document.getElementById("launcher-global-model");
+    if (globalModelInput) {
+      state.launcherGlobalModelOverride = globalModelInput.value;
+    }
 
     // Codex variants (special: has source/verification)
     state.launcherCodexVariants = Array.from(

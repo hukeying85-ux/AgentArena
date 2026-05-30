@@ -209,6 +209,10 @@
                   <svg class="icon"><use href="#icon-play"/></svg>
                   <span id="try-demo-text">Try Demo</span>
                 </button>
+                <button id="configure-agents-btn" class="btn btn-ghost btn-lg" type="button">
+                  <svg class="icon"><use href="#icon-settings"/></svg>
+                  <span>Configure Agents</span>
+                </button>
                 <p class="muted demo-hint" id="demo-hint">Load sample data to explore the interface</p>
               </div>
             </div>
@@ -392,19 +396,6 @@
                 <input id="markdown-file" type="file" accept=".md,text/markdown,text/plain" />
               </label>
             </details>
-          </div>
-        </section>
-
-        <section id="error-state" class="hero hidden">
-          <p class="eyebrow" data-i18n="failedToLoad">Error</p>
-          <h2 id="error-title">Failed to load results</h2>
-          <p id="error-message" class="muted"></p>
-          <div class="hero-actions">
-            <button id="error-retry" class="btn btn-primary" type="button">
-              <svg class="icon"><use href="#icon-refresh"/></svg>
-              <span data-i18n="tryAgain">Try Again</span>
-            </button>
-            <button id="error-back" class="btn" type="button"><span data-i18n="backToStart">Back to Start</span></button>
           </div>
         </section>
 
@@ -749,6 +740,16 @@
           </details>
         </section>
       </main>
+    </div>
+
+    <div id="sticky-benchmark-bar" class="sticky-benchmark-bar hidden">
+      <div class="sticky-bar-content">
+        <span id="sticky-bar-summary" class="sticky-bar-summary">Select agents and a task to start benchmarking</span>
+        <button id="sticky-bar-run-btn" type="button" class="btn btn-primary">
+          <svg class="icon"><use href="#icon-play"/></svg>
+          <span id="sticky-bar-run-text">Start Benchmark</span>
+        </button>
+      </div>
     </div>
 
     <script type="module" src="./app.js"></script>
