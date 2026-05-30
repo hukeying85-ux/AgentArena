@@ -211,9 +211,9 @@
                 </button>
                 <button id="configure-agents-btn" class="btn btn-ghost btn-lg" type="button">
                   <svg class="icon"><use href="#icon-settings"/></svg>
-                  <span>Configure Agents</span>
+                  <span data-i18n="configureAgentsBtn">Configure Agents</span>
                 </button>
-                <p class="muted demo-hint" id="demo-hint">Load sample data to explore the interface</p>
+                <p class="muted demo-hint" id="demo-hint" data-i18n="demoHint">Load sample data to explore the interface</p>
               </div>
             </div>
 
@@ -226,8 +226,8 @@
                     <svg class="icon"><use href="#icon-zap"/></svg>
                   </span>
                   <div>
-                    <strong>Fair Comparison</strong>
-                    <p class="muted">Same repo, same task, same judges for all agents</p>
+                    <strong data-i18n="heroFeatureFairTitle">Fair Comparison</strong>
+                    <p class="muted" data-i18n="heroFeatureFairDesc">Same repo, same task, same judges for all agents</p>
                   </div>
                 </div>
                 <div class="feature-item">
@@ -235,8 +235,8 @@
                     <svg class="icon"><use href="#icon-chart"/></svg>
                   </span>
                   <div>
-                    <strong>Rich Reports</strong>
-                    <p class="muted">Verdict cards, diff views, judge details, and trace replays</p>
+                    <strong data-i18n="heroFeatureRichTitle">Rich Reports</strong>
+                    <p class="muted" data-i18n="heroFeatureRichDesc">Verdict cards, diff views, judge details, and trace replays</p>
                   </div>
                 </div>
                 <div class="feature-item">
@@ -244,8 +244,8 @@
                     <svg class="icon"><use href="#icon-refresh"/></svg>
                   </span>
                   <div>
-                    <strong>History Tracking</strong>
-                    <p class="muted">Track agent performance across multiple runs</p>
+                    <strong data-i18n="heroFeatureHistoryTitle">History Tracking</strong>
+                    <p class="muted" data-i18n="heroFeatureHistoryDesc">Track agent performance across multiple runs</p>
                   </div>
                 </div>
               </div>
@@ -548,20 +548,20 @@
             </section>
             <section id="trace-replay-section" class="detail-card hidden">
               <div class="panel-header">
-                <h3 id="trace-replay-title">Trace Replay</h3>
+                <h3 id="trace-replay-title" data-i18n="traceReplayTitle">Trace Replay</h3>
                 <div class="trace-replay-controls">
-                  <button id="trace-replay-prev" type="button" class="btn btn-sm" disabled title="Previous Step">
+                  <button id="trace-replay-prev" type="button" class="btn btn-sm" disabled data-i18n-title="traceReplayPrevTitle">
                     <svg class="icon"><use href="#icon-refresh"/></svg>
-                    Prev
+                    <span data-i18n="traceReplayPrev">Prev</span>
                   </button>
                   <span id="trace-replay-step" class="muted">Step 0/0</span>
-                  <button id="trace-replay-next" type="button" class="btn btn-sm" disabled title="Next Step">
-                    Next
+                  <button id="trace-replay-next" type="button" class="btn btn-sm" disabled data-i18n-title="traceReplayNextTitle">
+                    <span data-i18n="traceReplayNext">Next</span>
                     <svg class="icon"><use href="#icon-refresh"/></svg>
                   </button>
-                  <button id="trace-replay-play" type="button" class="btn btn-sm" title="Auto Play">
+                  <button id="trace-replay-play" type="button" class="btn btn-sm" data-i18n-title="traceReplayAutoPlayTitle">
                     <svg class="icon"><use href="#icon-play"/></svg>
-                    Play
+                    <span data-i18n="traceReplayPlay">Play</span>
                   </button>
                 </div>
               </div>
@@ -572,15 +572,15 @@
               </div>
               <div id="trace-replay-summary" class="trace-replay-summary">
                 <div class="summary-grid">
-                  <div class="summary-item"><span class="summary-label">Total Events</span><strong id="trace-total-events">0</strong></div>
-                  <div class="summary-item"><span class="summary-label">Duration</span><strong id="trace-duration">0ms</strong></div>
-                  <div class="summary-item"><span class="summary-label">Errors</span><strong id="trace-errors">0</strong></div>
-                  <div class="summary-item"><span class="summary-label">Agent</span><strong id="trace-agent">-</strong></div>
+                  <div class="summary-item"><span class="summary-label" data-i18n="traceReplayTotalEvents">Total Events</span><strong id="trace-total-events">0</strong></div>
+                  <div class="summary-item"><span class="summary-label" data-i18n="traceReplayDuration">Duration</span><strong id="trace-duration">0ms</strong></div>
+                  <div class="summary-item"><span class="summary-label" data-i18n="traceReplayErrors">Errors</span><strong id="trace-errors">0</strong></div>
+                  <div class="summary-item"><span class="summary-label" data-i18n="traceReplayAgent">Agent</span><strong id="trace-agent">-</strong></div>
                 </div>
               </div>
               <div id="trace-replay-content" class="trace-replay-content">
                 <div class="trace-empty-state">
-                  <p>Select a run to view trace replay</p>
+                  <p data-i18n="traceReplaySelectRun">Select a run to view trace replay</p>
                 </div>
               </div>
             </section>

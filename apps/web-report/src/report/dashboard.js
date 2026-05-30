@@ -932,7 +932,7 @@ function renderComparisonBars(run) {
     }));
     renderComparisonBarChart(comparisonContainer, agentsData, null, {
       width: 600,
-      title: 'Score Dimensions Comparison',
+      title: t('chartComparisonTitle'),
       animation: true
     });
   }
@@ -943,10 +943,10 @@ function renderComparisonBars(run) {
     const radarData = results.slice(0, 3).map(r => ({
       name: resultLabel(r),
       dimensions: [
-        { name: "Status", value: r.status === "success" ? 100 : 0 },
-        { name: "Tests", value: r.judgeResults.filter(j => j.success).length / Math.max(r.judgeResults.length, 1) * 100 },
-        { name: "Duration", value: Math.max(0, 100 - (r.durationMs || 0) / 1000) },
-        { name: "Precision", value: Math.max(diffPrecisionScore(r), 0) * 100 }
+        { name: t("scoreWeightStatus"), value: r.status === "success" ? 100 : 0 },
+        { name: t("scoreWeightTests"), value: r.judgeResults.filter(j => j.success).length / Math.max(r.judgeResults.length, 1) * 100 },
+        { name: t("scoreWeightDuration"), value: Math.max(0, 100 - (r.durationMs || 0) / 1000) },
+        { name: t("scoreWeightPrecision"), value: Math.max(diffPrecisionScore(r), 0) * 100 }
       ]
     }));
     if (radarData.length > 0) {

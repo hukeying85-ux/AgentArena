@@ -612,6 +612,26 @@ function renderStaticText() {
   setTextBySelector('[data-i18n="codeReviewSelectLabel"]', t("codeReviewSelectLabel"));
   setTextBySelector('[data-i18n="codeReviewCompareBtn"]', t("codeReviewCompareBtn"));
   setTextBySelector('[data-i18n="codeReviewEmptyState"]', t("codeReviewEmptyState"));
+  setTextBySelector('[data-i18n="heroFeatureFairTitle"]', t("heroFeatureFairTitle"));
+  setTextBySelector('[data-i18n="heroFeatureFairDesc"]', t("heroFeatureFairDesc"));
+  setTextBySelector('[data-i18n="heroFeatureRichTitle"]', t("heroFeatureRichTitle"));
+  setTextBySelector('[data-i18n="heroFeatureRichDesc"]', t("heroFeatureRichDesc"));
+  setTextBySelector('[data-i18n="heroFeatureHistoryTitle"]', t("heroFeatureHistoryTitle"));
+  setTextBySelector('[data-i18n="heroFeatureHistoryDesc"]', t("heroFeatureHistoryDesc"));
+  setTextBySelector('[data-i18n="configureAgentsBtn"]', t("configureAgentsBtn"));
+  setTextBySelector('[data-i18n="demoHint"]', t("demoHint"));
+  setTextBySelector('[data-i18n="traceReplayTitle"]', t("traceReplayTitle"));
+  setTextBySelector('[data-i18n="traceReplayPrev"]', t("traceReplayPrev"));
+  setTextBySelector('[data-i18n="traceReplayNext"]', t("traceReplayNext"));
+  setTextBySelector('[data-i18n="traceReplayPlay"]', t("traceReplayPlay"));
+  setTextBySelector('[data-i18n="traceReplayTotalEvents"]', t("traceReplayTotalEvents"));
+  setTextBySelector('[data-i18n="traceReplayDuration"]', t("traceReplayDuration"));
+  setTextBySelector('[data-i18n="traceReplayErrors"]', t("traceReplayErrors"));
+  setTextBySelector('[data-i18n="traceReplayAgent"]', t("traceReplayAgent"));
+  setTextBySelector('[data-i18n="traceReplaySelectRun"]', t("traceReplaySelectRun"));
+  document.querySelector('#trace-replay-prev')?.setAttribute('title', t("traceReplayPrevTitle"));
+  document.querySelector('#trace-replay-next')?.setAttribute('title', t("traceReplayNextTitle"));
+  document.querySelector('#trace-replay-play')?.setAttribute('title', t("traceReplayAutoPlayTitle"));
   if (elements.sidebarToggle) {
     elements.sidebarToggle.setAttribute("aria-label", t("toggleSidebar"));
   }

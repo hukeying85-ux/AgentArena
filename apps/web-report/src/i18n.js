@@ -35,9 +35,16 @@ const en = {
   heroTitle: "Benchmark the local coding agents you already trust with your real work.",
   heroDescription:
     "Use the same repository, the same task, and the same judges to compare local agent setups or to baseline one agent over time.",
-  heroWhatTitle: "What AgentArena gives you",
+  heroWhatTitle: "What AgentArena Gives You",
   heroWhatBody:
     "A local benchmark harness for coding agents you already use: shared setup, shared judges, replayable traces, and reports that are actually useful after the run ends.",
+  heroFeatureFairTitle: "Fair Comparison",
+  heroFeatureFairDesc: "Same repo, same task, same judges for all agents",
+  heroFeatureRichTitle: "Rich Reports",
+  heroFeatureRichDesc: "Verdict cards, diff views, judge details, and trace replays",
+  heroFeatureHistoryTitle: "History Tracking",
+  heroFeatureHistoryDesc: "Track agent performance across multiple runs",
+  configureAgentsBtn: "Configure Agents",
   heroHowTitle: "Recommended workflow",
   heroHowSteps: [
     "Choose the repository and task that resemble your real work.",
@@ -418,7 +425,17 @@ const en = {
     stepProgress: 'Step {current}/{total}',
     play: 'Play',
     pause: 'Pause',
-    selectRun: 'Select a run to view trace replay'
+    selectRun: 'Select a run to view trace replay',
+    title: 'Trace Replay',
+    prev: 'Prev',
+    prevTitle: 'Previous Step',
+    next: 'Next',
+    nextTitle: 'Next Step',
+    autoPlay: 'Auto Play',
+    totalEvents: 'Total Events',
+    duration: 'Duration',
+    errors: 'Errors',
+    agent: 'Agent'
   },
 
   // Chart components
@@ -493,6 +510,13 @@ const zhCN = {
   heroWhatTitle: "AgentArena 真正提供什么",
   heroWhatBody:
     "它是一个面向重度 agent 用户的本地 benchmark 工具：统一执行、统一 judge、统一 trace、统一报告，方便你真正比较本地 agent 的能力。",
+  heroFeatureFairTitle: "公平对比",
+  heroFeatureFairDesc: "所有 agent 使用相同的仓库、任务和 judges",
+  heroFeatureRichTitle: "丰富报告",
+  heroFeatureRichDesc: "结论卡片、diff 视图、judge 详情和 trace 回放",
+  heroFeatureHistoryTitle: "历史追踪",
+  heroFeatureHistoryDesc: "跨多次运行追踪 agent 表现",
+  configureAgentsBtn: "配置 Agents",
   heroHowTitle: "推荐用法",
   heroHowSteps: [
     "先选一个真正代表你工作场景的仓库和任务。",
@@ -1064,7 +1088,17 @@ const zhCN = {
     stepProgress: '步骤 {current}/{total}',
     play: '播放',
     pause: '暂停',
-    selectRun: '选择要查看跟踪回放的运行'
+    selectRun: '选择要查看跟踪回放的运行',
+    title: 'Trace 回放',
+    prev: '上一步',
+    prevTitle: '上一步',
+    next: '下一步',
+    nextTitle: '下一步',
+    autoPlay: '自动播放',
+    totalEvents: '总事件数',
+    duration: '时长',
+    errors: '错误',
+    agent: 'Agent'
   },
 
   // Chart components
