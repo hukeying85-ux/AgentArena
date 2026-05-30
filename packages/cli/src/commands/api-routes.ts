@@ -310,6 +310,9 @@ export async function handleCreateAdhocTaskpack(rawBody: string): Promise<ApiRes
   if (body.prompt.length > 100_000) {
     return jsonResponse({ error: "prompt must be less than 100,000 characters." }, 400);
   }
+  // Strip control characters (except newline, carriage return, tab) to prevent
+  // YAML injection and terminal escape sequence attacks
+  const sanitizedPrompt = body.prompt.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
   if (body.title && body.title.length > 500) {
     return jsonResponse({ error: "title must be less than 500 characters." }, 400);
   }
@@ -405,7 +408,7 @@ export async function handleCreateAdhocTaskpack(rawBody: string): Promise<ApiRes
       dependencies: [],
       judgeRationale: `These default checks assume a ${detectedLang} repository with appropriate build, test, and lint commands.`
     },
-    prompt: body.prompt,
+    prompt: sanitizedPrompt,
     judges
   }, { lineWidth: 0 });
   const adhocPath = path.join(adhocDir, `${adhocId}.yaml`);

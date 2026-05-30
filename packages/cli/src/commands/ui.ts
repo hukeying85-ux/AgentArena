@@ -90,7 +90,15 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
   const port = parsed.port ?? DEFAULT_UI_PORT;
   const isLocalhost = host === "127.0.0.1" || host === "localhost" || host === "::1" || host === "::ffff:127.0.0.1";
   // Token priority: --auth-token > AGENTARENA_AUTH_TOKEN env > auto-generated
+  const authTokenSource = parsed.authToken?.trim() ? "cli" : process.env.AGENTARENA_AUTH_TOKEN?.trim() ? "env" : "auto";
   const authToken = parsed.authToken?.trim() || process.env.AGENTARENA_AUTH_TOKEN?.trim() || generateAuthToken();
+  if (!isLocalhost && authTokenSource === "auto") {
+    logger.warn(
+      "server",
+      "auth.auto_generated",
+      "WARNING: Auth token was auto-generated for non-localhost binding. Set AGENTARENA_AUTH_TOKEN or use --auth-token for stable authentication."
+    );
+  }
   let activeRun: ActiveUiRun | null = null;
   /** Generation counter to prevent stale finally blocks from corrupting new run state. */
   let runGeneration = 0;
@@ -611,7 +619,21 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
         }
 
         try {
-          const body = await fs.readFile(filePath);
+          let body = await fs.readFile(filePath);
+
+          // Auto-inject auth token into index.html for localhost (seamless first-time UX).
+          // Injects a meta tag that the frontend reads on startup — no redirect needed.
+          if (isLocalhost && filePath.endsWith("index.html") && authToken) {
+            let html = body.toString("utf8");
+            const metaTag = `<meta name="agentarena-auth-token" content="${authToken}">`;
+            if (html.includes("</head>")) {
+              html = html.replace("</head>", `  ${metaTag}\n</head>`);
+            } else {
+              html = metaTag + "\n" + html;
+            }
+            body = Buffer.from(html, "utf8");
+          }
+
           response.writeHead(200, {
             "Content-Type": detectContentType(filePath),
             "Cache-Control": "no-store",

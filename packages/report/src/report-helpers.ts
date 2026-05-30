@@ -49,6 +49,12 @@ export type ReportCopy = {
   failuresTitle: string;
   htmlReportTitlePrefix: string;
   htmlGeneratedAtLabel: string;
+  decisionReportTitle: string;
+  recommendationLabel: string;
+  averageCostLabel: string;
+  confidenceLabel: string;
+  fullReportLabel: string;
+  perRun: string;
 };
 
 const REPORT_COPY: Record<Locale, ReportCopy> = {
@@ -89,6 +95,12 @@ const REPORT_COPY: Record<Locale, ReportCopy> = {
     failuresTitle: "Failures",
     htmlReportTitlePrefix: "AgentArena Report -",
     htmlGeneratedAtLabel: "Generated at",
+    decisionReportTitle: "AGENTARENA DECISION REPORT",
+    recommendationLabel: "Recommendation",
+    averageCostLabel: "Avg Cost",
+    confidenceLabel: "Confidence",
+    fullReportLabel: "Full Report",
+    perRun: "run",
   },
   "zh-CN": {
     reportTitle: "AgentArena 报告",
@@ -125,7 +137,13 @@ const REPORT_COPY: Record<Locale, ReportCopy> = {
     resultsTitle: "结果",
     failuresTitle: "失败项",
     htmlReportTitlePrefix: "AgentArena 报告 -",
-    htmlGeneratedAtLabel: "生成时间"
+    htmlGeneratedAtLabel: "生成时间",
+    decisionReportTitle: "AGENTARENA 决策报告",
+    recommendationLabel: "推荐",
+    averageCostLabel: "平均成本",
+    confidenceLabel: "置信度",
+    fullReportLabel: "完整报告",
+    perRun: "次",
   }
 };
 

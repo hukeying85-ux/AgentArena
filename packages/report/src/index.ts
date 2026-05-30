@@ -4,7 +4,7 @@ import { type BenchmarkRun, ensureDirectory } from "@agentarena/core";
 import { renderHtml } from "./html-template.js";
 import { buildLeaderboard, } from "./leaderboard.js";
 import { renderMarkdown, renderPrComment } from "./markdown-template.js";
-import { buildBadgePayload, type Locale, sanitizeRun } from "./report-helpers.js";
+import { buildBadgePayload, getReportCopy, type Locale, sanitizeRun } from "./report-helpers.js";
 import { enrichRunWithScores } from "./scoring.js";
 
 async function atomicWriteFile(filePath: string, content: string, retries = 3, delayMs = 100): Promise<void> {
@@ -46,7 +46,7 @@ export {
 export type { AggregatedAgentStats, MultiRunComparison } from "./multi-run.js";
 export { aggregateMultiRuns, formatMultiRunReport } from "./multi-run.js";
 export type { Locale, ReportCopy, ScoredResult, ScoredRun } from "./report-helpers.js";
-export { sanitizeRun } from "./report-helpers.js";
+export { getReportCopy, sanitizeRun } from "./report-helpers.js";
 export {
   CRITICAL_FAIL_SCORE_BAND,
   computeCompositeScore,

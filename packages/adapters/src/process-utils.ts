@@ -230,7 +230,7 @@ export async function runProcess(
         cwd,
         env: environment,
         stdio: ["ignore", "pipe", "pipe"],
-        shell: false,
+        shell: process.platform === "win32",
         windowsHide: true,
         windowsVerbatimArguments: false,
         ...(process.platform !== "win32" ? { detached: true } : {})
@@ -345,7 +345,14 @@ export async function terminateProcessTree(pid: number): Promise<void> {
     try {
       process.kill(-pid, "SIGTERM");
     } catch {
-      try { process.kill(pid, "SIGTERM"); } catch (error) { adapterWarn("process.kill SIGTERM fallback failed", { pid, error: error instanceof Error ? error.message : String(error) }); }
+      try {
+        process.kill(pid, "SIGTERM");
+      } catch (error) {
+        adapterWarn("process.kill SIGTERM fallback failed", {
+          pid,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
     }
 
     // Escalate to SIGKILL after grace period
@@ -353,7 +360,14 @@ export async function terminateProcessTree(pid: number): Promise<void> {
     try {
       process.kill(-pid, "SIGKILL");
     } catch {
-      try { process.kill(pid, "SIGKILL"); } catch (error) { adapterWarn("process.kill SIGKILL fallback failed", { pid, error: error instanceof Error ? error.message : String(error) }); }
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch (error) {
+        adapterWarn("process.kill SIGKILL fallback failed", {
+          pid,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
     }
   }
 }
