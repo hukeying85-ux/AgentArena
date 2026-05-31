@@ -1118,12 +1118,12 @@ function renderCompareTableV2(run) {
     container.appendChild(canvas);
     const radarData = {
       dimensions: [
-        { name: 'Code Quality', value: result.judgeResults?.filter(j => j.success).length / Math.max(result.judgeResults?.length || 1, 1) * 100 },
-        { name: 'Speed', value: Math.max(0, 100 - Math.min((result.durationMs || 0) / 60000, 1) * 100) },
-        { name: 'Token Eff.', value: result.tokenUsage ? Math.max(0, 100 - Math.min(result.tokenUsage / 100000, 1) * 100) : 50 },
-        { name: 'Debug', value: result.status === 'success' ? 80 : 20 },
-        { name: 'Refactor', value: Math.max(diffPrecisionScore(result), 0) * 100 },
-        { name: 'Docs', value: 50 }
+        { name: t('chartCodeQuality'), value: result.judgeResults?.filter(j => j.success).length / Math.max(result.judgeResults?.length || 1, 1) * 100 },
+        { name: t('chartSpeed'), value: Math.max(0, 100 - Math.min((result.durationMs || 0) / 60000, 1) * 100) },
+        { name: t('chartTokenEfficiency'), value: result.tokenUsage ? Math.max(0, 100 - Math.min(result.tokenUsage / 100000, 1) * 100) : 50 },
+        { name: t('chartDebugAbility'), value: result.status === 'success' ? 80 : 20 },
+        { name: t('chartRefactorAbility'), value: Math.max(diffPrecisionScore(result), 0) * 100 },
+        { name: t('chartDocsAbility'), value: 50 }
       ]
     };
     renderRadarChart(canvas, radarData, { width: 200, height: 200, padding: 30 });
