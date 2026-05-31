@@ -1409,20 +1409,25 @@ elements.launcherToggle.addEventListener("click", () => {
   renderLauncher();
 });
 
-// Back to launcher button — scroll to launcher, expand it, and clear run state
+// Back to launcher button — scroll to launcher, expand it
 if (elements.backToLauncher) {
   elements.backToLauncher.addEventListener("click", () => {
     // Expand launcher if collapsed
     state.launcherExpanded = true;
+    // Ensure launcher panel is visible
+    if (elements.launcherPanel) {
+      elements.launcherPanel.classList.remove("hidden");
+    }
     renderLauncher();
-    // Scroll to top of page to show launcher
-    window.scrollTo({ top: 0, behavior: "smooth" });
-    // Focus the launcher panel after scroll completes
-    setTimeout(() => {
-      if (elements.launcherPanel) {
-        elements.launcherPanel.scrollIntoView({ behavior: "smooth", block: "start" });
-      }
-    }, 100);
+    // Scroll to launcher panel immediately
+    if (elements.launcherPanel) {
+      elements.launcherPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+      // Add visual highlight to draw attention
+      elements.launcherPanel.classList.add("launcher-highlight");
+      setTimeout(() => {
+        elements.launcherPanel.classList.remove("launcher-highlight");
+      }, 2000);
+    }
   });
 }
 elements.languageSelect.addEventListener("change", (event) => {

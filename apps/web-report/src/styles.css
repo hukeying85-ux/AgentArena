@@ -5750,3 +5750,30 @@ textarea:focus-visible {
   from { opacity: 0; transform: translateY(-8px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+/* ===================================================================
+   Launcher highlight animation (when "back to launcher" is clicked)
+   =================================================================== */
+
+@keyframes launcher-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(25, 118, 210, 0.4); }
+  50% { box-shadow: 0 0 0 8px rgba(25, 118, 210, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(25, 118, 210, 0); }
+}
+
+.launcher-highlight {
+  animation: launcher-pulse 0.8s ease 2;
+  border-color: var(--accent, #1976d2) !important;
+}
+
+@media (prefers-color-scheme: dark) {
+  @keyframes launcher-pulse {
+    0% { box-shadow: 0 0 0 0 rgba(66, 165, 245, 0.5); }
+    50% { box-shadow: 0 0 0 8px rgba(66, 165, 245, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(66, 165, 245, 0); }
+  }
+
+  .launcher-highlight {
+    border-color: var(--accent, #42a5f5) !important;
+  }
+}
