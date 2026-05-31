@@ -1098,7 +1098,7 @@ function renderCompareTableV2(run) {
   `;
 
   // Set up show-all handler via event delegation (avoids global namespace pollution)
-  const showAllBtn = container.querySelector('[data-action="show-all-compare"]');
+  const showAllBtn = elements.compareTable.querySelector('[data-action="show-all-compare"]');
   if (showAllBtn) {
     showAllBtn.addEventListener('click', () => {
       state._compareShowAll = true;
