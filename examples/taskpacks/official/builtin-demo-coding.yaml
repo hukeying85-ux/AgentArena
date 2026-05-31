@@ -1,0 +1,119 @@
+schemaVersion: agentarena.taskpack/v1
+id: official-builtin-demo-coding
+title: "Built-in Demo: Add Error Handling"
+description: |
+  A coding task that works out of the box — no local project needed.
+  Uses the built-in test repository with 4 TypeScript packages.
+  The agent must add proper error handling to a service function.
+metadata:
+  source: official
+  owner: AgentArena
+  difficulty: easy
+  objective: Test agent's ability to add error handling and write defensive code in a monorepo.
+  repoTypes:
+    - monorepo
+    - node
+    - typescript
+  tags:
+    - error-handling
+    - coding
+    - builtin
+    - quick-start
+  dependencies: []
+  judgeRationale: Checks that the agent added try/catch, custom error types, and updated callers.
+  differentiator: Good agents add meaningful error messages and proper types; weak agents just wrap everything in generic try/catch.
+  i18n:
+    zh-CN:
+      title: "内置演示：添加错误处理"
+      description: |
+        开箱即用的编码任务——不需要本地项目。
+        使用内置测试仓库（4 个 TypeScript 包）。
+        Agent 需要为服务函数添加正确的错误处理。
+      objective: 测试 Agent 添加错误处理和编写防御性代码的能力。
+      judgeRationale: 检查 Agent 是否添加了 try/catch、自定义错误类型，并更新了调用方。
+      differentiator: 优秀 Agent 添加有意义的错误信息和正确的类型；弱 Agent 只是用通用 try/catch 包裹一切。
+
+# Use the built-in test repository — no user repo needed!
+repoSource: "builtin://nodejs-monorepo"
+
+prompt: |
+  ## Task | 任务
+
+  The `getUserData` function in `packages/core/src/user-service.ts` currently has no error handling.
+  If it fails, the caller gets an unhandled rejection. Add proper error handling:
+
+  1. Create a custom `UserDataError` class in `packages/core/src/user-service.ts`
+  2. Make `getUserData` throw `UserDataError` when given an empty or invalid userId
+  3. Update `packages/runner/src/index.ts` to catch `UserDataError` specifically
+     and include the error class name in the output
+  4. Update `packages/cli/src/index.ts` to show a user-friendly error message
+     when `getUserData` fails (instead of crashing)
+
+  ## Requirements | 要求
+
+  - `UserDataError` must extend `Error` and have a `userId` property
+  - Empty string `""` and whitespace-only strings should throw
+  - Error messages must be descriptive (not just "error")
+  - Existing tests must still pass
+  - No new dependencies allowed
+
+  ## Files to modify | 需要修改的文件
+
+  - `packages/core/src/user-service.ts` — add error class + validation
+  - `packages/runner/src/index.ts` — catch specific error type
+  - `packages/cli/src/index.ts` — user-friendly error display
+
+expectedChangedPaths:
+  - packages/core/src/user-service.ts
+  - packages/runner/src/index.ts
+  - packages/cli/src/index.ts
+
+judges:
+  - id: error-class-exists
+    type: file-contains
+    label: "UserDataError class is defined"
+    path: packages/core/src/user-service.ts
+    pattern: "class UserDataError"
+
+  - id: error-extends-error
+    type: file-contains
+    label: "UserDataError extends Error"
+    path: packages/core/src/user-service.ts
+    pattern: "extends Error"
+
+  - id: error-has-userid
+    type: file-contains
+    label: "UserDataError has userId property"
+    path: packages/core/src/user-service.ts
+    regex: "userId\\s*[:=]"
+
+  - id: empty-validation
+    type: file-contains
+    label: "Empty userId is validated/rejected"
+    path: packages/core/src/user-service.ts
+    regex: "(trim|length\\s*===?\\s*0|!\\s*userId|\\.length)"
+
+  - id: runner-catches-error
+    type: file-contains
+    label: "Runner catches UserDataError"
+    path: packages/runner/src/index.ts
+    pattern: "UserDataError"
+
+  - id: cli-error-handling
+    type: file-contains
+    label: "CLI has error handling"
+    path: packages/cli/src/index.ts
+    regex: "(catch|try|UserDataError|error)"
+
+  - id: no-generic-only-catch
+    type: regex-match
+    label: "Not just generic catch (has specific error handling)"
+    path: packages/runner/src/index.ts
+    regex: "UserDataError"
+    minMatches: 1
+
+  - id: error-exported
+    type: file-contains
+    label: "UserDataError is exported from core"
+    path: packages/core/src/index.ts
+    pattern: "UserDataError"

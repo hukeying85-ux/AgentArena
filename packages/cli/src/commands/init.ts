@@ -260,6 +260,7 @@ export async function listOfficialTaskPacks(): Promise<
     judges: Array<{ id: string; type: string; label: string }>;
     difficulty?: string;
     differentiator?: string;
+    repoSource?: string;
   }>
 > {
   try {
@@ -312,6 +313,7 @@ export async function listOfficialTaskPacks(): Promise<
           })),
           difficulty: taskPack.metadata?.difficulty,
           differentiator: taskPack.metadata?.differentiator,
+          repoSource: taskPack.repoSource,
           i18n,
         };
       }),

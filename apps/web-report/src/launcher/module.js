@@ -832,6 +832,7 @@ export function createLauncherModule(deps) {
 
     const customOption = `<option value="">${escapeHtml(t("taskPackCustom"))}</option>`;
     const groupLabels = { easy: t("difficultyEasy") || "简单", medium: t("difficultyMedium") || "中等", hard: t("difficultyHard") || "困难", other: t("difficultyOther") || "其他" };
+    const builtinBadge = t("builtinRepoBadge") || "Built-in";
     const optionHtml = [customOption];
     for (const diffKey of ["easy", "medium", "hard", "other"]) {
       const packs = grouped[diffKey];
@@ -839,7 +840,8 @@ export function createLauncherModule(deps) {
       optionHtml.push(`<optgroup label="${escapeHtml(groupLabels[diffKey])} (${packs.length})">`);
       for (const tp of packs) {
         const tpTitle = taskPackI18n(tp, "title") || tp.title;
-        optionHtml.push(`<option value="${escapeHtml(tp.path)}">${escapeHtml(tpTitle)}</option>`);
+        const badge = tp.repoSource?.startsWith("builtin://") ? ` [${escapeHtml(builtinBadge)}]` : "";
+        optionHtml.push(`<option value="${escapeHtml(tp.path)}">${escapeHtml(tpTitle)}${badge}</option>`);
       }
       optionHtml.push(`</optgroup>`);
     }
@@ -1506,7 +1508,10 @@ export function createLauncherModule(deps) {
 
   function validateLauncher() {
     const messages = [];
-    if (!elements.launcherRepoPath.value.trim()) {
+    const selectedTaskPack = state.availableTaskPacks.find((tp) => tp.path === elements.launcherTaskPath.value);
+    const isBuiltinTaskPack = selectedTaskPack?.repoSource?.startsWith("builtin://");
+    // Only require repo path if the task pack does NOT use a builtin repo
+    if (!isBuiltinTaskPack && !elements.launcherRepoPath.value.trim()) {
       messages.push({ level: "error", text: localText("仓库路径不能为空。", "Repository path is required.") });
     }
     const hasAdhocPrompt = elements.launcherAdhocPrompt.value.trim().length > 0;
@@ -1517,8 +1522,7 @@ export function createLauncherModule(deps) {
     if (agents.length === 0) {
       messages.push({ level: "error", text: localText("至少需要启用一个 agent 或 variant。", "At least one agent or variant must be enabled.") });
     }
-    const selectedTaskPack = state.availableTaskPacks.find((tp) => tp.path === elements.launcherTaskPath.value);
-    if (selectedTaskPack?.repoSource?.startsWith("builtin://")) {
+    if (isBuiltinTaskPack && elements.launcherRepoPath.value.trim()) {
       messages.push({ level: "warning", text: localText("此任务包使用内置仓库，你填写的仓库路径将被忽略。", "This task pack uses a built-in repo. Your repository path will be ignored.") });
     }
     const noSecretVariants = state.launcherClaudeVariants.filter((v) => v.enabled && !v.secretStored && v.providerKind !== "official");
@@ -1635,8 +1639,14 @@ export function createLauncherModule(deps) {
     const concurrencyValue = Number.parseInt(document.querySelector("#launcher-concurrency")?.value ?? "1", 10);
     const maxConcurrency = Number.isFinite(concurrencyValue) && concurrencyValue > 0 ? concurrencyValue : 1;
 
+    // For builtin task packs, use "." as repoPath — the server will resolve
+    // the builtin:// repoSource and ignore the user repo path entirely.
+    const selectedTaskPackForRun = state.availableTaskPacks.find((tp) => tp.path === taskPath);
+    const isBuiltin = selectedTaskPackForRun?.repoSource?.startsWith("builtin://");
+    const repoPath = elements.launcherRepoPath.value.trim() || (isBuiltin ? "." : ".");
+
     const payload = {
-      repoPath: elements.launcherRepoPath.value.trim(),
+      repoPath,
       taskPath,
       outputPath: elements.launcherOutputPath.value.trim() || undefined,
       agents,

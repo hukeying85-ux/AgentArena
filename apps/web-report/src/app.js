@@ -935,11 +935,32 @@ elements.launcherTaskSelect.addEventListener("change", (event) => {
   if (value) {
     elements.launcherTaskPath.value = value;
     elements.launcherAdhocPromptField.style.display = "none";
+    // Sync builtin checkbox with selected task pack
+    const selectedTp = state.availableTaskPacks?.find((tp) => tp.path === value);
+    if (elements.launcherUseBuiltin) {
+      const isBuiltin = selectedTp?.repoSource?.startsWith("builtin://");
+      elements.launcherUseBuiltin.checked = isBuiltin;
+      elements.launcherRepoPath.disabled = isBuiltin;
+      if (isBuiltin) {
+        elements.launcherRepoPath.placeholder = t("builtinRepoPlaceholder") || "Built-in demo repo (no path needed)";
+        elements.launcherRepoPath.value = "";
+      } else {
+        elements.launcherRepoPath.placeholder = "";
+        if (!elements.launcherRepoPath.value && state.serviceInfo?.repoPath) {
+          elements.launcherRepoPath.value = state.serviceInfo.repoPath;
+        }
+      }
+    }
   } else {
     elements.launcherAdhocPromptField.style.display = "";
     elements.launcherAdhocPromptLabel.textContent = t("launcherAdhocPromptLabel");
     elements.launcherAdhocPromptHint.textContent = t("customPromptHint");
     elements.launcherAdhocPrompt.placeholder = t("customPromptPlaceholder");
+    if (elements.launcherUseBuiltin) {
+      elements.launcherUseBuiltin.checked = false;
+      elements.launcherRepoPath.disabled = false;
+      elements.launcherRepoPath.placeholder = "";
+    }
   }
   saveLauncherConfig();
   renderLauncher();
@@ -947,6 +968,35 @@ elements.launcherTaskSelect.addEventListener("change", (event) => {
 elements.launcherRepoPath.addEventListener("input", () => saveLauncherConfig());
 elements.launcherTaskPath.addEventListener("input", () => saveLauncherConfig());
 elements.launcherOutputPath.addEventListener("input", () => saveLauncherConfig());
+
+// Built-in demo repo toggle
+if (elements.launcherUseBuiltin) {
+  elements.launcherUseBuiltin.addEventListener("change", () => {
+    const checked = elements.launcherUseBuiltin.checked;
+    elements.launcherRepoPath.disabled = checked;
+    if (checked) {
+      // Auto-select the builtin demo task pack
+      const builtinPack = state.availableTaskPacks?.find(
+        (tp) => tp.repoSource?.startsWith("builtin://")
+      );
+      if (builtinPack) {
+        elements.launcherTaskSelect.value = builtinPack.path;
+        elements.launcherTaskPath.value = builtinPack.path;
+        elements.launcherRepoPath.value = "";
+        elements.launcherRepoPath.placeholder = t("builtinRepoPlaceholder") || "Built-in demo repo (no path needed)";
+        elements.launcherAdhocPromptField.style.display = "none";
+      }
+    } else {
+      // Restore normal mode
+      elements.launcherRepoPath.placeholder = "";
+      if (state.serviceInfo?.repoPath) {
+        elements.launcherRepoPath.value = state.serviceInfo.repoPath;
+      }
+    }
+    saveLauncherConfig();
+    renderLauncher();
+  });
+}
 
 function extractAgentConfigFromCard(buttonEl) {
   const card = buttonEl.closest(".variant-card");

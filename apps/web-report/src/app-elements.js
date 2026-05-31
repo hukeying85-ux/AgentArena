@@ -37,6 +37,7 @@ const elements = {
   launcherToggle: document.querySelector("#launcher-toggle"),
   launcherCompactSummary: document.querySelector("#launcher-compact-summary"),
   launcherRepoPath: document.querySelector("#launcher-repo-path"),
+  launcherUseBuiltin: document.querySelector("#launcher-use-builtin"),
   launcherTaskSelect: document.querySelector("#launcher-task-select"),
   taskPackDetail: document.querySelector("#task-pack-detail"),
   launcherTaskPath: document.querySelector("#launcher-task-path"),

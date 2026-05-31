@@ -187,6 +187,8 @@ const en = {
   diagnosticsZoneTitle: "Failure Diagnosis",
   diagnosticsZoneDescription: "Inspect judge failures, changed files, trace steps, and side-by-side code differences when the score alone is not enough.",
   taskPackCustom: "Custom path",
+  builtinRepoPlaceholder: "Built-in demo repo (no path needed)",
+  builtinRepoBadge: "Built-in",
   markdownNotLoaded: "Not loaded",
   crossRunCompareTitle: "Cross-Run Compare",
   crossRunDescription:
@@ -677,6 +679,8 @@ const zhCN = {
   diagnosticsZoneTitle: "失败诊断",
   diagnosticsZoneDescription: "当分数不够解释问题时，集中查看 judge 失败、改动文件、trace 步骤和代码差异。",
   taskPackCustom: "自定义路径",
+  builtinRepoPlaceholder: "内置演示仓库（无需填写路径）",
+  builtinRepoBadge: "内置",
   markdownNotLoaded: "未加载",
   crossRunCompareTitle: "跨运行对比",
   crossRunDescription: "选择多个运行，比较不同模型配置下的 Agent 表现。",
