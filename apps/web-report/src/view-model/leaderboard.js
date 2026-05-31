@@ -179,11 +179,11 @@ export function buildLeaderboard(runs, currentRun) {
     excludedRunCount: excludedRuns.length,
     rows,
     comparabilityRules: [
-      "Only runs with the same task are compared",
-      "Only runs with the same score mode are compared",
-      "Different agent versions are treated as separate entries",
-      "Different providers/profiles are treated as separate entries",
-      "Different models are treated as separate entries"
+      "leaderboardRuleSameTask",
+      "leaderboardRuleSameScoreMode",
+      "leaderboardRuleVersionSeparate",
+      "leaderboardRuleProviderSeparate",
+      "leaderboardRuleModelSeparate"
     ]
   };
 }

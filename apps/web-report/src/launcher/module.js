@@ -517,8 +517,8 @@ export function createLauncherModule(deps) {
           <label class="field">
             <span>${escapeHtml(localText("类型", "Kind"))} <span class="field-required">${escapeHtml(localText("必填", "required"))}</span></span>
             <select data-role="provider-kind">
-              <option value="anthropic-compatible" ${editor.kind === "anthropic-compatible" ? "selected" : ""}>Anthropic Compatible</option>
-              <option value="openai-proxy" ${editor.kind === "openai-proxy" ? "selected" : ""}>OpenAI Proxy</option>
+              <option value="anthropic-compatible" ${editor.kind === "anthropic-compatible" ? "selected" : ""}>${escapeHtml(localText("Anthropic 兼容", "Anthropic Compatible"))}</option>
+              <option value="openai-proxy" ${editor.kind === "openai-proxy" ? "selected" : ""}>${escapeHtml(localText("OpenAI 代理", "OpenAI Proxy"))}</option>
             </select>
           </label>
           <label class="field">
@@ -532,8 +532,8 @@ export function createLauncherModule(deps) {
           <label class="field">
             <span>${escapeHtml(localText("API 格式", "API Format"))} <span class="field-required">${escapeHtml(localText("必填", "required"))}</span></span>
             <select data-role="provider-api-format">
-              <option value="anthropic-messages" ${editor.apiFormat === "anthropic-messages" ? "selected" : ""}>Anthropic Messages</option>
-              <option value="openai-chat-via-proxy" ${editor.apiFormat === "openai-chat-via-proxy" ? "selected" : ""}>OpenAI Chat via Proxy</option>
+              <option value="anthropic-messages" ${editor.apiFormat === "anthropic-messages" ? "selected" : ""}>${escapeHtml(localText("Anthropic Messages", "Anthropic Messages"))}</option>
+              <option value="openai-chat-via-proxy" ${editor.apiFormat === "openai-chat-via-proxy" ? "selected" : ""}>${escapeHtml(localText("OpenAI Chat 代理", "OpenAI Chat via Proxy"))}</option>
             </select>
           </label>
           <label class="field">

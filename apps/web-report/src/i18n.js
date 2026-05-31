@@ -224,6 +224,15 @@ const en = {
   leaderboardMedianCost: "Median Cost",
   leaderboardLastSeen: "Last Seen",
   leaderboardNote: "Note: Version changes create new historical records; scores are not inherited. Different providers and models are tracked separately.",
+  leaderboardRuleSameTask: "Only runs with the same task are compared",
+  leaderboardRuleSameScoreMode: "Only runs with the same score mode are compared",
+  leaderboardRuleVersionSeparate: "Different agent versions are treated as separate entries",
+  leaderboardRuleProviderSeparate: "Different providers/profiles are treated as separate entries",
+  leaderboardRuleModelSeparate: "Different models are treated as separate entries",
+  providerKindAnthropicCompatible: "Anthropic Compatible",
+  providerKindOpenaiProxy: "OpenAI Proxy",
+  providerApiFormatAnthropicMessages: "Anthropic Messages",
+  providerApiFormatOpenaiChatViaProxy: "OpenAI Chat via Proxy",
 
   // UI States
   loadingResults: "Loading results...",
@@ -702,6 +711,15 @@ const zhCN = {
   leaderboardMedianCost: "中位成本",
   leaderboardLastSeen: "最后更新",
   leaderboardNote: "注：版本变化会开启新的历史记录，不继承旧版本分数。不同 provider、model 也会分开统计。",
+  leaderboardRuleSameTask: "仅对比相同任务的运行",
+  leaderboardRuleSameScoreMode: "仅对比相同评分模式的运行",
+  leaderboardRuleVersionSeparate: "不同 agent 版本视为独立条目",
+  leaderboardRuleProviderSeparate: "不同 provider/profile 视为独立条目",
+  leaderboardRuleModelSeparate: "不同模型视为独立条目",
+  providerKindAnthropicCompatible: "Anthropic 兼容",
+  providerKindOpenaiProxy: "OpenAI 代理",
+  providerApiFormatAnthropicMessages: "Anthropic Messages",
+  providerApiFormatOpenaiChatViaProxy: "OpenAI Chat 代理",
 
   // UI States
   loadingResults: "加载中...",
