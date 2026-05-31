@@ -150,6 +150,7 @@ const en = {
   launcherTaskPathLabel: "Task Pack Path",
   launcherOutputLabel: "Output Folder",
   launcherAdhocPromptLabel: "Custom Prompt",
+  launcherAdhocPromptPlaceholder: "Describe the task you want the selected agents to run.",
   launcherAdhocPromptHint:
     "Enter a prompt and AgentArena will create a temporary task pack and dispatch it to the selected agents.",
   launcherAgentsLabel: "Agents",
@@ -640,6 +641,7 @@ const zhCN = {
   launcherTaskPathLabel: "任务包路径",
   launcherOutputLabel: "输出目录",
   launcherAdhocPromptLabel: "自定义提示词",
+  launcherAdhocPromptPlaceholder: "描述你希望选中的 Agent 执行的任务。",
   launcherAdhocPromptHint:
     "输入提示词后，系统会自动生成临时任务包并下发给选中的 Agent 执行。",
   launcherAgentsLabel: "参与对比的 Agent",
