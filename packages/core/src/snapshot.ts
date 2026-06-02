@@ -3,6 +3,7 @@ import { createReadStream, promises as fs } from "node:fs";
 import { cpus } from "node:os";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
+import { logger } from "./logging.js";
 import { normalizePath } from "./paths.js";
 import type { DiffSummary, FileSnapshotEntry } from "./types/index.js";
 
@@ -60,6 +61,11 @@ interface FileToHash {
   mtimeMs: number;
 }
 
+/**
+ * Bounded-concurrency map. See packages/runner/src/concurrency.ts for
+ * the full concurrency-safety rationale (shared counter is safe under
+ * Node.js single-threaded event loop when read-increment is synchronous).
+ */
 async function mapWithConcurrency<T, R>(
   items: T[],
   limit: number,
@@ -70,6 +76,7 @@ async function mapWithConcurrency<T, R>(
 
   async function worker(): Promise<void> {
     while (nextIndex < items.length) {
+      // Synchronous claim — no await between read and increment.
       const currentIndex = nextIndex;
       nextIndex += 1;
       results[currentIndex] = await mapper(items[currentIndex]);
@@ -99,14 +106,14 @@ export async function snapshotDirectory(rootPath: string): Promise<Map<string, F
     }
     if (depth > maxDepth) {
       truncated = true;
-      console.warn(`Snapshot: max depth ${maxDepth} reached at ${currentPath}; remaining files skipped.`);
+      logger.warn("core", "snapshot.max_depth", `Snapshot: max depth ${maxDepth} reached at ${currentPath}; remaining files skipped.`);
       return;
     }
     let entries: import("node:fs").Dirent[];
     try {
       entries = await fs.readdir(currentPath, { withFileTypes: true });
     } catch (_error) {
-      console.warn(`Snapshot: skipped directory due to error: ${currentPath}`, _error instanceof Error ? _error.message : String(_error));
+      logger.warn("core", "snapshot.skip_dir", `Snapshot: skipped directory due to error: ${currentPath}`, { error: _error });
       return;
     }
 
@@ -134,7 +141,7 @@ export async function snapshotDirectory(rootPath: string): Promise<Map<string, F
         seenBytes += stat.size;
         if (seenFiles > maxFiles || seenBytes > maxTotalBytes) {
           truncated = true;
-          console.warn(`Snapshot: scan budget exceeded (${seenFiles} files, ${seenBytes} bytes); remaining files skipped.`);
+          logger.warn("core", "snapshot.budget_exceeded", `Snapshot: scan budget exceeded (${seenFiles} files, ${seenBytes} bytes); remaining files skipped.`);
           return;
         }
         if (stat.size > maxFileSize) {
@@ -147,7 +154,7 @@ export async function snapshotDirectory(rootPath: string): Promise<Map<string, F
         }
         filesToHash.push({ absolutePath, relativePath, size: stat.size, mtimeMs: stat.mtimeMs });
       } catch (_error) {
-        console.warn(`Snapshot: skipped file due to error: ${relativePath}`, _error instanceof Error ? _error.message : String(_error));
+        logger.warn("core", "snapshot.skip_file", `Snapshot: skipped file due to error: ${relativePath}`, { error: _error });
       }
     }
 
@@ -165,7 +172,7 @@ export async function snapshotDirectory(rootPath: string): Promise<Map<string, F
       const hash = await hashFileStream(file.absolutePath);
       return { relativePath: file.relativePath, hash };
     } catch (_error) {
-      console.warn(`Snapshot: skipped file due to error: ${file.relativePath}`, _error instanceof Error ? _error.message : String(_error));
+      logger.warn("core", "snapshot.skip_file", `Snapshot: skipped file due to error: ${file.relativePath}`, { error: _error });
       return null;
     }
   });
@@ -181,7 +188,8 @@ export async function snapshotDirectory(rootPath: string): Promise<Map<string, F
 
 export function diffSnapshots(
   before: Map<string, FileSnapshotEntry>,
-  after: Map<string, FileSnapshotEntry>
+  after: Map<string, FileSnapshotEntry>,
+  options: { reliable?: boolean; unreliableReason?: string } = {}
 ): DiffSummary {
   const added: string[] = [];
   const changed: string[] = [];
@@ -227,10 +235,17 @@ export function diffSnapshots(
     }
   }
 
-  return {
+  const summary: DiffSummary = {
     added: added.sort(),
     changed: changed.sort(),
     removed: removed.sort(),
     skippedLargeFiles: skippedLargeFiles.sort()
   };
+  if (options.reliable === false) {
+    summary.reliable = false;
+    if (options.unreliableReason) {
+      summary.unreliableReason = options.unreliableReason;
+    }
+  }
+  return summary;
 }

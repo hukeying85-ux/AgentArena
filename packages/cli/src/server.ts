@@ -5,7 +5,7 @@
  * Handles: rate limiting, CORS, token auth, API routing, static file serving.
  */
 
-import { randomBytes } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import type http from "node:http";
 import path from "node:path";
 import { auditLogger, logger, metrics } from "@agentarena/core";
@@ -27,6 +27,7 @@ interface RateLimitEntry {
   expensiveTimestamps: number[];
 }
 
+const RATE_LIMIT_MAX_STORE_SIZE = 10_000;
 const rateLimitStore = new Map<string, RateLimitEntry>();
 
 // Proxy trust configuration
@@ -74,6 +75,23 @@ export function getClientIp(request: http.IncomingMessage): string {
 
 export function checkRateLimit(ip: string, pathname: string): { allowed: boolean; retryAfterMs?: number } {
   const now = Date.now();
+
+  // Evict oldest entry when store is at capacity to prevent unbounded growth
+  if (!rateLimitStore.has(ip) && rateLimitStore.size >= RATE_LIMIT_MAX_STORE_SIZE) {
+    let oldestKey: string | undefined;
+    let oldestTime = Infinity;
+    for (const [key, entry] of rateLimitStore) {
+      const lastTs = entry.timestamps[entry.timestamps.length - 1] ?? 0;
+      if (lastTs < oldestTime) {
+        oldestTime = lastTs;
+        oldestKey = key;
+      }
+    }
+    if (oldestKey !== undefined) {
+      rateLimitStore.delete(oldestKey);
+    }
+  }
+
   let entry = rateLimitStore.get(ip);
   if (!entry) {
     entry = { timestamps: [], expensiveTimestamps: [] };
@@ -126,6 +144,19 @@ export function startRateLimitCleanup(): NodeJS.Timeout {
         rateLimitStore.delete(ip);
       }
     }
+    // Evict oldest entries if store exceeds max size
+    if (rateLimitStore.size > RATE_LIMIT_MAX_STORE_SIZE) {
+      const entries = [...rateLimitStore.entries()]
+        .sort((a, b) => {
+          const aLast = a[1].timestamps[a[1].timestamps.length - 1] ?? 0;
+          const bLast = b[1].timestamps[b[1].timestamps.length - 1] ?? 0;
+          return aLast - bLast;
+        });
+      const toEvict = entries.slice(0, entries.length - RATE_LIMIT_MAX_STORE_SIZE);
+      for (const [ip] of toEvict) {
+        rateLimitStore.delete(ip);
+      }
+    }
   }, RATE_LIMIT_WINDOW_MS);
 }
 
@@ -134,20 +165,52 @@ export function generateAuthToken(): string {
   return randomBytes(32).toString("hex");
 }
 
+/**
+ * Cache of computed allowed-origin Sets keyed by `host:port`.
+ *
+ * The host and port are immutable for the lifetime of a server, so the Set
+ * (8 entries + the 4-entry `0.0.0.0` extension) can be built once and reused
+ * across every request. Previously this was constructed on every CORS check,
+ * adding hundreds of needless allocations per second under load.
+ */
+const corsOriginCache = new Map<string, Set<string>>();
+
+function buildAllowedOrigins(host: string, port: number): Set<string> {
+  const cacheKey = `${host}:${port}`;
+  const cached = corsOriginCache.get(cacheKey);
+  if (cached) return cached;
+  // Normalize host for IPv6 bracket notation (browsers send [::1] but config may have ::1)
+  const normalizedHost = host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
+  const allowed = new Set([
+    `http://${normalizedHost}:${port}`,
+    `http://localhost:${port}`,
+    `http://127.0.0.1:${port}`,
+    `http://[::1]:${port}`,
+    `https://${normalizedHost}:${port}`,
+    `https://localhost:${port}`,
+    `https://127.0.0.1:${port}`,
+    `https://[::1]:${port}`,
+  ]);
+  if (host === "0.0.0.0") {
+    allowed.add(`http://localhost:${port}`);
+    allowed.add(`http://127.0.0.1:${port}`);
+    allowed.add(`https://localhost:${port}`);
+    allowed.add(`https://127.0.0.1:${port}`);
+  }
+  // Evict oldest entry if cache grows beyond reasonable bound (single-server model)
+  if (corsOriginCache.size > 16) {
+    const firstKey = corsOriginCache.keys().next().value;
+    if (firstKey !== undefined) corsOriginCache.delete(firstKey);
+  }
+  corsOriginCache.set(cacheKey, allowed);
+  return allowed;
+}
+
 export function checkCorsOrigin(origin: string | undefined, host: string, port: number): boolean {
   if (!origin) return true;
   // Reject null origin (from file:// protocol, privacy redirects, etc.)
   if (origin === "null") return false;
-  const allowedOrigins = new Set([
-    `http://${host}:${port}`,
-    `http://localhost:${port}`,
-    `http://127.0.0.1:${port}`
-  ]);
-  if (host === "0.0.0.0") {
-    allowedOrigins.add(`http://localhost:${port}`);
-    allowedOrigins.add(`http://127.0.0.1:${port}`);
-  }
-  return allowedOrigins.has(origin);
+  return buildAllowedOrigins(host, port).has(origin);
 }
 
 /**
@@ -189,13 +252,16 @@ export function checkAuthHeader(
 
   if (isSensitive || isDestructiveApi || !isLocalhost) {
     const providedToken = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : "";
-    // Use timing-safe comparison to prevent timing attacks
-    // Constant-time comparison: always iterate over the expected token length
-    // to avoid leaking the token length via timing differences.
-    let mismatch = providedToken.length !== authToken.length ? 1 : 0;
-    for (let i = 0; i < authToken.length; i++) {
-      mismatch |= (i < providedToken.length ? providedToken.charCodeAt(i) : 0) ^ authToken.charCodeAt(i);
-    }
+    // Use crypto.timingSafeEqual for constant-time comparison (prevents timing attacks).
+    // Pad the shorter buffer to match the longer one to avoid leaking length via timing.
+    const expectedBuf = Buffer.from(authToken, "utf8");
+    const providedBuf = Buffer.from(providedToken, "utf8");
+    const maxLen = Math.max(expectedBuf.length, providedBuf.length, 1);
+    const paddedExpected = Buffer.alloc(maxLen);
+    const paddedProvided = Buffer.alloc(maxLen);
+    expectedBuf.copy(paddedExpected);
+    providedBuf.copy(paddedProvided);
+    const mismatch = timingSafeEqual(paddedExpected, paddedProvided) ? 0 : 1;
     if (mismatch !== 0) {
       const maskedIp = clientIp ? clientIp.slice(0, 3) + "***" : "unknown";
       metrics.authFailureTotal.inc({ clientIp: maskedIp, path: requestUrl.pathname });
@@ -232,7 +298,7 @@ export function jsonResponse(data: unknown, statusCode = 200): { statusCode: num
       "X-Frame-Options": "DENY",
       "X-Content-Type-Options": "nosniff",
       "Referrer-Policy": "strict-origin-when-cross-origin",
-      "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'",
+      "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'self'; form-action 'self'",
       // Prevent caching of API responses that may contain sensitive data
       "Pragma": "no-cache"
     }
@@ -243,7 +309,12 @@ export function textResponse(body: string, statusCode = 200): { statusCode: numb
   return {
     statusCode,
     body,
-    headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" }
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": "no-store",
+      "X-Frame-Options": "DENY",
+      "X-Content-Type-Options": "nosniff"
+    }
   };
 }
 
@@ -254,22 +325,26 @@ export class HttpError extends Error {
   }
 }
 
-export async function readRequestBody(request: http.IncomingMessage, maxBytes = 1_048_576, timeoutMs = 30_000): Promise<string> {
+/** Maximum request body size (1 MB) */
+const MAX_REQUEST_BODY_BYTES = 1_048_576;
+/** Request body read timeout (30 seconds) */
+const REQUEST_BODY_TIMEOUT_MS = 30_000;
+
+export async function readRequestBody(request: http.IncomingMessage, maxBytes = MAX_REQUEST_BODY_BYTES, timeoutMs = REQUEST_BODY_TIMEOUT_MS): Promise<string> {
   const chunks: Buffer[] = [];
   let totalBytes = 0;
 
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    const timer = setTimeout(() => {
-      request.destroy();
-      reject(new HttpError("Request body read timed out.", 408));
-    }, timeoutMs);
-    request.on("end", () => clearTimeout(timer));
-    request.on("error", () => clearTimeout(timer));
-    request.on("close", () => clearTimeout(timer));
-  });
+  const abortController = new AbortController();
+  const timeoutTimer = setTimeout(() => {
+    abortController.abort();
+    request.destroy();
+  }, timeoutMs);
 
-  const readPromise = (async () => {
+  try {
     for await (const chunk of request) {
+      if (abortController.signal.aborted) {
+        throw new HttpError("Request body read timed out.", 408);
+      }
       const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       totalBytes += buffer.length;
       if (totalBytes > maxBytes) {
@@ -278,9 +353,14 @@ export async function readRequestBody(request: http.IncomingMessage, maxBytes = 
       chunks.push(buffer);
     }
     return Buffer.concat(chunks).toString("utf8");
-  })();
-
-  return Promise.race([readPromise, timeoutPromise]);
+  } catch (error) {
+    if (abortController.signal.aborted) {
+      throw new HttpError("Request body read timed out.", 408);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutTimer);
+  }
 }
 
 export function detectContentType(filePath: string): string {
@@ -288,18 +368,30 @@ export function detectContentType(filePath: string): string {
   switch (ext) {
     case ".html": return "text/html; charset=utf-8";
     case ".js": return "text/javascript; charset=utf-8";
+    case ".mjs": return "text/javascript; charset=utf-8";
     case ".css": return "text/css; charset=utf-8";
     case ".json": return "application/json; charset=utf-8";
+    case ".xml": return "application/xml; charset=utf-8";
     case ".svg": return "image/svg+xml";
     case ".wasm": return "application/wasm";
     case ".webmanifest": return "application/manifest+json";
     case ".png": return "image/png";
     case ".jpg": case ".jpeg": return "image/jpeg";
     case ".gif": return "image/gif";
+    case ".webp": return "image/webp";
+    case ".avif": return "image/avif";
     case ".ico": return "image/x-icon";
     case ".woff": return "font/woff";
     case ".woff2": return "font/woff2";
     case ".ttf": return "font/ttf";
+    case ".otf": return "font/otf";
+    case ".eot": return "application/vnd.ms-fontobject";
+    case ".map": return "application/json";
+    case ".pdf": return "application/pdf";
+    case ".mp4": return "video/mp4";
+    case ".mp3": return "audio/mpeg";
+    case ".webm": return "video/webm";
+    case ".txt": return "text/plain; charset=utf-8";
     default: return "application/octet-stream";
   }
 }

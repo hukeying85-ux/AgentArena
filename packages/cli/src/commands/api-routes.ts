@@ -26,13 +26,43 @@ import {
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { jsonResponse } from "../server.js";
 
+/**
+ * Wrap an API handler with structured error logging and a safe error envelope.
+ *
+ * The envelope distinguishes:
+ *   - Known errors (HttpError, ENOENT, validation failures) → propagate the
+ *     message and a sensible status code so the SPA can show actionable text.
+ *   - Unknown errors → log internally with the full error, return a generic
+ *     "Internal server error" to avoid leaking implementation details or PII.
+ */
 export async function withErrorHandling(promise: Promise<ApiResponse>): Promise<ApiResponse> {
   try {
     return await promise;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    // biome-ignore lint/suspicious/noConsole: server error logging
-    console.error(`[agentarena] API handler error: ${message}`);
+    const errnoCode = (error as NodeJS.ErrnoException | undefined)?.code;
+    const rawMessage = error instanceof Error ? error.message : String(error);
+
+    // Validation-shaped errors thrown by handlers (these throw plain Error
+    // with a user-facing message). Surface them as 400 so the SPA can render.
+    if (error instanceof Error && error.name === "ValidationError") {
+      logger.warn("server", "api.validation_failed", `Validation failed: ${rawMessage}`);
+      return jsonResponse({ error: rawMessage }, 400);
+    }
+
+    // Not-found errors from file lookups (taskpack file, profile, etc).
+    if (errnoCode === "ENOENT") {
+      logger.info("server", "api.not_found", `Resource not found: ${rawMessage}`);
+      return jsonResponse({ error: rawMessage }, 404);
+    }
+
+    // Permission / unreadable resource — operator-actionable.
+    if (errnoCode === "EACCES" || errnoCode === "EPERM") {
+      logger.warn("server", "api.permission_denied", `Permission denied: ${rawMessage}`, { error });
+      return jsonResponse({ error: rawMessage }, 403);
+    }
+
+    // Truly unexpected — log full error context, return a sanitized envelope.
+    logger.error("server", "api.unexpected_error", `Unhandled API error: ${rawMessage}`, { error });
     return jsonResponse({ error: "Internal server error" }, 500);
   }
 }
@@ -200,7 +230,17 @@ export async function handleProviderProfileCreate(rawBody: string): Promise<ApiR
   });
 }
 
+function validateProfileId(profileId: string): string | null {
+  if (!profileId || typeof profileId !== "string") return "Profile ID is required.";
+  if (profileId.length > 128) return "Profile ID too long (max 128 characters).";
+  if (!/^[a-zA-Z0-9_-]+$/.test(profileId)) return "Profile ID may only contain alphanumeric characters, hyphens, and underscores.";
+  return null;
+}
+
 export async function handleProviderProfileUpdate(profileId: string, rawBody: string): Promise<ApiResponse> {
+  const profileIdError = validateProfileId(profileId);
+  if (profileIdError) return jsonResponse({ error: profileIdError }, 400);
+
   let payload: ProviderProfilePayload;
   try {
     payload = JSON.parse(rawBody) as ProviderProfilePayload;
@@ -223,6 +263,8 @@ export async function handleProviderProfileUpdate(profileId: string, rawBody: st
 }
 
 export async function handleProviderProfileDelete(profileId: string): Promise<ApiResponse> {
+  const profileIdError = validateProfileId(profileId);
+  if (profileIdError) return jsonResponse({ error: profileIdError }, 400);
   try {
     await deleteClaudeProviderProfile(profileId);
   } catch (err: unknown) {
@@ -235,6 +277,9 @@ export async function handleProviderProfileDelete(profileId: string): Promise<Ap
 }
 
 export async function handleProviderProfileSecret(profileId: string, rawBody: string): Promise<ApiResponse> {
+  const profileIdError = validateProfileId(profileId);
+  if (profileIdError) return jsonResponse({ error: profileIdError }, 400);
+
   let payload: { secret?: string };
   try {
     payload = JSON.parse(rawBody) as { secret?: string };
@@ -264,6 +309,15 @@ export async function handleCreateAdhocTaskpack(rawBody: string): Promise<ApiRes
   }
   if (body.prompt.length > 100_000) {
     return jsonResponse({ error: "prompt must be less than 100,000 characters." }, 400);
+  }
+  // Strip control characters (except newline, carriage return, tab) to prevent
+  // YAML injection and terminal escape sequence attacks
+  const sanitizedPrompt = body.prompt.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+  if (body.title && body.title.length > 500) {
+    return jsonResponse({ error: "title must be less than 500 characters." }, 400);
+  }
+  if (body.title && /[<>"'&]/.test(body.title)) {
+    return jsonResponse({ error: "title must not contain HTML-significant characters (<, >, \", ', &)." }, 400);
   }
   const adhocDir = path.join(process.cwd(), ".agentarena", "adhoc-taskpacks");
   await fs.mkdir(adhocDir, { recursive: true });
@@ -354,7 +408,7 @@ export async function handleCreateAdhocTaskpack(rawBody: string): Promise<ApiRes
       dependencies: [],
       judgeRationale: `These default checks assume a ${detectedLang} repository with appropriate build, test, and lint commands.`
     },
-    prompt: body.prompt,
+    prompt: sanitizedPrompt,
     judges
   }, { lineWidth: 0 });
   const adhocPath = path.join(adhocDir, `${adhocId}.yaml`);

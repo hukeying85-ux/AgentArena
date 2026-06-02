@@ -14,15 +14,33 @@
  * The sandbox catches accidental path escapes in well-behaved adapters,
  * not malicious code.
  *
+ * SECURITY WARNING: Do NOT rely on this sandbox for defense against
+ * adversarial agents. For untrusted code execution, use OS-level
+ * isolation (containers, VMs, seccomp, namespaces). This module is
+ * a convenience layer for catching accidental misconfigurations only.
+ *
  * Modes:
  * - "off": no validation (returns true always)
  * - "warn": logs violation + trace event, returns false, does not throw
  * - "strict" (default): throws Error on violation
  */
 
+import { logger } from "./logging.js";
 import { isPathInsideWorkspace } from "./paths.js";
+import type { TraceEventType } from "./types/benchmark.js";
 
 export type SandboxMode = "off" | "warn" | "strict";
+
+/**
+ * Subset of TraceEvent that the sandbox is allowed to emit.
+ * Narrowing to `TraceEventType` ensures any new sandbox event name has to be
+ * added to the closed TraceEventType union before the code will compile.
+ */
+type SandboxTraceFn = (event: {
+  type: TraceEventType;
+  message: string;
+  metadata?: Record<string, unknown>;
+}) => Promise<void>;
 
 /**
  * Validate that a target path is within the workspace boundary.
@@ -34,7 +52,7 @@ export async function validateWorkspacePath(
   workspacePath: string,
   targetPath: string,
   context: string,
-  trace: ((event: { type: string; message: string; metadata?: Record<string, unknown> }) => Promise<void>) | undefined,
+  trace: SandboxTraceFn | undefined,
   mode: SandboxMode = "strict"
 ): Promise<boolean> {
   if (mode === "off") return true;
@@ -48,13 +66,17 @@ export async function validateWorkspacePath(
         message,
         metadata: { context, targetPath, workspacePath, mode }
       }).catch((err: unknown) => {
-        console.error("[sandbox] trace write failed:", err instanceof Error ? err.message : String(err));
+        logger.error("core", "sandbox.trace_write_failed", `Sandbox trace write failed: ${err instanceof Error ? err.message : String(err)}`, {
+          error: err
+        });
       });
     }
     if (mode === "strict") {
       throw new Error(message);
     }
-    console.warn(message);
+    logger.warn("core", "sandbox.violation", message, {
+      metadata: { context, targetPath, workspacePath, mode }
+    });
     return false;
   }
   return true;
@@ -65,7 +87,7 @@ export async function validateWorkspacePath(
  */
 export function createWorkspaceSandbox(
   workspacePath: string,
-  trace: ((event: { type: string; message: string; metadata?: Record<string, unknown> }) => Promise<void>) | undefined,
+  trace: SandboxTraceFn | undefined,
   mode: SandboxMode = "strict"
 ) {
   return {

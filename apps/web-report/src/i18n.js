@@ -8,6 +8,7 @@ const en = {
   themeLabelLight: "Light",
   themeLabelDark: "Dark",
   languageLabel: "Language",
+  languageEnglishLabel: "English",
   languageChineseLabel: "Chinese",
   runsFolderTitle: "Recommended: Load Run Folder",
   runsFolderHint:
@@ -35,9 +36,18 @@ const en = {
   heroTitle: "Benchmark the local coding agents you already trust with your real work.",
   heroDescription:
     "Use the same repository, the same task, and the same judges to compare local agent setups or to baseline one agent over time.",
-  heroWhatTitle: "What AgentArena gives you",
+  heroWhatTitle: "What AgentArena Gives You",
   heroWhatBody:
     "A local benchmark harness for coding agents you already use: shared setup, shared judges, replayable traces, and reports that are actually useful after the run ends.",
+  heroFeatureFairTitle: "Fair Comparison",
+  heroFeatureFairDesc: "Same repo, same task, same judges for all agents",
+  heroFeatureRichTitle: "Rich Reports",
+  heroFeatureRichDesc: "Verdict cards, diff views, judge details, and trace replays",
+  heroFeatureHistoryTitle: "History Tracking",
+  heroFeatureHistoryDesc: "Track agent performance across multiple runs",
+  configureAgentsBtn: "Configure Agents",
+  stickyBarHint: "Select agents and a task to start benchmarking",
+  stickyBarAgentsConfigured: (count) => `<strong>${count}</strong> agent${count === 1 ? '' : 's'} configured`,
   heroHowTitle: "Recommended workflow",
   heroHowSteps: [
     "Choose the repository and task that resemble your real work.",
@@ -57,6 +67,7 @@ const en = {
   judgeFiltersTitle: "Judge Filters",
   markdownSummaryTitle: "Markdown Summary",
   copySummary: "Copy Summary",
+  copyVerdictCard: "Copy Verdict Card",
   copyShareSvg: "Copy Share SVG",
   downloadShareSvg: "Download Share SVG",
   judgeSearchPlaceholder: "Search label, target, expectation",
@@ -139,6 +150,7 @@ const en = {
   launcherTaskPathLabel: "Task Pack Path",
   launcherOutputLabel: "Output Folder",
   launcherAdhocPromptLabel: "Custom Prompt",
+  launcherAdhocPromptPlaceholder: "Describe the task you want the selected agents to run.",
   launcherAdhocPromptHint:
     "Enter a prompt and AgentArena will create a temporary task pack and dispatch it to the selected agents.",
   launcherAgentsLabel: "Agents",
@@ -214,6 +226,15 @@ const en = {
   leaderboardMedianCost: "Median Cost",
   leaderboardLastSeen: "Last Seen",
   leaderboardNote: "Note: Version changes create new historical records; scores are not inherited. Different providers and models are tracked separately.",
+  leaderboardRuleSameTask: "Only runs with the same task are compared",
+  leaderboardRuleSameScoreMode: "Only runs with the same score mode are compared",
+  leaderboardRuleVersionSeparate: "Different agent versions are treated as separate entries",
+  leaderboardRuleProviderSeparate: "Different providers/profiles are treated as separate entries",
+  leaderboardRuleModelSeparate: "Different models are treated as separate entries",
+  providerKindAnthropicCompatible: "Anthropic Compatible",
+  providerKindOpenaiProxy: "OpenAI Proxy",
+  providerApiFormatAnthropicMessages: "Anthropic Messages",
+  providerApiFormatOpenaiChatViaProxy: "OpenAI Chat via Proxy",
 
   // UI States
   loadingResults: "Loading results...",
@@ -295,6 +316,8 @@ const en = {
   // Export buttons
   exportMarkdown: "Export Markdown",
   exportHtml: "Export HTML",
+  exportJson: "Export JSON",
+  importJson: "Import JSON",
   copyLink: "Copy Link",
 
   // Team cost calculator
@@ -321,6 +344,9 @@ const en = {
   customWeightsHint: "Custom weights (advanced)",
 
   // Score preset buttons
+  scorePresetLabel: "Score preset:",
+  scorePresetHint: "Re-scores the current view only. The archived scoring is preserved.",
+  scoreWeightsCustomTitle: "Custom weights (advanced)",
   scorePresetPracticalBtn: "🎯 Practical (Default)",
   scorePresetBalancedBtn: "⚖️ Balanced",
   scorePresetIssueResolutionBtn: "🎯 Issue Resolution",
@@ -372,6 +398,12 @@ const en = {
   efficiencyFirstCreditLabel: "Efficiency First Mode",
   rotatingTasksCreditLabel: "Rotating Tasks Mode",
 
+  // Code review
+  codeReviewTitle: "Code Review (Diff Comparison)",
+  codeReviewSelectLabel: "Select agents to compare:",
+  codeReviewCompareBtn: "Start Comparison",
+  codeReviewEmptyState: "Select at least 2 agents to compare",
+
   // Test connection
   testConnection: "Test",
   testConnectionTesting: "Testing...",
@@ -380,6 +412,7 @@ const en = {
   testConnectionBlocked: "Blocked",
   testConnectionUnverified: "Unverified",
   testConnectionError: "Test failed",
+  detectAllAgents: "Detect Installed Agents",
 
   // Community leaderboard
   communityEyebrow: "Community",
@@ -405,7 +438,17 @@ const en = {
     stepProgress: 'Step {current}/{total}',
     play: 'Play',
     pause: 'Pause',
-    selectRun: 'Select a run to view trace replay'
+    selectRun: 'Select a run to view trace replay',
+    title: 'Trace Replay',
+    prev: 'Prev',
+    prevTitle: 'Previous Step',
+    next: 'Next',
+    nextTitle: 'Next Step',
+    autoPlay: 'Auto Play',
+    totalEvents: 'Total Events',
+    duration: 'Duration',
+    errors: 'Errors',
+    agent: 'Agent'
   },
 
   // Chart components
@@ -419,7 +462,26 @@ const en = {
   chartDocsAbility: 'Docs Ability',
   chartWeightTotal: 'Total Weight',
   chartWeightWarning: 'Total weight should be 100%',
-  chartNoData: 'No chart data available.'
+  chartNoData: 'No chart data available.',
+
+  // Task Pack Market
+  marketTitle: 'Task Pack Market',
+  marketDescription: 'Browse and import community-shared task packs',
+  marketSearchPlaceholder: 'Search task packs...',
+  marketImportUrl: 'Import URL',
+  marketNoResults: 'No matching task packs found',
+  marketEmpty: 'No task packs yet. Click "Import URL" to add one.',
+  marketTaskCount: (n) => `${n} task(s)`,
+  marketImport: 'Import',
+  marketDialogTitle: 'Import Task Pack',
+  marketDialogHint: 'Enter a GitHub repo URL or raw content URL',
+  marketDialogCancel: 'Cancel',
+  marketDialogConfirm: 'Import',
+  marketImportSuccess: (name) => `Task pack "${name}" imported successfully!`,
+  marketImportFailed: (err) => `Import failed: ${err}`,
+  marketLoadFailed: (status) => `Load failed: ${status}`,
+  marketFetchFailed: (status) => `Failed to fetch task pack: ${status}`,
+  marketInvalidFormat: 'Invalid task pack format'
 };
 
 const zhCN = {
@@ -432,6 +494,7 @@ const zhCN = {
   themeLabelLight: "浅色",
   themeLabelDark: "深色",
   languageLabel: "语言",
+  languageEnglishLabel: "English",
   languageChineseLabel: "中文",
   runsFolderTitle: "推荐：打开结果文件夹",
   runsFolderHint:
@@ -461,6 +524,15 @@ const zhCN = {
   heroWhatTitle: "AgentArena 真正提供什么",
   heroWhatBody:
     "它是一个面向重度 agent 用户的本地 benchmark 工具：统一执行、统一 judge、统一 trace、统一报告，方便你真正比较本地 agent 的能力。",
+  heroFeatureFairTitle: "公平对比",
+  heroFeatureFairDesc: "所有 agent 使用相同的仓库、任务和 judges",
+  heroFeatureRichTitle: "丰富报告",
+  heroFeatureRichDesc: "结论卡片、diff 视图、judge 详情和 trace 回放",
+  heroFeatureHistoryTitle: "历史追踪",
+  heroFeatureHistoryDesc: "跨多次运行追踪 agent 表现",
+  configureAgentsBtn: "配置 Agents",
+  stickyBarHint: "选择 agents 和任务后开始跑分",
+  stickyBarAgentsConfigured: (count) => `已配置 <strong>${count}</strong> 个 agent`,
   heroHowTitle: "推荐用法",
   heroHowSteps: [
     "先选一个真正代表你工作场景的仓库和任务。",
@@ -479,6 +551,7 @@ const zhCN = {
   judgeFiltersTitle: "Judge 筛选",
   markdownSummaryTitle: "Markdown 摘要",
   copySummary: "复制摘要",
+  copyVerdictCard: "复制结果卡片",
   copyShareSvg: "复制分享 SVG",
   downloadShareSvg: "下载分享 SVG",
   judgeSearchPlaceholder: "搜索 label、target、expectation",
@@ -568,6 +641,7 @@ const zhCN = {
   launcherTaskPathLabel: "任务包路径",
   launcherOutputLabel: "输出目录",
   launcherAdhocPromptLabel: "自定义提示词",
+  launcherAdhocPromptPlaceholder: "描述你希望选中的 Agent 执行的任务。",
   launcherAdhocPromptHint:
     "输入提示词后，系统会自动生成临时任务包并下发给选中的 Agent 执行。",
   launcherAgentsLabel: "参与对比的 Agent",
@@ -641,6 +715,15 @@ const zhCN = {
   leaderboardMedianCost: "中位成本",
   leaderboardLastSeen: "最后更新",
   leaderboardNote: "注：版本变化会开启新的历史记录，不继承旧版本分数。不同 provider、model 也会分开统计。",
+  leaderboardRuleSameTask: "仅对比相同任务的运行",
+  leaderboardRuleSameScoreMode: "仅对比相同评分模式的运行",
+  leaderboardRuleVersionSeparate: "不同 agent 版本视为独立条目",
+  leaderboardRuleProviderSeparate: "不同 provider/profile 视为独立条目",
+  leaderboardRuleModelSeparate: "不同模型视为独立条目",
+  providerKindAnthropicCompatible: "Anthropic 兼容",
+  providerKindOpenaiProxy: "OpenAI 代理",
+  providerApiFormatAnthropicMessages: "Anthropic Messages",
+  providerApiFormatOpenaiChatViaProxy: "OpenAI Chat 代理",
 
   // UI States
   loadingResults: "加载中...",
@@ -747,6 +830,9 @@ const zhCN = {
   customWeightsHint: "自定义权重（高级）",
 
   // Score preset buttons
+  scorePresetLabel: "评分预设:",
+  scorePresetHint: "仅重新计算当前视图的得分，归档评分保持不变。",
+  scoreWeightsCustomTitle: "自定义权重（高级）",
   scorePresetPracticalBtn: "🎯 实用模式 (默认)",
   scorePresetBalancedBtn: "⚖️ 平衡模式",
   scorePresetIssueResolutionBtn: "🎯 Issue 解决模式",
@@ -762,6 +848,12 @@ const zhCN = {
   issueResolutionCreditLabel: "Issue Resolution 模式",
   efficiencyFirstCreditLabel: "Efficiency First 模式",
   rotatingTasksCreditLabel: "Rotating Tasks 模式",
+
+  // Code review
+  codeReviewTitle: "代码变更对比 (Code Review)",
+  codeReviewSelectLabel: "选择 Agent 对比:",
+  codeReviewCompareBtn: "开始对比",
+  codeReviewEmptyState: "选择至少 2 个 Agent 进行对比",
 
   // Fair comparison
   runCompareFairOnlyTitle: "公平对比",
@@ -815,6 +907,7 @@ const zhCN = {
   openThisRun: "打开这个 run",
   openLabel: "查看",
   exportJson: "导出 JSON",
+  importJson: "导入 JSON",
   exportLabel: "导出",
   removeFromList: "从列表移除",
   removeLabel: "移除",
@@ -995,6 +1088,7 @@ const zhCN = {
   testConnectionBlocked: "不可用",
   testConnectionUnverified: "未验证",
   testConnectionError: "测试失败",
+  detectAllAgents: "检测已安装的 Agent",
 
   // Community leaderboard
   communityEyebrow: "社区",
@@ -1020,7 +1114,17 @@ const zhCN = {
     stepProgress: '步骤 {current}/{total}',
     play: '播放',
     pause: '暂停',
-    selectRun: '选择要查看跟踪回放的运行'
+    selectRun: '选择要查看跟踪回放的运行',
+    title: 'Trace 回放',
+    prev: '上一步',
+    prevTitle: '上一步',
+    next: '下一步',
+    nextTitle: '下一步',
+    autoPlay: '自动播放',
+    totalEvents: '总事件数',
+    duration: '时长',
+    errors: '错误',
+    agent: 'Agent'
   },
 
   // Chart components
@@ -1034,7 +1138,26 @@ const zhCN = {
   chartDocsAbility: '文档能力',
   chartWeightTotal: '总权重',
   chartWeightWarning: '总权重应为 100%',
-  chartNoData: '暂无图表数据。'
+  chartNoData: '暂无图表数据。',
+
+  // Task Pack Market
+  marketTitle: '任务包市场',
+  marketDescription: '浏览和导入社区共享的任务包',
+  marketSearchPlaceholder: '搜索任务包...',
+  marketImportUrl: '导入 URL',
+  marketNoResults: '未找到匹配的任务包',
+  marketEmpty: '暂无任务包，点击"导入 URL"添加',
+  marketTaskCount: (n) => `${n} 个任务`,
+  marketImport: '导入',
+  marketDialogTitle: '导入任务包',
+  marketDialogHint: '输入 GitHub 仓库 URL 或 raw content URL',
+  marketDialogCancel: '取消',
+  marketDialogConfirm: '导入',
+  marketImportSuccess: (name) => `任务包 "${name}" 导入成功！`,
+  marketImportFailed: (err) => `导入失败: ${err}`,
+  marketLoadFailed: (status) => `加载失败: ${status}`,
+  marketFetchFailed: (status) => `无法获取任务包: ${status}`,
+  marketInvalidFormat: '无效的任务包格式'
 };
 
 export const MESSAGES = {

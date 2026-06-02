@@ -30,7 +30,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { ClaudeProviderProfile, ClaudeProviderRiskFlag } from "@agentarena/core";
-import { isInternalUrl } from "@agentarena/core";
+import { hasInternalDnsResolution, isInternalUrl } from "@agentarena/core";
 
 interface ProfileRegistryFile {
   schemaVersion: 1;
@@ -153,6 +153,11 @@ async function ensureRegistryDir(): Promise<void> {
   await fs.mkdir(path.dirname(registryPath()), { recursive: true });
 }
 
+// ---------------------------------------------------------------------------
+// Section 1: Registry file I/O
+// Reads/writes ~/.config/agentarena/claude-provider-profiles.json
+// ---------------------------------------------------------------------------
+
 async function readRegistry(): Promise<ProfileRegistryFile> {
   let rawRegistry: string;
   try {
@@ -241,6 +246,10 @@ async function runPowerShellJson(script: string): Promise<unknown> {
     );
   });
 }
+
+// ---------------------------------------------------------------------------
+// Section 2: Secret storage (Windows Credential Manager / AES-256-GCM)
+// ---------------------------------------------------------------------------
 
 async function setSecretWindows(profileId: string, secret: string): Promise<void> {
   const target = secretTarget(profileId);
@@ -398,9 +407,14 @@ async function hasStoredSecret(profileId: string): Promise<boolean> {
   return (await getSecretFile(profileId)) !== null;
 }
 
+/**
+ * @deprecated Always returns `true`. Profile secret storage now works on every
+ * platform (Windows Credential Manager, macOS Keychain, encrypted file
+ * fallback), so the predicate has no remaining purpose. Callers using this
+ * as a feature gate are dead branches — remove or replace with explicit
+ * platform checks where actually needed.
+ */
 export function supportsWindowsCredentialManager(): boolean {
-  // Legacy public helper kept for compatibility with existing callers/tests.
-  // AgentArena now supports profile secret storage on every platform, even if the backend differs.
   return true;
 }
 
@@ -434,6 +448,10 @@ export async function getClaudeProviderProfile(profileId?: string): Promise<Clau
   return profile;
 }
 
+// ---------------------------------------------------------------------------
+// Section 3: Profile CRUD (save, get, list, delete, buildEnvironment)
+// ---------------------------------------------------------------------------
+
 export async function saveClaudeProviderProfile(input: ClaudeProviderProfileInput): Promise<ClaudeProviderProfile> {
   if (input.kind === "official") {
     throw new Error("The built-in official Claude profile cannot be replaced.");
@@ -441,6 +459,30 @@ export async function saveClaudeProviderProfile(input: ClaudeProviderProfileInpu
 
   if (input.baseUrl && isInternalUrl(input.baseUrl)) {
     throw new Error("baseUrl cannot point to an internal/private address. This restriction prevents Server-Side Request Forgery (SSRF) attacks.");
+  }
+
+  // DNS rebinding guard: resolve the hostname and verify no resolved IP is
+  // internal/private. Without this, an attacker could register a domain that
+  // initially resolves to a public IP (passing isInternalUrl) but later resolves
+  // to 127.0.0.1 at request time, bypassing the SSRF protection.
+  if (input.baseUrl) {
+    try {
+      const isDnsInternal = await hasInternalDnsResolution(input.baseUrl);
+      if (isDnsInternal) {
+        throw new Error(
+          `baseUrl "${input.baseUrl}" resolves to an internal/private IP address. ` +
+          `This restriction prevents DNS rebinding SSRF attacks.`
+        );
+      }
+    } catch (dnsError) {
+      if (dnsError instanceof Error && dnsError.message.includes("resolves to an internal")) {
+        throw dnsError;
+      }
+      // DNS resolution failure is treated as potentially internal (fail-safe)
+      throw new Error(
+        `baseUrl "${input.baseUrl}" failed DNS resolution. Cannot verify it does not point to an internal address.`
+      );
+    }
   }
 
   if (input.baseUrl) {

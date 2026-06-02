@@ -7,7 +7,7 @@ AgentArena has entered stabilization. The core feature set is complete and the f
 - **Adapters**: No new adapters will be accepted. The current set (demo-fast, demo-thorough, demo-budget, codex, claude-code, cursor, gemini-cli, aider, copilot, kilo-cli, opencode, qwen-code, trae, augment, windsurf) is final.
 - **Judge types**: No new judge types. The 15 current types cover the validation surface.
 - **Scoring formula**: The 6 score modes and their weight presets are locked. No changes to `computeCompositeScore` behavior.
-- **CLI commands**: The command set (run, doctor, ui, init-taskpack, init-ci, list-adapters) is final.
+- **CLI commands**: The command set (run, doctor, ui, init-taskpack, init-ci, list-adapters, clean) is final.
 
 ## What is stable (public API)
 

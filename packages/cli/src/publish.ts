@@ -7,6 +7,7 @@ import type {
   CommunityLeaderboardIndex,
   CommunityRunEntry,
 } from "@agentarena/core";
+import { isScoreMode } from "@agentarena/core";
 import { sanitizeRun } from "@agentarena/report";
 import type { ParsedArgs } from "./args.js";
 
@@ -172,7 +173,7 @@ export function extractCommunityEntry(
     publishedBy,
     taskPackId: sanitized.task?.id ?? "unknown",
     taskTitle: sanitized.task?.title ?? "Unknown Task",
-    scoreMode: sanitized.scoreMode ?? "balanced",
+    scoreMode: sanitized.scoreMode && isScoreMode(sanitized.scoreMode) ? sanitized.scoreMode : "balanced",
     agentResults,
   };
 }

@@ -89,11 +89,33 @@ export function validateTaskPackId(id: string): boolean {
 }
 
 function isPrivateIp(ip: string): boolean {
-  if (ip === "127.0.0.1" || ip === "0.0.0.0") return true;
+  if (ip === "0.0.0.0") return true;
+  // Full 127.0.0.0/8 loopback range
+  if (ip.startsWith("127.")) return true;
   if (ip.startsWith("10.")) return true;
   if (ip.startsWith("192.168.")) return true;
   if (/^172\.(1[6-9]|2\d|3[01])\./.test(ip)) return true;
   if (ip.startsWith("169.254.")) return true;
+  // RFC 6598 Carrier-Grade NAT / shared address space
+  if (/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(ip)) return true;
+  // RFC 2544 benchmark testing
+  if (/^198\.1[89]\./.test(ip)) return true;
+  // Multicast
+  if (/^(22[4-9]|23\d)\./.test(ip)) return true;
+  return false;
+}
+
+function isPrivateIpv6(ip: string): boolean {
+  // IPv6 loopback
+  if (ip === "::1") return true;
+  // IPv6 ULA (fc00::/7)
+  if (/^f[cd][0-9a-f]{2}:/i.test(ip)) return true;
+  // IPv6 link-local (fe80::/10)
+  if (/^fe80:/i.test(ip)) return true;
+  // IPv6 multicast (ff00::/8)
+  if (/^ff00:/i.test(ip)) return true;
+  // Unspecified
+  if (ip === "::") return true;
   return false;
 }
 
@@ -105,7 +127,7 @@ export function isInternalUrl(urlString: string): boolean {
     if (hostname.startsWith("[") && hostname.endsWith("]")) {
       hostname = hostname.slice(1, -1);
     }
-    if (hostname === "::1" || hostname === "::" || hostname === "[::]") return true;
+    if (isPrivateIpv6(hostname)) return true;
     const ipv4Mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i;
     const match = hostname.match(ipv4Mapped);
     if (match) {
@@ -124,6 +146,50 @@ export function isInternalUrl(urlString: string): boolean {
     if (hostname.endsWith(".internal") || hostname.endsWith(".local") || hostname.endsWith(".localhost")) return true;
     return false;
   } catch {
+    return true;
+  }
+}
+
+/**
+ * Resolve a hostname to its IP addresses and check if any resolve to a
+ * private/internal address. This guards against DNS rebinding attacks where
+ * a domain initially resolves to a public IP (passing `isInternalUrl`)
+ * but later resolves to a private IP at request time.
+ *
+ * Returns true if any resolved IP is internal/private.
+ */
+export async function hasInternalDnsResolution(urlString: string): Promise<boolean> {
+  try {
+    const { promises: dnsPromises } = await import("node:dns");
+    const parsed = new URL(urlString);
+    const hostname = parsed.hostname.toLowerCase();
+
+    // Skip check for IP literals and known-safe hostnames
+    if (/^\d+\.\d+\.\d+\.\d+$/.test(hostname)) {
+      return isPrivateIp(hostname);
+    }
+
+    try {
+      const addresses = await dnsPromises.resolve4(hostname);
+      for (const addr of addresses) {
+        if (isPrivateIp(addr)) return true;
+      }
+    } catch {
+      // No A records — try AAAA
+    }
+
+    try {
+      const addresses6 = await dnsPromises.resolve6(hostname);
+      for (const addr of addresses6) {
+        if (isPrivateIpv6(addr)) return true;
+      }
+    } catch {
+      // No AAAA records either — treat as non-internal
+    }
+
+    return false;
+  } catch {
+    // DNS resolution failure = treat as potentially internal (fail-safe)
     return true;
   }
 }

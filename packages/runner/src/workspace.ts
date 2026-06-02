@@ -1,4 +1,5 @@
 import { promises as fs } from "node:fs";
+import { logger } from "@agentarena/core";
 
 const WORKSPACE_CLEANUP_MAX_RETRIES = 3;
 const WORKSPACE_CLEANUP_RETRY_DELAY_MS = 1000;
@@ -19,9 +20,9 @@ export function formatErrorMessage(error: unknown): string {
   return String(error);
 }
 
-export function debugLog(enabled: boolean, ...args: unknown[]): void {
+export function debugLog(enabled: boolean, message: string, metadata?: Record<string, unknown>): void {
   if (enabled) {
-    console.error("[debug]", ...args);
+    logger.debug("runner", "workspace.debug", message, metadata ? { metadata } : undefined);
   }
 }
 

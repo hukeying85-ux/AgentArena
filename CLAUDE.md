@@ -1,3 +1,8 @@
+---
+description: 
+alwaysApply: true
+---
+
 # CLAUDE.md
 
 AgentArena — local-first benchmark and replay tool for comparing AI coding agents in real repositories.

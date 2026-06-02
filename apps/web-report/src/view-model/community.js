@@ -115,7 +115,7 @@ export function renderCommunityLeaderboard(container, indexData, t, locale) {
     const rank = i + 1;
     const rankClass = rank <= 3 ? `rank-${rank}` : "";
     const lastSeen = entry.lastPublishedAt ? new Date(entry.lastPublishedAt) : null;
-    const lastSeenStr = lastSeen && !isNaN(lastSeen.getTime())
+    const lastSeenStr = lastSeen && !Number.isNaN(lastSeen.getTime())
       ? lastSeen.toLocaleDateString(isZhCn ? "zh-CN" : "en", {
           year: "numeric",
           month: "short",
@@ -129,7 +129,7 @@ export function renderCommunityLeaderboard(container, indexData, t, locale) {
     html += `<td>${escapeHtml(entry.model)}</td>`;
     html += `<td class="score-cell">${typeof entry.avgScore === "number" ? entry.avgScore.toFixed(1) : "-"}</td>`;
     html += `<td>${typeof entry.successRate === "number" ? (entry.successRate * 100).toFixed(0) + "%" : "-"}</td>`;
-    html += `<td>${entry.runCount}</td>`;
+    html += `<td>${escapeHtml(String(entry.runCount))}</td>`;
     html += `<td>${lastSeenStr}</td>`;
     html += `</tr>`;
   }

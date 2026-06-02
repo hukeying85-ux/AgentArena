@@ -8,6 +8,7 @@ import {
   formatDecisionReport,
   formatVarianceReport,
   generateDecisionReport,
+  getReportCopy,
   writeReport,
 } from "@agentarena/report";
 import { type BenchmarkProgressEvent, runBenchmark } from "@agentarena/runner";
@@ -165,9 +166,15 @@ export async function runBenchmarkCommand(
   await fs.writeFile(csvPath, generateCsv(benchmark), "utf8");
 
   // Generate decision report
+  // TODO: expose as CLI flags (--team-size, --daily-runs)
+  // These defaults represent a typical small team scenario for cost projection.
+  // teamSize=10: average dev team size for ROI calculations
+  // dailyRuns=5: conservative estimate of benchmark runs per day
+  const DEFAULT_TEAM_SIZE = 10;
+  const DEFAULT_DAILY_RUNS = 5;
   const decisionReport = generateDecisionReport(benchmark, {
-    teamSize: 10,
-    dailyRuns: 5,
+    teamSize: DEFAULT_TEAM_SIZE,
+    dailyRuns: DEFAULT_DAILY_RUNS,
   });
   const decisionReportPath = path.join(
     benchmark.outputPath,
@@ -299,16 +306,17 @@ export async function runBenchmarkCommand(
       (r) => r.recommendation === "recommended",
     );
     if (topRec) {
+      const copy = getReportCopy(reportLocale);
       console.log(`\n${"═".repeat(60)}`);
-      console.log(`📋 AGENTARENA DECISION REPORT`);
+      console.log(`📋 ${copy.decisionReportTitle}`);
       console.log(`${"═".repeat(60)}`);
       console.log(``);
-      console.log(`🏆 推荐: ${topRec.displayLabel}`);
-      console.log(`   - 成功率: ${(topRec.successRate * 100).toFixed(0)}%`);
-      console.log(`   - 平均成本: $${topRec.avgCostPerRun.toFixed(2)}/次`);
-      console.log(`   - 置信度: ${topRec.confidence}`);
+      console.log(`🏆 ${copy.recommendationLabel}: ${topRec.displayLabel}`);
+      console.log(`   - ${copy.successRateLabel}: ${(topRec.successRate * 100).toFixed(0)}%`);
+      console.log(`   - ${copy.averageCostLabel}: $${topRec.avgCostPerRun.toFixed(2)}/${copy.perRun}`);
+      console.log(`   - ${copy.confidenceLabel}: ${topRec.confidence}`);
       console.log(``);
-      console.log(`📄 完整报告: ${decisionReportPath}`);
+      console.log(`📄 ${copy.fullReportLabel}: ${decisionReportPath}`);
       console.log(`${"═".repeat(60)}`);
     }
 

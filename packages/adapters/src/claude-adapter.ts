@@ -5,7 +5,8 @@ import type {
   AdapterPreflightOptions,
   AdapterPreflightResult,
   AgentAdapter,
-  AgentResolvedRuntime
+  AgentResolvedRuntime,
+  TraceEventType
 } from "@agentarena/core";
 import { CLAUDE_CODE_CAPABILITY, type InvocationSpec } from "./adapter-capabilities.js";
 import { formatAdapterError } from "./adapter-diagnostics.js";
@@ -110,7 +111,7 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
 
   protected async executeClaudeLike(
     context: AdapterExecutionContext,
-    eventType: string,
+    eventType: TraceEventType,
     finishLabel: string,
     options?: {
       extraArgs?: string[];

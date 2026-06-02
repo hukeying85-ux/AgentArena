@@ -1,3 +1,5 @@
+import type { ScoreMode } from "../scoring-weights.js";
+
 export interface LeaderboardEntry {
   agentId: string;
   displayLabel: string;
@@ -21,7 +23,7 @@ export interface TaskRotation {
 export interface Leaderboard {
   version: "agentarena.leaderboard/v1";
   updatedAt: string;
-  scoreMode: string;
+  scoreMode: ScoreMode;
   entries: LeaderboardEntry[];
   rotations: TaskRotation[];
   categories: string[];
@@ -51,7 +53,7 @@ export interface CommunityRunEntry {
   publishedBy: string;
   taskPackId: string;
   taskTitle: string;
-  scoreMode: string;
+  scoreMode: ScoreMode;
   agentResults: CommunityAgentResult[];
 }
 

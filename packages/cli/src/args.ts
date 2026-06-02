@@ -1,3 +1,5 @@
+import { isScoreMode, SCORE_MODES, type ScoreMode } from "@agentarena/core";
+
 export interface ParsedArgs {
   command?: string;
   repoPath?: string;
@@ -29,7 +31,7 @@ export interface ParsedArgs {
   host?: string;
   port?: number;
   noOpen?: boolean;
-  scoreMode?: string;
+  scoreMode?: ScoreMode;
   tokenBudget?: number;
   categories?: string[];
   rotationId?: string;
@@ -77,6 +79,7 @@ Run Command:
     --max-concurrency <n>      Maximum number of agents to run in parallel (default: 1)
     --json                     Output results as JSON
     --verbose, -v              Show verbose error messages with stack traces
+    -V                         Show version number
     --debug                    Show detailed debug output (adapter comms, judge timing, trace events)
 
   Scoring Options:
@@ -440,15 +443,14 @@ export function parseArgs(argv: string[]): ParsedArgs {
         break;
       }
       case "--score-mode": {
-        parsed.scoreMode = args.shift();
-        if (!parsed.scoreMode) {
-          throw new Error("--score-mode requires a mode. Options: practical, balanced, issue-resolution, efficiency-first, rotating-tasks, comprehensive");
+        const mode = args.shift();
+        if (!mode) {
+          throw new Error(`--score-mode requires a mode. Options: ${SCORE_MODES.join(", ")}`);
         }
-        // Valid modes matching scoring.ts definitions
-        const validModes = ["practical", "balanced", "issue-resolution", "efficiency-first", "rotating-tasks", "comprehensive"];
-        if (!validModes.includes(parsed.scoreMode)) {
-          throw new Error(`--score-mode must be one of: ${validModes.join(", ")}. Got: ${parsed.scoreMode}`);
+        if (!isScoreMode(mode)) {
+          throw new Error(`--score-mode must be one of: ${SCORE_MODES.join(", ")}. Got: ${mode}`);
         }
+        parsed.scoreMode = mode;
         break;
       }
       case "--token-budget": {

@@ -71,23 +71,23 @@ function waitForServer(port, timeoutMs = 10000) {
 }
 
 async function startServer(port) {
-  const child = spawn(process.execPath, [CLI_ENTRY, "ui", "--port", String(port), "--no-open"], {
+  // Pre-generate an explicit auth token to avoid token-file race conditions across
+  // parallel test runs. The CLI masks tokens in stdout for security, so parsing
+  // from stdout no longer works.
+  const authToken = `test-token-${Date.now()}-${port}-${Math.random().toString(36).slice(2, 10)}`;
+  const child = spawn(process.execPath, [CLI_ENTRY, "ui", "--port", String(port), "--no-open", "--auth-token", authToken], {
     cwd: REPO_ROOT,
     stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env }
   });
 
-  let stdout = "";
   let stderr = "";
-  child.stdout.on("data", (chunk) => { stdout += chunk; });
+  child.stdout.resume();
   child.stderr.on("data", (chunk) => { stderr += chunk; });
 
   await waitForServer(port);
 
   await new Promise(r => setTimeout(r, 200));
-
-  const tokenMatch = stdout.match(/auth_token=(\S+)/);
-  const authToken = tokenMatch ? tokenMatch[1] : undefined;
 
   return { child, stderr: () => stderr, authToken };
 }
@@ -143,8 +143,8 @@ test("POST /api/run missing agents returns 400", { timeout: 60_000 }, async () =
   const { child, authToken } = await startServer(port);
   try {
     const res = await request(port, "POST", "/api/run", {
-      repoPath: "/tmp/test",
-      taskPath: "/tmp/test.yaml"
+      repoPath: process.cwd(),
+      taskPath: path.join(process.cwd(), "test.yaml")
     }, authToken);
     assert.equal(res.statusCode, 400);
     assert.ok(res.body.error.includes("agent") || res.body.error.includes("required"));

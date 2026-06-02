@@ -8,8 +8,10 @@ import {
   checkRateLimit,
   detectContentType,
   generateAuthToken,
+  getClientIp,
   HttpError,
   jsonResponse,
+  setTrustProxy,
   startRateLimitCleanup,
   textResponse,
 } from "../packages/cli/dist/server.js";
@@ -242,4 +244,67 @@ test("startRateLimitCleanup: returns a Timer handle", () => {
   assert.ok(timer, "Should return a timer handle");
   // Clean up
   clearInterval(timer);
+});
+
+// ─── getClientIp tests ───
+
+test("getClientIp: returns socket IP when trustProxy is false", () => {
+  setTrustProxy(false);
+  const req = { socket: { remoteAddress: "192.168.1.100" }, headers: {} };
+  assert.equal(getClientIp(req), "192.168.1.100");
+});
+
+test("getClientIp: returns socket IP when no X-Forwarded-For header", () => {
+  setTrustProxy(true);
+  const req = { socket: { remoteAddress: "10.0.0.1" }, headers: {} };
+  assert.equal(getClientIp(req), "10.0.0.1");
+  setTrustProxy(false);
+});
+
+test("getClientIp: extracts client IP from X-Forwarded-For with trusted proxy", () => {
+  setTrustProxy(true);
+  const req = {
+    socket: { remoteAddress: "10.0.0.1" },
+    headers: { "x-forwarded-for": "203.0.113.50, 10.0.0.1" }
+  };
+  // Should use second-to-last IP (the real client before the proxy)
+  assert.equal(getClientIp(req), "203.0.113.50");
+  setTrustProxy(false);
+});
+
+test("getClientIp: handles single IP in X-Forwarded-For", () => {
+  setTrustProxy(true);
+  const req = {
+    socket: { remoteAddress: "10.0.0.1" },
+    headers: { "x-forwarded-for": "203.0.113.50" }
+  };
+  assert.equal(getClientIp(req), "203.0.113.50");
+  setTrustProxy(false);
+});
+
+test("getClientIp: returns 'unknown' when remoteAddress is undefined", () => {
+  setTrustProxy(false);
+  const req = { socket: {}, headers: {} };
+  assert.equal(getClientIp(req), "unknown");
+});
+
+test("getClientIp: rejects untrusted proxy IP", () => {
+  setTrustProxy(true, ["10.0.0.1"]);
+  const req = {
+    socket: { remoteAddress: "192.168.1.1" },
+    headers: { "x-forwarded-for": "203.0.113.50, 192.168.1.1" }
+  };
+  // Socket IP is not in trusted set, so X-Forwarded-For is ignored
+  assert.equal(getClientIp(req), "192.168.1.1");
+  setTrustProxy(false);
+});
+
+test("getClientIp: trusts X-Forwarded-For from trusted proxy IP", () => {
+  setTrustProxy(true, ["10.0.0.1"]);
+  const req = {
+    socket: { remoteAddress: "10.0.0.1" },
+    headers: { "x-forwarded-for": "203.0.113.50, 10.0.0.1" }
+  };
+  assert.equal(getClientIp(req), "203.0.113.50");
+  setTrustProxy(false);
 });

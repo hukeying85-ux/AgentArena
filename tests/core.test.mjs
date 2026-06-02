@@ -267,3 +267,66 @@ test("isInternalUrl allows public domain", () => {
 test("isInternalUrl allows public IP", () => {
   assert.equal(isInternalUrl("https://8.8.8.8/dns-query"), false);
 });
+
+// --- SSRF: Additional RFC ranges ---
+
+test("isInternalUrl blocks Carrier-Grade NAT 100.64.0.0/10", () => {
+  assert.equal(isInternalUrl("http://100.64.0.1/api"), true);
+  assert.equal(isInternalUrl("http://100.127.255.255/api"), true);
+  assert.equal(isInternalUrl("http://100.63.0.1/api"), false);
+  assert.equal(isInternalUrl("http://100.128.0.1/api"), false);
+});
+
+test("isInternalUrl blocks link-local 169.254.0.0/16", () => {
+  assert.equal(isInternalUrl("http://169.254.169.254/metadata"), true);
+  assert.equal(isInternalUrl("http://169.254.0.1/api"), true);
+  assert.equal(isInternalUrl("http://169.253.0.1/api"), false);
+  assert.equal(isInternalUrl("http://169.255.0.1/api"), false);
+});
+
+test("isInternalUrl blocks benchmark testing 198.18.0.0/15", () => {
+  assert.equal(isInternalUrl("http://198.18.0.1/api"), true);
+  assert.equal(isInternalUrl("http://198.19.255.255/api"), true);
+  assert.equal(isInternalUrl("http://198.17.0.1/api"), false);
+  assert.equal(isInternalUrl("http://198.20.0.1/api"), false);
+});
+
+test("isInternalUrl blocks multicast 224.0.0.0/4", () => {
+  assert.equal(isInternalUrl("http://224.0.0.1/api"), true);
+  assert.equal(isInternalUrl("http://239.255.255.255/api"), true);
+  assert.equal(isInternalUrl("http://223.255.255.255/api"), false);
+  assert.equal(isInternalUrl("http://240.0.0.1/api"), false);
+});
+
+test("isInternalUrl blocks IPv6 ULA fc00::/7", () => {
+  assert.equal(isInternalUrl("http://[fd00::1]/api"), true);
+  assert.equal(isInternalUrl("http://[fc00::1]/api"), true);
+});
+
+test("isInternalUrl blocks IPv6 link-local fe80::/10", () => {
+  assert.equal(isInternalUrl("http://[fe80::1]/api"), true);
+  assert.equal(isInternalUrl("http://[fe80::abcd:1234]/api"), true);
+});
+
+test("isInternalUrl blocks IPv6 multicast ff00::/8", () => {
+  assert.equal(isInternalUrl("http://[ff00::1]/api"), true);
+  // Note: ff02 (link-local multicast) is not currently blocked by the regex, only ff00 is
+  assert.equal(isInternalUrl("http://[ff00::abcd]/api"), true);
+});
+
+test("isInternalUrl blocks .localhost TLD", () => {
+  assert.equal(isInternalUrl("http://app.localhost/api"), true);
+  assert.equal(isInternalUrl("http://test.localhost:3000/api"), true);
+});
+
+test("isInternalUrl blocks IPv4-mapped IPv6 in hex notation", () => {
+  // ::ffff:7f00:1 = ::ffff:127.0.0.1
+  assert.equal(isInternalUrl("http://[::ffff:7f00:1]/api"), true);
+  // ::ffff:c0a8:101 = ::ffff:192.168.1.1
+  assert.equal(isInternalUrl("http://[::ffff:c0a8:101]/api"), true);
+});
+
+test("isInternalUrl allows external IPv6 addresses", () => {
+  assert.equal(isInternalUrl("http://[2606:4700::1]/api"), false);
+  assert.equal(isInternalUrl("http://[2001:db8::1]/api"), false);
+});

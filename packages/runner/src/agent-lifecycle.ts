@@ -1,15 +1,13 @@
+import { promises as fs } from "node:fs";
 import path from "node:path";
 import { getAdapter } from "@agentarena/adapters";
 import {
   type AdapterPreflightResult,
   type AgentRunResult,
-  type AgentSelection,
   type BenchmarkCancellation,
-  BenchmarkCancelledError,
   buildExecutionEnvironment,
   type CommandStepResult,
   copyRepository,
-  createAgentSelection,
   createWorkspaceSandbox,
   type DiffPrecisionSummary,
   type DiffSummary,
@@ -36,9 +34,12 @@ import {
   summarizeCommandStepFailure
 } from "./result-builder.js";
 import { buildDiffPrecision, collectChangedFiles } from "./snapshot.js";
+import { wrapWithTimeout } from "./timeout-utils.js";
 import { debugLog, formatErrorDetails, formatErrorMessage } from "./workspace.js";
 
 const AGENT_EXECUTE_TIMEOUT_GRACE_MS = 5_000;
+/** Timeout for teardown commands (30 seconds) */
+const TEARDOWN_TIMEOUT_MS = 30_000;
 
 export interface AgentRunContext {
   task: Awaited<ReturnType<typeof loadTaskPack>>;
@@ -211,67 +212,50 @@ export async function runSetupCommands(
     const failedStep = setupResults.find((value) => !value.success) ?? setupResults[0];
     return {
       setupResults,
-      earlyResult: {
-        agentId: preflight.agentId,
-        baseAgentId: preflight.baseAgentId,
-        variantId: preflight.variantId,
-        displayLabel: preflight.displayLabel,
-        requestedConfig: preflight.requestedConfig,
-        resolvedRuntime: preflight.resolvedRuntime,
-        agentTitle: context.adapter.title,
-        adapterKind: context.adapter.kind,
+      earlyResult: createBaseResult({
         preflight,
+        tracePath: context.tracePath,
+        workspacePath,
         status: "failed",
         summary: failedStep
           ? summarizeCommandStepFailure("setup", failedStep)
           : "Setup command failed but no result was captured.",
-        durationMs: 0,
-        tokenUsage: 0,
-        estimatedCostUsd: 0,
-        costKnown: false,
-        changedFiles: [],
-        changedFilesHint: [],
-        setupResults,
-        judgeResults: [],
-        teardownResults: [],
-        tracePath: context.tracePath,
-        workspacePath,
-        diff: {
-          added: [],
-          changed: [],
-          removed: [],
-          skippedLargeFiles: []
-        }
-      }
+        setupResults
+      })
     };
   }
 
   return { setupResults, earlyResult: undefined };
 }
 
+export interface BeforeSnapshotResult {
+  snapshot: Map<string, { relativePath: string; hash: string }>;
+  reliable: boolean;
+  reason?: string;
+}
+
 export async function createBeforeSnapshot(
   preflight: AdapterPreflightResult,
   context: AgentRunContext
-): Promise<Map<string, { relativePath: string; hash: string }>> {
+): Promise<BeforeSnapshotResult> {
   const { workspacePath, traceRecorder } = context;
 
-  let beforeSnapshot: Map<string, { relativePath: string; hash: string }>;
   try {
-    beforeSnapshot = await snapshotDirectory(workspacePath);
+    return { snapshot: await snapshotDirectory(workspacePath), reliable: true };
   } catch (error) {
     const errorDetails = formatErrorDetails(error);
     await traceRecorder.record({
       agentId: preflight.agentId,
       timestamp: new Date().toISOString(),
       type: "snapshot.before_failed",
-      message: "Failed to create before snapshot. Diff accuracy will be reduced.",
+      message: "Failed to create before snapshot. Diff will be marked unreliable.",
       metadata: errorDetails
     });
-    console.warn(`Warning: Before snapshot failed for ${preflight.agentId}: ${errorDetails.message}. Diff may be inaccurate.`);
-    beforeSnapshot = new Map();
+    logger.warn("runner", "snapshot.before_failed", `Before snapshot failed for ${preflight.agentId}: ${errorDetails.message}. Diff marked unreliable.`, {
+      agentId: preflight.agentId
+    });
+    return { snapshot: new Map(), reliable: false, reason: errorDetails.message };
   }
-
-  return beforeSnapshot;
 }
 
 export async function executeAgent(
@@ -404,10 +388,10 @@ export async function executeAgent(
 export async function runJudgesAndAfterSnapshot(
   preflight: AdapterPreflightResult,
   adapterResult: Awaited<ReturnType<typeof context.adapter.execute>> | undefined,
-  beforeSnapshot: Map<string, { relativePath: string; hash: string }>,
+  beforeSnapshotResult: BeforeSnapshotResult,
   options: Pick<{ updateSnapshots?: boolean }, "updateSnapshots">,
   context: AgentRunContext
-): Promise<{ judgeResults: Awaited<ReturnType<typeof runJudges>>; judgeError: unknown; afterSnapshot: Map<string, { relativePath: string; hash: string }>; diff: DiffSummary; changedFiles: string[]; diffPrecision: DiffPrecisionSummary | undefined }> {
+): Promise<{ judgeResults: Awaited<ReturnType<typeof runJudges>>; judgeError: unknown; afterSnapshot: Map<string, { relativePath: string; hash: string }>; diff: DiffSummary; changedFiles: string[]; diffPrecision: DiffPrecisionSummary | undefined; diffReliable: boolean }> {
   const { task, workspacePath, traceRecorder, throwIfCancelled, cancellation } = context;
 
   let judgeResults: Awaited<ReturnType<typeof runJudges>> = [];
@@ -439,6 +423,8 @@ export async function runJudgesAndAfterSnapshot(
   }
 
   let afterSnapshot: Map<string, { relativePath: string; hash: string }>;
+  let afterReliable = true;
+  let afterReason: string | undefined;
   try {
     afterSnapshot = await snapshotDirectory(workspacePath);
   } catch (error) {
@@ -447,18 +433,29 @@ export async function runJudgesAndAfterSnapshot(
       agentId: preflight.agentId,
       timestamp: new Date().toISOString(),
       type: "snapshot.after_failed",
-      message: "Failed to create after snapshot. Diff accuracy will be reduced.",
+      message: "Failed to create after snapshot. Diff will be marked unreliable.",
       metadata: errorDetails
     });
-    console.warn(`Warning: After snapshot failed for ${preflight.agentId}: ${errorDetails.message}. Diff may be inaccurate.`);
+    logger.warn("runner", "snapshot.after_failed", `After snapshot failed for ${preflight.agentId}: ${errorDetails.message}. Diff marked unreliable.`, {
+      agentId: preflight.agentId
+    });
     afterSnapshot = new Map();
+    afterReliable = false;
+    afterReason = errorDetails.message;
   }
 
-  const diff = diffSnapshots(beforeSnapshot, afterSnapshot);
+  const diffReliable = beforeSnapshotResult.reliable && afterReliable;
+  const unreliableReason = !diffReliable
+    ? (beforeSnapshotResult.reason ?? afterReason ?? "snapshot failed")
+    : undefined;
+  const diff = diffSnapshots(beforeSnapshotResult.snapshot, afterSnapshot, {
+    reliable: diffReliable,
+    unreliableReason
+  });
   const changedFiles = buildChangedFiles(diff, adapterResult?.changedFilesHint ?? []);
-  const diffPrecision = buildDiffPrecision(task.expectedChangedPaths, changedFiles);
+  const diffPrecision = buildDiffPrecision(task.expectedChangedPaths, changedFiles, { reliable: diffReliable });
 
-  return { judgeResults, judgeError, afterSnapshot, diff, changedFiles, diffPrecision };
+  return { judgeResults, judgeError, afterSnapshot, diff, changedFiles, diffPrecision, diffReliable };
 }
 
 export async function runTeardownCommands(
@@ -555,9 +552,7 @@ export function buildFinalResult(
   startedAt: number,
   setupResults: CommandStepResult[],
   judgeResults: Awaited<ReturnType<typeof runJudges>>,
-  _judgeError: unknown,
   teardownResults: CommandStepResult[],
-  _teardownError: unknown,
   diff: DiffSummary,
   changedFiles: string[],
   collectedFiles: string[],
@@ -713,55 +708,48 @@ export function buildFinalResult(
   });
 }
 
-export function wrapWithTimeout<T>(
-  promise: Promise<T>,
-  timeoutMs: number,
-  label: string
-): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timeoutHandle = setTimeout(() => {
-      reject(new Error(`${label} timed out after ${timeoutMs}ms.`));
-    }, timeoutMs);
+// wrapWithTimeout and normalizeSelections moved to dedicated modules
 
-    promise
-      .then((value) => {
-        clearTimeout(timeoutHandle);
-        resolve(value);
-      })
-      .catch((error) => {
-        clearTimeout(timeoutHandle);
-        reject(error);
-      });
-  });
-}
-
-export function normalizeSelections(options: { agents?: AgentSelection[]; agentIds: string[] }): AgentSelection[] {
-  const rawSelections =
-    options.agents && options.agents.length > 0
-      ? options.agents
-      : options.agentIds.map((agentId) =>
-          createAgentSelection({
-            baseAgentId: agentId,
-            displayLabel: getAdapter(agentId).title
-          })
-        );
-
-  const seenVariantIds = new Map<string, number>();
-  return rawSelections.map((selection) => {
-    const occurrence = (seenVariantIds.get(selection.variantId) ?? 0) + 1;
-    seenVariantIds.set(selection.variantId, occurrence);
-    if (occurrence === 1) {
-      return selection;
-    }
-
-    return {
-      ...selection,
-      variantId: `${selection.variantId}-${occurrence}`,
-      displayLabel: `${selection.displayLabel} #${occurrence}`
-    };
-  });
-}
-
+/**
+ * Execute a single agent run through the full benchmark pipeline.
+ *
+ * STATE MACHINE (implicit — no state variable, each phase returns or continues):
+ *
+ *   1. createAgentRunContext   — allocate workspace, trace recorder, abort controller
+ *   2. setupWorkspaceAndPrechecks — copy repo, check preflight status
+ *      → returns early if preflight blocked
+ *   3. runSetupCommands        — run task setup commands
+ *      → returns early if any setup command fails
+ *   4. createBeforeSnapshot    — snapshot workspace before agent runs
+ *   5. executeAgent            — run adapter with timeout + cancellation
+ *   6. collectChangedFiles     — git diff for changed file detection
+ *   7. runJudgesAndAfterSnapshot — run judges + after-snapshot + diff
+ *   8. runTeardownCommands     — cleanup commands (ALWAYS runs, even on cancel)
+ *   9. buildFinalResult        — assemble the result object
+ *
+ * CRITICAL BEHAVIORS:
+ *
+ * - Teardown failure marks the ENTIRE run as failed, even if agent + all judges
+ *   passed. This is intentional: a failing cleanup script indicates an
+ *   environment problem that invalidates the benchmark.
+ *
+ * - Cancellation is a three-layer system:
+ *   (a) BenchmarkCancellation.signal → forwarded to adapter's AbortController
+ *   (b) Adapter timeout → SIGTERM → grace period → SIGKILL
+ *   (c) Teardown ignores cancellation if adapter/judges already aborted
+ *       (teardownShouldIgnoreCancellation), ensuring cleanup always runs
+ *
+ * - Timeout is double-layered:
+ *   (a) Adapter gets agentTimeoutMs() + 5s grace period (AGENT_EXECUTE_TIMEOUT_GRACE_MS)
+ *   (b) Teardown gets TEARDOWN_TIMEOUT_MS (30s)
+ *
+ * - changedFilesHint (agent-claimed) vs changedFiles (git diff):
+ *   If git is unreliable (snapshot failed), the hint becomes the primary source.
+ *   The diffReliable flag tracks this but is NOT surfaced to the user in the UI.
+ *
+ * - success requires ALL of: adapter succeeded, no adapter error, no judge error,
+ *   all judges passed, no teardown error, all teardown passed.
+ */
 export async function runAgent(
   repoPath: string,
   outputPath: string,
@@ -787,23 +775,24 @@ export async function runAgent(
     return earlyResult2;
   }
 
-  const beforeSnapshot = await createBeforeSnapshot(preflight, context);
+  const beforeSnapshotResult = await createBeforeSnapshot(preflight, context);
 
   const { adapterResult, adapterError, startedAt } = await executeAgent(preflight, repoPath, context);
 
-  const collectedFiles = await collectChangedFiles(context.workspacePath);
+  const collectedResult = await collectChangedFiles(context.workspacePath);
+  const collectedFiles = collectedResult.files;
 
   const { judgeResults, judgeError, diff, changedFiles, diffPrecision } = await runJudgesAndAfterSnapshot(
     preflight,
     adapterResult,
-    beforeSnapshot,
+    beforeSnapshotResult,
     options,
     context
   );
 
   let teardownResults: CommandStepResult[] = [];
   let teardownError: unknown;
-  const teardownTimeout = 30_000;
+  const teardownTimeout = TEARDOWN_TIMEOUT_MS;
   let teardownTimedOut = false;
   const teardownAbortController = new AbortController();
   const teardownTimeoutHandle = setTimeout(() => {
@@ -832,7 +821,7 @@ export async function runAgent(
     clearTimeout(teardownTimeoutHandle);
   }
   if (teardownTimedOut && !teardownError) {
-    teardownError = new BenchmarkCancelledError("Teardown timeout");
+    teardownError = new Error("Teardown timeout");
     const errorDetails = formatErrorDetails(teardownError);
     await context.traceRecorder.record({
       agentId: preflight.agentId,
@@ -866,9 +855,7 @@ export async function runAgent(
     startedAt,
     setupResults,
     judgeResults,
-    judgeError,
     teardownResults,
-    teardownError,
     diff,
     changedFiles,
     collectedFiles,
@@ -881,7 +868,6 @@ export async function runAgent(
     // Clean up intermediate files on cancellation
     if (context.cancellation?.signal?.aborted) {
       try {
-        const { promises: fs } = await import("node:fs");
         const intermediateFiles = [
           context.tracePath,
           path.join(context.agentOutputPath, "before-snapshot.json"),
@@ -891,16 +877,21 @@ export async function runAgent(
           try {
             await fs.unlink(filePath);
           } catch (error) {
-            console.debug("[agentarena] Failed to delete intermediate file:", error instanceof Error ? error.message : String(error));
+            const errCode = (error as NodeJS.ErrnoException | undefined)?.code;
+            if (errCode !== "ENOENT") {
+              logger.debug("runner", "cleanup.intermediate_failed", `Failed to delete intermediate file: ${error instanceof Error ? error.message : String(error)}`, {
+                metadata: { filePath }
+              });
+            }
           }
         }
       } catch (error) {
-        console.debug("[agentarena] Intermediate file cleanup failed:", error instanceof Error ? error.message : String(error));
+        logger.debug("runner", "cleanup.intermediate_failed", `Intermediate file cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
 
     await context.traceRecorder.close().catch((closeError: unknown) => {
-      console.warn(`[agentarena] Failed to close trace recorder: ${closeError instanceof Error ? closeError.message : String(closeError)}`);
+      logger.warn("runner", "trace.close_failed", `Failed to close trace recorder: ${closeError instanceof Error ? closeError.message : String(closeError)}`);
     });
   }
 }

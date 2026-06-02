@@ -19,11 +19,13 @@ const _RUN_CACHE_MAX_BYTES = 1_500_000;
 // ---------------------------------------------------------------------------
 
 /**
- * Get auth token from URL hash or localStorage.
+ * Get auth token from URL hash, meta tag, or localStorage.
+ * Priority: URL hash > meta tag (localhost auto-inject) > localStorage.
  * If found in hash, persists to localStorage and clears the hash.
  * @returns {string}
  */
 function getAuthToken() {
+  // Check URL hash first (backwards compatibility)
   const hash = window.location.hash;
   if (hash) {
     const match = hash.match(/[#&]token=([^&]+)/);
@@ -33,11 +35,129 @@ function getAuthToken() {
       return match[1];
     }
   }
+
+  // Check meta tag (localhost auto-inject for seamless UX)
+  const metaToken = document.querySelector('meta[name="agentarena-auth-token"]')?.content;
+  if (metaToken) {
+    localStorage.setItem('agentarena_token', metaToken);
+    return metaToken;
+  }
+
   return localStorage.getItem('agentarena_token') || '';
 }
 
 /**
- * Handle API error responses (401 = auth redirect).
+ * Render a bilingual "Authentication Required" prompt with a token input.
+ * Builds DOM via createElement instead of innerHTML — preserves the existing
+ * page (no document.body wipe that destroys all event listeners) and uses
+ * safe DOM APIs that cannot be XSS-exploited even if locale strings change.
+ */
+function renderAuthRequiredOverlay() {
+  const existing = document.getElementById('auth-required-overlay');
+  if (existing) return;
+
+  const overlay = document.createElement('div');
+  overlay.id = 'auth-required-overlay';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  overlay.setAttribute('aria-labelledby', 'auth-required-title');
+  Object.assign(overlay.style, {
+    position: 'fixed', inset: '0', display: 'flex', alignItems: 'center', justifyContent: 'center',
+    background: 'rgba(0,0,0,0.45)', zIndex: '9999', fontFamily: 'system-ui'
+  });
+
+  const card = document.createElement('div');
+  Object.assign(card.style, {
+    background: '#fff', color: '#111', padding: '24px 28px', borderRadius: '12px',
+    maxWidth: '440px', boxShadow: '0 12px 32px rgba(0,0,0,0.25)', position: 'relative'
+  });
+
+  const closeButton = document.createElement('button');
+  closeButton.type = 'button';
+  closeButton.setAttribute('aria-label', '关闭 / Close');
+  closeButton.innerHTML = '&times;';
+  Object.assign(closeButton.style, {
+    position: 'absolute', top: '12px', right: '12px',
+    background: 'transparent', border: 'none', fontSize: '24px', lineHeight: '1',
+    cursor: 'pointer', color: '#666', padding: '4px 8px'
+  });
+  closeButton.addEventListener('click', () => {
+    overlay.remove();
+  });
+  card.appendChild(closeButton);
+
+  const title = document.createElement('h2');
+  title.id = 'auth-required-title';
+  title.textContent = '需要认证 · Authentication Required';
+  title.style.margin = '0 0 12px';
+  card.appendChild(title);
+
+  const desc = document.createElement('p');
+  desc.textContent = '本服务器需要 Bearer Token 才能访问 API。请打开服务器启动时打印的 auth_token_file 路径，粘贴文件内容到下方。 ／ This server requires a Bearer token. Open the auth_token_file printed by the server and paste its contents below.';
+  desc.style.margin = '0 0 16px';
+  desc.style.fontSize = '14px';
+  card.appendChild(desc);
+
+  const input = document.createElement('input');
+  input.type = 'password';
+  input.autocomplete = 'off';
+  input.spellcheck = false;
+  input.setAttribute('aria-label', 'Auth token');
+  input.placeholder = 'Paste auth token';
+  Object.assign(input.style, {
+    width: '100%', padding: '8px 12px', fontSize: '14px',
+    border: '1px solid #d4d4d4', borderRadius: '6px', boxSizing: 'border-box'
+  });
+  card.appendChild(input);
+
+  const error = document.createElement('div');
+  error.style.color = '#b91c1c';
+  error.style.fontSize = '13px';
+  error.style.marginTop = '6px';
+  error.hidden = true;
+  card.appendChild(error);
+
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.textContent = '提交 / Submit';
+  Object.assign(button.style, {
+    marginTop: '14px', padding: '8px 14px', fontSize: '14px',
+    background: '#0f172a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer'
+  });
+  button.addEventListener('click', () => {
+    const token = input.value.trim();
+    if (!token) {
+      error.textContent = '请输入 token / Token is required';
+      error.hidden = false;
+      return;
+    }
+    localStorage.setItem('agentarena_token', token);
+    window.location.reload();
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') button.click();
+  });
+  card.appendChild(button);
+
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
+
+  const closeOverlay = () => overlay.remove();
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) closeOverlay();
+  });
+  document.addEventListener('keydown', function handler(e) {
+    if (e.key === 'Escape' && document.getElementById('auth-required-overlay')) {
+      closeOverlay();
+      document.removeEventListener('keydown', handler);
+    }
+  });
+
+  setTimeout(() => input.focus(), 0);
+}
+
+/**
+ * Handle API error responses (401 = auth required).
  * @param {Response} response
  * @returns {boolean} true if the error was handled (caller should return)
  */
@@ -45,11 +165,11 @@ function handleApiError(response) {
   if (response.status === 401) {
     const token = getAuthToken();
     if (!token) {
-      document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:system-ui"><div style="text-align:center"><h2>Authentication Required</h2><p>This server requires a Bearer token for API access.</p><p>Please open the URL provided when the server started (includes #token=...).</p></div></div>';
+      renderAuthRequiredOverlay();
       return true;
     }
     localStorage.removeItem('agentarena_token');
-    window.location.reload();
+    renderAuthRequiredOverlay();
     return true;
   }
   return false;
@@ -152,8 +272,10 @@ function setHidden(element, hidden) {
   if (!element) return;
   if (hidden) {
     element.setAttribute("hidden", "");
+    element.classList.add("hidden");
   } else {
     element.removeAttribute("hidden");
+    element.classList.remove("hidden");
   }
 }
 
@@ -168,7 +290,8 @@ function escapeHtml(value) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
+    .replace(/'/g, "&#39;")
+    .replace(/`/g, "&#96;");
 }
 
 /**
@@ -208,6 +331,37 @@ function formatElapsedDuration(ms) {
 }
 
 /**
+ * Format an ISO timestamp as a human-readable relative time string.
+ * @param {string} isoString - ISO 8601 timestamp
+ * @param {Function} [localText] - i18n function (zh, en) => string
+ * @returns {string}
+ */
+function formatRelativeTime(isoString, localText) {
+  if (!isoString) return "—";
+  const now = Date.now();
+  const then = new Date(isoString).getTime();
+  if (Number.isNaN(then)) return isoString;
+  const diffMs = now - then;
+  const diffSec = Math.floor(diffMs / 1000);
+  const diffMin = Math.floor(diffSec / 60);
+  const diffHour = Math.floor(diffMin / 60);
+  const diffDay = Math.floor(diffHour / 24);
+
+  if (diffSec < 60) return localText ? localText("刚刚", "just now") : "just now";
+  if (diffMin < 60) return localText ? localText(`${diffMin} 分钟前`, `${diffMin}m ago`) : `${diffMin}m ago`;
+  if (diffHour < 24) return localText ? localText(`${diffHour} 小时前`, `${diffHour}h ago`) : `${diffHour}h ago`;
+  if (diffDay < 7) return localText ? localText(`${diffDay} 天前`, `${diffDay}d ago`) : `${diffDay}d ago`;
+
+  // Fallback: show date in local format
+  const d = new Date(isoString);
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  const hour = String(d.getHours()).padStart(2, "0");
+  const min = String(d.getMinutes()).padStart(2, "0");
+  return `${month}-${day} ${hour}:${min}`;
+}
+
+/**
  * Display name for a Claude provider profile.
  * @param {Object} profile
  * @returns {string}
@@ -227,6 +381,7 @@ export {
   escapeHtml,
   fetchWithTimeout,
   formatElapsedDuration,
+  formatRelativeTime,
   getAuthToken,
   handleApiError,
   providerDisplayName,

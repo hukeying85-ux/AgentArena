@@ -217,8 +217,8 @@ test("handleProviderProfileSecret: returns 200 for empty secret (clear)", async 
   // This test verifies that empty secret is allowed (to clear a secret)
   // We use a non-existent profile ID, which should return an error about the profile not found
   const res = await handleProviderProfileSecret("non-existent-id", JSON.stringify({ secret: "" }));
-  // The response depends on whether the profile exists, but should not be 400 for validation
-  assert.ok([200, 400, 404, 500].includes(res.statusCode));
+  // Should not be 400 for validation; exact status depends on implementation
+  assert.ok(res.statusCode !== 400, "Should not be a validation error for empty secret");
 });
 
 test("handleAdaptersList: includes all expected adapter kinds", async () => {

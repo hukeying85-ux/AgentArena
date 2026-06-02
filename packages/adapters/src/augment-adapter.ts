@@ -280,7 +280,7 @@ export class AugmentAdapter implements AgentAdapter {
     const changedFilesHint: string[] = [...parsed.changedFiles];
 
     if (changedFilesHint.length === 0) {
-      changedFilesHint.push(...await getChangedFilesFromGit(context.workspacePath));
+      changedFilesHint.push(...(await getChangedFilesFromGit(context.workspacePath)).files);
     }
 
     const summary =

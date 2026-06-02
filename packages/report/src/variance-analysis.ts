@@ -45,7 +45,7 @@ export function computeVarianceAnalysis(
 
   const agents: AgentVarianceStats[] = [];
   for (const [agentId, results] of agentResults) {
-    const scores = results.map((result) => result.compositeScore ?? 0).filter((score) => score > 0);
+    const scores = results.map((result) => result.compositeScore).filter((score): score is number => typeof score === "number");
     const durations = results.map((result) => result.durationMs).filter((duration) => duration > 0);
     const costs = results.map((result) => result.estimatedCostUsd).filter((cost) => cost >= 0);
     const successes = results.filter((result) => result.status === "success").length;
@@ -111,11 +111,37 @@ function computeStdDev(values: number[]): number {
 
 function computeCV(values: number[]): number {
   const mean = computeMean(values);
-  if (mean === 0) return 0;
+  if (mean === 0) {
+    const stdDev = computeStdDev(values);
+    // When mean is 0: if all values are 0, CV is 0 (truly stable).
+    // If stdDev > 0, use MAX_SAFE_INTEGER to flag as unstable.
+    // Infinity is avoided because JSON serializes it as null, silently corrupting reports.
+    return stdDev > 0 ? Number.MAX_SAFE_INTEGER : 0;
+  }
   const stdDev = computeStdDev(values);
   return stdDev / mean;
 }
 
+/**
+ * Determine confidence level based on sample size and coefficient of variation.
+ *
+ * THRESHOLD RATIONALE:
+ * - CV < 0.05 (5%): Borrowed from measurement science where CV < 5% is
+ *   conventionally considered "good" precision. For AI agent benchmarking,
+ *   this means score variation within 5% of the mean — agents are consistently
+ *   ranked similarly across runs.
+ * - CV < 0.1 (10%): A looser threshold for "medium" confidence, acknowledging
+ *   that agent output is inherently stochastic. At 10% CV, rankings may flip
+ *   between adjacent agents but the overall ordering is usually stable.
+ * - runCount >= 5 for "high": n=5 gives a reasonable variance estimate for
+ *   small-sample statistics. Below 5, the CV itself is unreliable.
+ * - runCount >= 3 for "medium": n=3 is the bare minimum for any variance
+ *   estimate. Below 3, we cannot compute meaningful standard deviation.
+ *
+ * These thresholds have NOT been empirically validated against real benchmark
+ * data to confirm correlation with stable rankings. They are reasonable
+ * starting points that should be refined as more data accumulates.
+ */
 function computeConfidence(runCount: number, cv: number): "high" | "medium" | "low" {
   if (runCount >= 5 && cv < 0.05) return "high";
   if (runCount >= 3 && cv < 0.1) return "medium";

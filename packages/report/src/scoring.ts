@@ -14,149 +14,73 @@
  * Implementation is fully independent with no official affiliation.
  */
 
-import type { BenchmarkRun } from "@agentarena/core";
-import { getDefaultWeights } from "@agentarena/core";
-import { findJudgeByType, hasScoreMetadata, type ScoredRun } from "./report-helpers.js";
+import type { BenchmarkRun, ScoreMode } from "@agentarena/core";
+import { getDefaultWeights, isScoreMode } from "@agentarena/core";
+import { hasScoreMetadata, type ScoredRun } from "./report-helpers.js";
+import {
+  acceptanceRateScore,
+  categoryScore,
+  costEfficiencyScore,
+  criticalJudgePassRatio,
+  durationEfficiencyScore,
+  failToPassScore,
+  hasCriticalJudgeFailure,
+  lintQualityScore,
+  nonCriticalJudgePassRatio,
+  passToPassScore,
+  precisionScore,
+  resolutionRateScore,
+  testPassRatio,
+  tokenEfficiencyScoreComponent,
+} from "./score-metrics.js";
+import { normalizeApplicableWeights, normalizeWeights } from "./score-weights.js";
+
+export { hasCriticalJudgeFailure } from "./score-metrics.js";
+// Re-export for backward compatibility
+export { normalizeApplicableWeights } from "./score-weights.js";
 
 // ---------------------------------------------------------------------------
-// Individual metric helpers (shared by both score computation & score reasons)
+// Score band constants (used by both backend and frontend)
 // ---------------------------------------------------------------------------
 
 /**
- * Test pass ratio from judge results.
- * Returns 0 if no test judge is present or judge has no totalCount.
- * Returns 1 if judge.success is true but totalCount is 0 (edge: no tests, but judge passed).
+ * Score band for failed runs: 10–40.
+ *
+ * Rationale: Failed runs should score below passing runs (50+) but not zero,
+ * because some partial work may still have value (e.g., correct approach but
+ * wrong implementation). The 10–40 range leaves room for efficiency bonuses
+ * to differentiate between "barely tried" and "almost succeeded" failures.
+ *
+ * SCORING_VERSION history: v1-v4 used different bands and weight formulas.
+ * v5 is the current version (frozen at 0.1.0 per STABILITY.md).
  */
-function testPassRatio(result: BenchmarkRun["results"][number]): number {
-  const judge = findJudgeByType(result, "test-result");
-  if (!judge || typeof judge.totalCount !== "number") {
-    return judge?.success ? 1 : 0;
-  }
-  return judge.totalCount > 0 ? (judge.passedCount ?? 0) / judge.totalCount : judge.success ? 1 : 0;
-}
+export const FAILED_SCORE_BAND = { min: 10, max: 40 } as const;
 
 /**
- * Critical judge pass ratio.
- * Returns 1 when there are no critical judges (vacuously true: all 0 of 0 passed).
+ * Score band for runs with critical judge failures: 50–70.
+ *
+ * Rationale: These runs technically succeeded (exit code 0) but failed critical
+ * validation (e.g., tests broken, security issues). They should score below
+ * fully passing runs (70+) but above failures (40). The 50–70 range reflects
+ * "partially successful" — the agent did something right but missed critical checks.
  */
-function criticalJudgePassRatio(result: BenchmarkRun["results"][number]): number {
-  const criticalJudges = result.judgeResults.filter((j) => j.critical === true);
-  if (criticalJudges.length === 0) {
-    return 1;
-  }
-  return criticalJudges.filter((j) => j.success).length / criticalJudges.length;
-}
+export const CRITICAL_FAIL_SCORE_BAND = { min: 50, max: 70 } as const;
 
-/**
- * Non-critical judge pass ratio.
- * Returns 1 when there are no non-critical judges (vacuously true).
- */
-function nonCriticalJudgePassRatio(result: BenchmarkRun["results"][number]): number {
-  const nonCriticalJudges = result.judgeResults.filter((j) => j.critical !== true);
-  if (nonCriticalJudges.length === 0) {
-    return 1;
-  }
-  return nonCriticalJudges.filter((j) => j.success).length / nonCriticalJudges.length;
-}
+// ---------------------------------------------------------------------------
+// Scoring weights and thresholds
+// ---------------------------------------------------------------------------
 
-/** Whether any critical judge failed. */
-function hasCriticalJudgeFailure(result: BenchmarkRun["results"][number]): boolean {
-  return result.judgeResults.some((j) => j.critical === true && !j.success);
-}
+/** Duration efficiency weight in failed-run bonus calculation */
+const FAILED_DURATION_WEIGHT = 0.3;
+/** Cost efficiency weight in failed-run bonus calculation */
+const FAILED_COST_WEIGHT = 0.2;
+/** Scale factor to map efficiency bonus (0-0.5) into score points (0-50) */
+const FAILED_EFFICIENCY_SCALE = 100;
 
-/**
- * fail-to-pass score (Issue Resolution mode).
- * Uses patch-validation judge success rate as proxy.
- * Returns 0 when no patch-validation judges exist.
- */
-function failToPassScore(result: BenchmarkRun["results"][number]): number {
-  const patchValidationJudges = (result.judgeResults ?? []).filter(j => j.type === "patch-validation");
-  if (patchValidationJudges.length === 0) return 0;
-  return patchValidationJudges.filter(j => j.success).length / patchValidationJudges.length;
-}
-
-/**
- * pass-to-pass score (Issue Resolution mode).
- * Returns 0 when no test judge data exists.
- */
-function passToPassScore(result: BenchmarkRun["results"][number]): number {
-  const patchValidation = result.sweBench?.patchValidationResult;
-  if (patchValidation?.passToPassResults && patchValidation.passToPassResults.length > 0) {
-    const passed = patchValidation.passToPassResults.filter(r => r.status === "pass").length;
-    return passed / patchValidation.passToPassResults.length;
-  }
-  const judge = findJudgeByType(result, "test-result");
-  if (!judge || typeof judge.totalCount !== "number" || judge.totalCount === 0) {
-    return 0;
-  }
-  return (judge.passedCount ?? 0) / judge.totalCount;
-}
-
-/**
- * Lint quality score: 1 / (1 + errors*10 + warnings).
- * Returns 0 when no lint judge is present.
- */
-function lintQualityScore(result: BenchmarkRun["results"][number]): number {
-  const judge = findJudgeByType(result, "lint-check");
-  if (!judge) {
-    return 0;
-  }
-  const errors = judge.errorCount ?? 0;
-  const warnings = judge.warningCount ?? 0;
-  return 1 / (1 + errors * 10 + warnings);
-}
-
-/** Duration efficiency: fastest / this result's duration (0–1, higher is better). */
-function durationEfficiencyScore(result: BenchmarkRun["results"][number], run: BenchmarkRun): number {
-  const durations = run.results.map((entry) => entry.durationMs).filter((value) => value > 0);
-  if (durations.length === 0) {
-    return 0;
-  }
-  const fastest = Math.min(...durations);
-  return fastest / Math.max(result.durationMs, fastest);
-}
-
-/** Cost efficiency: cheapest / this result's cost (0–1, higher is better). */
-function costEfficiencyScore(result: BenchmarkRun["results"][number], run: BenchmarkRun): number {
-  const costs = run.results.filter((entry) => entry.costKnown && entry.estimatedCostUsd > 0).map((entry) => entry.estimatedCostUsd);
-  if (!result.costKnown || result.estimatedCostUsd <= 0 || costs.length === 0) {
-    return 0;
-  }
-  const cheapest = Math.min(...costs);
-  return cheapest / Math.max(result.estimatedCostUsd, cheapest);
-}
-
-/**
- * Precision score: only applicable when task defines expectedChangedPaths.
- * Returns 0 when not applicable.
- */
-function precisionScore(result: BenchmarkRun["results"][number], run: BenchmarkRun): number {
-  const hasExpectedPaths = run.task.expectedChangedPaths && run.task.expectedChangedPaths.length > 0;
-  if (!hasExpectedPaths) {
-    return 0;
-  }
-  return Math.max(result.diffPrecision?.score ?? 0, 0);
-}
-
-/** Resolution rate score (Issue Resolution mode). Falls back to status boolean. */
-function resolutionRateScore(result: BenchmarkRun["results"][number]): number {
-  return result.sweBench?.resolutionRate ?? (result.status === "success" ? 1 : 0);
-}
-
-/** Token efficiency score component (Efficiency First / Comprehensive modes). */
-function tokenEfficiencyScoreComponent(result: BenchmarkRun["results"][number]): number {
-  return result.tokenEfficiencyScore ?? 0;
-}
-
-/** Acceptance rate score (Efficiency First mode). */
-function acceptanceRateScore(result: BenchmarkRun["results"][number]): number {
-  return result.cursorBench?.acceptanceRate ?? 0;
-}
-
-/** Category score (Rotating Tasks mode). Full mark on success. */
-function categoryScore(result: BenchmarkRun["results"][number]): number {
-  return result.status === "success" ? 1 : 0;
-}
+/** Threshold for "perfect" score reason tags (≥ 99.9%) */
+const SCORE_PERFECT_THRESHOLD = 0.999;
+/** Threshold for "high" score reason tags (> 95%) */
+const SCORE_HIGH_THRESHOLD = 0.95;
 
 // ---------------------------------------------------------------------------
 // Score component computation (shared by computeCompositeScore & frontend)
@@ -204,64 +128,6 @@ export function computeScoreComponents(
   };
 }
 
-/**
- * Filter weights to only include applicable keys, then normalize to sum=1.
- * Applicability rules:
- * - "precision" only if task defines expectedChangedPaths
- * - "tokenEfficiency" only if result has tokenEfficiencyScore
- * - "resolutionRate" / "failToPassTests" / "passToPassTests" only if result has sweBench.resolutionRate
- * - "acceptanceRate" only if result has cursorBench.acceptanceRate
- */
-export function normalizeApplicableWeights(
-  weights: Record<string, number>,
-  result: BenchmarkRun["results"][number],
-  run: BenchmarkRun
-): Record<string, number> {
-  // Compatibility: migrate legacy "judges" key → criticalJudges + nonCriticalJudges
-  const migratedWeights: Record<string, number> = {};
-  for (const [key, weight] of Object.entries(weights)) {
-    if (key === "judges") {
-      // Split legacy "judges" weight 2:1 into critical:nonCritical
-      if (!weights.criticalJudges) migratedWeights.criticalJudges = weight * (2 / 3);
-      if (!weights.nonCriticalJudges) migratedWeights.nonCriticalJudges = weight * (1 / 3);
-    } else {
-      migratedWeights[key] = weight;
-    }
-  }
-
-  const applicableWeights: Record<string, number> = {};
-  const isPrecisionApplicable = run.task.expectedChangedPaths && run.task.expectedChangedPaths.length > 0;
-  const hasTokenEfficiency = result.tokenEfficiencyScore !== undefined;
-  const hasResolutionRate = result.sweBench?.resolutionRate !== undefined;
-  const hasAcceptanceRate = result.cursorBench?.acceptanceRate !== undefined;
-
-  for (const [key, weight] of Object.entries(migratedWeights)) {
-    if (key === "precision" && !isPrecisionApplicable) continue;
-    if (key === "tokenEfficiency" && !hasTokenEfficiency) continue;
-    if (key === "resolutionRate" && !hasResolutionRate) continue;
-    if (key === "acceptanceRate" && !hasAcceptanceRate) continue;
-    if (key === "failToPassTests" && !hasResolutionRate) continue;
-    if (key === "passToPassTests" && !hasResolutionRate) continue;
-    applicableWeights[key] = weight;
-  }
-
-  // Normalize so weights sum to 1
-  const total = Object.values(applicableWeights).reduce((sum, v) => sum + v, 0);
-  if (total <= 0) {
-    return applicableWeights;
-  }
-  return Object.fromEntries(Object.entries(applicableWeights).map(([k, v]) => [k, v / total]));
-}
-
-// ---------------------------------------------------------------------------
-// Score band constants (used by both backend and frontend)
-// ---------------------------------------------------------------------------
-
-/** Score band for failed runs: 10–40 */
-export const FAILED_SCORE_BAND = { min: 10, max: 40 } as const;
-/** Score band for runs with critical judge failures: 50–70 */
-export const CRITICAL_FAIL_SCORE_BAND = { min: 50, max: 70 } as const;
-
 // ---------------------------------------------------------------------------
 // Composite scoring
 // ---------------------------------------------------------------------------
@@ -278,7 +144,7 @@ export function computeCompositeScore(
   result: BenchmarkRun["results"][number],
   run: BenchmarkRun,
   scoreWeights?: Record<string, number>,
-  scoreMode?: string
+  scoreMode?: ScoreMode
 ): number {
   const weights = scoreWeights ?? getDefaultWeights(scoreMode ?? "practical");
 
@@ -286,17 +152,23 @@ export function computeCompositeScore(
   if (result.status !== "success") {
     const baseScore = FAILED_SCORE_BAND.min;
     const efficiencyBonus = (
-      durationEfficiencyScore(result, run) * 0.3 +
-      costEfficiencyScore(result, run) * 0.2
+      durationEfficiencyScore(result, run) * FAILED_DURATION_WEIGHT +
+      costEfficiencyScore(result, run) * FAILED_COST_WEIGHT
     );
-    return Math.round(Math.min(FAILED_SCORE_BAND.max, baseScore + efficiencyBonus * 100) * 10) / 10;
+    return Math.round(Math.min(FAILED_SCORE_BAND.max, baseScore + efficiencyBonus * FAILED_EFFICIENCY_SCALE) * 10) / 10;
   }
 
   const components = computeScoreComponents(result, run);
 
-  // Rule 2: Critical judge failure → partial band (use user weights)
+  // Rule 2: Critical judge failure → partial band (use only applicable non-critical weights)
   if (hasCriticalJudgeFailure(result)) {
-    const n = normalizeApplicableWeights(weights, result, run);
+    // Build partial weights from only the components used in the partial score
+    const partialWeightKeys = ["tests", "nonCriticalJudges", "lint", "precision", "duration", "cost"];
+    const rawPartialWeights: Record<string, number> = {};
+    for (const key of partialWeightKeys) {
+      if (weights[key] !== undefined) rawPartialWeights[key] = weights[key];
+    }
+    const n = normalizeWeights(rawPartialWeights);
     const weightedPartial =
       components.tests * (n.tests ?? 0) +
       components.nonCriticalJudges * (n.nonCriticalJudges ?? 0) +
@@ -350,16 +222,16 @@ export function computeScoreReasons(result: BenchmarkRun["results"][number], run
 
   const components = computeScoreComponents(result, run);
 
-  if (components.tests >= 0.999) reasons.push("tests");
-  if (components.criticalJudges >= 0.999) reasons.push("critical-judges");
-  if (components.nonCriticalJudges >= 0.999) reasons.push("non-critical-judges");
-  if (components.lint >= 0.999) reasons.push("lint");
-  if (components.precision >= 0.999) reasons.push("precision");
-  if (components.duration >= 0.999) reasons.push("duration");
-  if (components.cost >= 0.999) reasons.push("cost");
-  if (components.resolutionRate > 0.95) reasons.push("resolution-rate-high");
-  if (components.tokenEfficiency > 0.95) reasons.push("token-efficiency-good");
-  if (components.acceptanceRate > 0.95) reasons.push("acceptance-rate-high");
+  if (components.tests >= SCORE_PERFECT_THRESHOLD) reasons.push("tests");
+  if (components.criticalJudges >= SCORE_PERFECT_THRESHOLD) reasons.push("critical-judges");
+  if (components.nonCriticalJudges >= SCORE_PERFECT_THRESHOLD) reasons.push("non-critical-judges");
+  if (components.lint >= SCORE_PERFECT_THRESHOLD) reasons.push("lint");
+  if (components.precision >= SCORE_PERFECT_THRESHOLD) reasons.push("precision");
+  if (components.duration >= SCORE_PERFECT_THRESHOLD) reasons.push("duration");
+  if (components.cost >= SCORE_PERFECT_THRESHOLD) reasons.push("cost");
+  if (components.resolutionRate > SCORE_HIGH_THRESHOLD) reasons.push("resolution-rate-high");
+  if (components.tokenEfficiency > SCORE_HIGH_THRESHOLD) reasons.push("token-efficiency-good");
+  if (components.acceptanceRate > SCORE_HIGH_THRESHOLD) reasons.push("acceptance-rate-high");
 
   return reasons;
 }
@@ -369,7 +241,8 @@ export function computeScoreReasons(result: BenchmarkRun["results"][number], run
  * This is the main entry point called by the report pipeline.
  */
 export function enrichRunWithScores(run: BenchmarkRun): ScoredRun {
-  const scoreMode = hasScoreMetadata(run) ? (run.scoreMode ?? "practical") : "practical";
+  const rawMode = hasScoreMetadata(run) ? run.scoreMode : undefined;
+  const scoreMode: ScoreMode = (rawMode && isScoreMode(rawMode)) ? rawMode : "practical";
   const scoreWeights = (hasScoreMetadata(run) ? run.scoreWeights : undefined) ?? getDefaultWeights(scoreMode);
 
   return {

@@ -6,11 +6,59 @@ import type {
 import type { TaskJudge } from "./judge.js";
 import type { TaskPack } from "./task-pack.js";
 
+/**
+ * Closed enumeration of every trace event `type` that is emitted by AgentArena.
+ *
+ * Adding a new event type:
+ *   1. Add the literal here.
+ *   2. (If the event has typed payload) document the metadata fields nearby
+ *      or in the emitting module's JSDoc.
+ *
+ * Keeping this union closed catches typos at compile time (a misspelled event
+ * name fails to compile rather than silently producing a trace entry no
+ * consumer recognises).
+ */
+export type TraceEventType =
+  // Adapter lifecycle (canonical names from packages/adapters/src/adapter-events.ts)
+  | "adapter.start"
+  | "adapter.message"
+  | "adapter.tool_use"
+  | "adapter.file_change"
+  | "adapter.usage"
+  | "adapter.result"
+  | "adapter.error"
+  | "adapter.finish"
+  // Adapter-vendor-specific result events
+  | "adapter.augment.result"
+  | "adapter.claude.profile"
+  | "adapter.claude.result"
+  | "adapter.codex.result"
+  | "adapter.cursor.result"
+  | "adapter.gemini.result"
+  | "adapter.qwen.result"
+  | "adapter.trae.result"
+  // Agent runner lifecycle
+  | "agent.copy_failed"
+  | "agent.skipped"
+  // Phase events
+  | "setup.error"
+  | "setup.finish"
+  | "judge.error"
+  | "judge.finish"
+  | "teardown.error"
+  | "teardown.finish"
+  | "preflight.result"
+  // Snapshot reliability
+  | "snapshot.before_failed"
+  | "snapshot.after_failed"
+  // Sandbox policy
+  | "sandbox.violation";
+
 export interface TraceEvent {
   timestamp: string;
   agentId: string;
   runId?: string;
-  type: string;
+  type: TraceEventType;
   message: string;
   metadata?: Record<string, unknown>;
 }
@@ -63,6 +111,14 @@ export interface DiffSummary {
   changed: string[];
   removed: string[];
   skippedLargeFiles: string[];
+  /**
+   * When false, the before/after snapshots failed and the diff cannot be trusted.
+   * Consumers (scoring, precision) must treat the run as having unknown changes,
+   * not zero changes. Absent for legacy results — treat absence as true.
+   */
+  reliable?: boolean;
+  /** Optional reason set alongside `reliable: false`. */
+  unreliableReason?: string;
 }
 
 export interface SweBenchMetrics {

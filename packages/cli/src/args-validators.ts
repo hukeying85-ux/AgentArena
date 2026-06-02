@@ -2,15 +2,17 @@
  * Per-command argument validators.
  *
  * Each validator checks that the required arguments for a specific command
- * are present and valid. Returns { ok: true } on success or { ok: false, error: string } on failure.
+ * are present and valid. Returns a discriminated union that makes invalid
+ * states unrepresentable: the previous shape (`{ ok: boolean, error?: string }`)
+ * allowed `{ ok: false }` without an error, and `{ ok: true, error: "..." }`
+ * with an ignored error — both meaningless. The new union prevents either.
  */
 
 import type { ParsedArgs } from "./args.js";
 
-export interface ValidationResult {
-  ok: boolean;
-  error?: string;
-}
+export type ValidationResult =
+  | { ok: true }
+  | { ok: false; error: string };
 
 export function validateRunCommand(args: ParsedArgs): ValidationResult {
   if (!args.repoPath) {

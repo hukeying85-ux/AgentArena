@@ -40,6 +40,15 @@ import {
   saveScoreConfig as saveScoreConfigImpl,
   updateScoreWeight as updateScoreWeightImpl
 } from "./score-config.js";
+import { selectAgent, selectRun } from "./selection-handlers.js";
+import {
+  baselineTaskWarning as baselineTaskWarningImpl,
+  formatJudgeType as formatJudgeTypeImpl,
+  statusClass,
+  summarizeJudges as summarizeJudgesImpl,
+  summarizeTaskPrompt as summarizeTaskPromptImpl,
+  translateDifficulty as translateDifficultyImpl,
+} from "./task-utils.js";
 import { createTraceReplayModule } from "./trace-replay.js";
 import { formatDuration } from "./utils/format.js";
 import { resultStore } from "./utils/storage.js";
@@ -55,20 +64,14 @@ import {
   fetchCommunityIndex,
   findCommunityRank,
   findJudgeByType,
-  findPreviousComparableRun,
   formatCompositeScore,
   formatDiffPrecisionMetric,
   formatLintMetric,
   formatTestMetric,
   getAgentTrendRows,
   getCachedCommunityData,
-  getCompareResults,
-  getCompositeScoreReasons,
   getCrossRunCompareRows,
   getCrossRunRecommendation,
-  getRunCompareRows,
-  getRunToRunAgentDiff,
-  getRunTrustSummary,
   getRunVerdict,
   getSelectionTrustSummary,
   normalizeScoreWeights,
@@ -147,11 +150,8 @@ function hideLoading() {
 }
 
 function showError(message) {
-  setHidden(elements.emptyState, true);
-  setHidden(elements.dashboard, true);
-  setHidden(elements.errorState, false);
-  if (elements.errorTitle) elements.errorTitle.textContent = t("failedToLoad");
-  if (elements.errorMessage) elements.errorMessage.textContent = message;
+  state.notice = `⚠️ ${message}`;
+  render();
 }
 
 function setText(id, value) {
@@ -169,6 +169,7 @@ function setTextBySelector(selector, value) {
 }
 
 function renderList(element, items) {
+  if (!element) return;
   element.innerHTML = items.map((item) => `<li>${escapeHtml(item)}</li>`).join("");
 }
 
@@ -228,7 +229,7 @@ function updateScoreWeight(key, value) {
 function applyScorePreset(presetId) {
   applyScorePresetImpl(state, presetId, {
     renderScoreWeightsControls,
-    renderWeightSliders: () => renderWeightSlidersImpl(state.scoreWeights),
+    renderWeightSliders: () => renderWeightSlidersImpl(state.scoreWeights, t),
     renderAll: () => {
       if (state.run) {
         renderVerdictHero(state.run);
@@ -244,7 +245,7 @@ function applyScorePreset(presetId) {
 
 // Weight slider generation
 function renderWeightSliders(weights) {
-  renderWeightSlidersImpl(weights);
+  renderWeightSlidersImpl(weights, t);
 }
 
 function recordKey(record) {
@@ -260,78 +261,17 @@ function localText(zh, en) {
   return state.language === "zh-CN" ? zh : en;
 }
 
-function translateDifficulty(d) {
-  if (!d) return "";
-  const map = { easy: t("difficultyEasy"), medium: t("difficultyMedium"), hard: t("difficultyHard") };
-  return map[d] || d;
-}
-
-function translateStatus(s) {
-  if (s === "success") return t("compareStatusSuccess");
-  if (s === "failed") return t("compareStatusFailed");
-  return s;
-}
+function translateDifficulty(d) { return translateDifficultyImpl(d, t); }
+// translateStatus is used via dashboard DI, not as a local wrapper
 
 // providerDisplayName is imported from ./app-helpers.js
 
 // clientRandomId is imported from ./app-helpers.js
 
-function taskIntentSummary(task) {
-  const objective = task.metadata?.objective ?? task.description ?? "";
-  const rationale = task.metadata?.judgeRationale ?? "";
-  const repoTypes = task.metadata?.repoTypes?.length ? task.metadata.repoTypes.join(", ") : "generic";
-  return {
-    objective,
-    rationale,
-    repoTypes
-  };
-}
+function baselineTaskWarning(task) { return baselineTaskWarningImpl(task, t); }
 
-function baselineTaskWarning(task) {
-  if (task.id === "official-repo-health" || task.id === "repo-health") {
-    return t("baselineWarning");
-  }
-
-  return t("generalWarning");
-}
-
-function taskMeaningBadges(task) {
-  if (task.id === "official-repo-health" || task.id === "repo-health") {
-    return [
-      t("baselineSanityCheck"),
-      t("notACodeReview"),
-      t("notABugfixBenchmark")
-    ];
-  }
-
-  return [t("interpretThroughGoal")];
-}
-
-function summarizeTaskPrompt(prompt) {
-  const compact = String(prompt ?? "")
-    .replaceAll(/\s+/g, " ")
-    .trim();
-  if (!compact) {
-    return "n/a";
-  }
-
-  return compact.length > 160 ? `${compact.slice(0, 157)}...` : compact;
-}
-
-function summarizeJudges(taskPack) {
-  const judges = Array.isArray(taskPack?.judges) ? taskPack.judges : [];
-  if (judges.length === 0) {
-    return t("noJudges");
-  }
-
-  const labels = judges.map((judge) => judge.label || judge.id).filter(Boolean);
-  const summary = labels.slice(0, 3).join(", ");
-  if (labels.length <= 3) {
-    return summary;
-  }
-
-  return t("judgesSummary", summary, labels.length);
-}
+function summarizeTaskPrompt(prompt) { return summarizeTaskPromptImpl(prompt); }
+function summarizeJudges(taskPack) { return summarizeJudgesImpl(taskPack, t); }
 
 
 function runFocusLine(run) {
@@ -450,40 +390,18 @@ const {
   runCompareFilters,
   t,
   localText,
-  escapeHtml,
-  setHidden,
   formatDuration,
   formatCost,
-  translateStatus,
-  statusClass,
-  formatJudgeType,
-  resultLabel,
-  baseAgentLabel,
   recordKey,
   runtimeVerificationLabel,
-  taskIntentSummary,
   getArchivedScoreModeLabel,
   getScoreModeLabel,
-  baselineTaskWarning,
-  taskMeaningBadges,
   runFocusLine,
-  summarizeRun,
-  getRunCompareRows,
-  getRunToRunAgentDiff,
-  getRunTrustSummary,
-  getAgentTrendRows,
-  getRunVerdict,
-  getCompareResults,
-  findPreviousComparableRun,
-  runtimeIdentity,
-  formatCompositeScore,
   formatDiffPrecisionMetric,
   formatTestMetric,
   formatLintMetric,
   findJudgeByType,
-  getCompositeScoreReasons,
   diffPrecisionScore,
-  getSelectionTrustSummary,
   renderStepCards,
   renderJudgeCards,
   renderDiff,
@@ -513,6 +431,22 @@ const traceReplay = createTraceReplayModule({
   t
 });
 
+// Shared deps for selectAgent/selectRun helpers
+const selectionDeps = {
+  elements,
+  syncLocationState,
+  renderAgentList,
+  renderCompareTableV2,
+  renderComparisonBars,
+  renderAgentTrendTableV2,
+  renderSelectedAgentV2,
+  renderRunDiffTableV2,
+  getAgentTrendRows,
+  setHidden,
+  updateCurrentRun,
+  render
+};
+
 const {
   downloadTextFile: downloadTextFileImpl,
   handleFileSelection: handleFileSelectionImpl,
@@ -529,7 +463,7 @@ function renderStaticText() {
   setText("update-banner-text", t("updateAvailable"));
   setText("language-label", t("languageLabel"));
   if (elements.languageSelect.options[0]) {
-    elements.languageSelect.options[0].text = "English";
+    elements.languageSelect.options[0].text = t("languageEnglishLabel");
   }
   if (elements.languageSelect.options[1]) {
     elements.languageSelect.options[1].text = t("languageChineseLabel");
@@ -572,7 +506,8 @@ function renderStaticText() {
   setText("score-weight-duration-label", t("scoreWeightDuration"));
   setText("score-weight-cost-label", t("scoreWeightCost"));
   const presetButtons = elements.scoreWeightPresets?.querySelectorAll("button[data-score-preset]") ?? [];
-  // Updated to only 3 core presets
+  // Only three presets need translated labels here (correctness-first, efficiency-first,
+  // comprehensive) — the rest use `data-i18n` attributes wired by renderStaticText.
   for (const button of presetButtons) {
     const presetId = button.dataset.scorePreset;
     switch (presetId) {
@@ -636,13 +571,67 @@ function renderStaticText() {
   if (elements.crossRunCloseCompare) {
     elements.crossRunCloseCompare.textContent = t("crossRunCloseCompare");
   }
-  setText("copy-share-card", t("copySummary"));
-  setText("copy-pr-table", t("copyPrTable"));
-  setText("download-share-svg", t("downloadShareSvg"));
+  setTextBySelector('[data-i18n="copyVerdictCard"]', t("copyVerdictCard"));
+  setTextBySelector('[data-i18n="copySummary"]', t("copySummary"));
+  setTextBySelector('[data-i18n="copyPrTable"]', t("copyPrTable"));
+  setTextBySelector('[data-i18n="copyLink"]', t("copyLink"));
+  setTextBySelector('[data-i18n="downloadShareSvg"]', t("downloadShareSvg"));
+  setTextBySelector('[data-i18n="exportMarkdown"]', t("exportMarkdown"));
+  setTextBySelector('[data-i18n="exportHtml"]', t("exportHtml"));
+  setTextBySelector('[data-i18n="exportJson"]', t("exportJson"));
+  setTextBySelector('[data-i18n="importJson"]', t("importJson"));
   setTextBySelector('[data-i18n="teamCostCalculatorTitle"]', t("teamCostCalculatorTitle"));
   setTextBySelector('[data-i18n="teamSizeLabel"]', t("teamSizeLabel"));
   setTextBySelector('[data-i18n="dailyRunsLabel"]', t("dailyRunsLabel"));
   setTextBySelector('[data-i18n="recalculateBtn"]', t("recalculateBtn"));
+  setTextBySelector('[data-i18n="scorePresetLabel"]', t("scorePresetLabel"));
+  setTextBySelector('[data-i18n="scorePresetHint"]', t("scorePresetHint"));
+  setTextBySelector('[data-i18n="scoreWeightsCustomTitle"]', t("scoreWeightsCustomTitle"));
+  setTextBySelector('[data-i18n="scorePresetPracticalBtn"]', t("scorePresetPracticalBtn"));
+  setTextBySelector('[data-i18n="scorePresetBalancedBtn"]', t("scorePresetBalancedBtn"));
+  setTextBySelector('[data-i18n="scorePresetIssueResolutionBtn"]', t("scorePresetIssueResolutionBtn"));
+  setTextBySelector('[data-i18n="scorePresetEfficiencyFirstBtn"]', t("scorePresetEfficiencyFirstBtn"));
+  setTextBySelector('[data-i18n="scorePresetRotatingTasksBtn"]', t("scorePresetRotatingTasksBtn"));
+  setTextBySelector('[data-i18n="scorePresetComprehensiveBtn"]', t("scorePresetComprehensiveBtn"));
+  setTextBySelector('[data-i18n="scoringModeLabel"]', t("scoringModeLabel"));
+  setTextBySelector('[data-i18n="scorePresetPractical"]', t("scorePresetPractical"));
+  setTextBySelector('[data-i18n="scorePresetBalanced"]', t("scorePresetBalanced"));
+  setTextBySelector('[data-i18n="scorePresetIssueResolution"]', t("scorePresetIssueResolution"));
+  setTextBySelector('[data-i18n="scorePresetEfficiencyFirst"]', t("scorePresetEfficiencyFirst"));
+  setTextBySelector('[data-i18n="scorePresetRotatingTasks"]', t("scorePresetRotatingTasks"));
+  setTextBySelector('[data-i18n="scorePresetComprehensive"]', t("scorePresetComprehensive"));
+  setTextBySelector('[data-i18n="inspirationCreditsTitle"]', t("inspirationCreditsTitle"));
+  setTextBySelector('[data-i18n="issueResolutionCreditLabel"]', t("issueResolutionCreditLabel"));
+  setTextBySelector('[data-i18n="efficiencyFirstCreditLabel"]', t("efficiencyFirstCreditLabel"));
+  setTextBySelector('[data-i18n="rotatingTasksCreditLabel"]', t("rotatingTasksCreditLabel"));
+  setTextBySelector('[data-i18n="issueResolutionCredit"]', t("issueResolutionCredit"));
+  setTextBySelector('[data-i18n="efficiencyFirstCredit"]', t("efficiencyFirstCredit"));
+  setTextBySelector('[data-i18n="rotatingTasksCredit"]', t("rotatingTasksCredit"));
+  setTextBySelector('[data-i18n="creditDisclaimer"]', t("creditDisclaimer"));
+  setTextBySelector('[data-i18n="codeReviewTitle"]', t("codeReviewTitle"));
+  setTextBySelector('[data-i18n="codeReviewSelectLabel"]', t("codeReviewSelectLabel"));
+  setTextBySelector('[data-i18n="codeReviewCompareBtn"]', t("codeReviewCompareBtn"));
+  setTextBySelector('[data-i18n="codeReviewEmptyState"]', t("codeReviewEmptyState"));
+  setTextBySelector('[data-i18n="heroFeatureFairTitle"]', t("heroFeatureFairTitle"));
+  setTextBySelector('[data-i18n="heroFeatureFairDesc"]', t("heroFeatureFairDesc"));
+  setTextBySelector('[data-i18n="heroFeatureRichTitle"]', t("heroFeatureRichTitle"));
+  setTextBySelector('[data-i18n="heroFeatureRichDesc"]', t("heroFeatureRichDesc"));
+  setTextBySelector('[data-i18n="heroFeatureHistoryTitle"]', t("heroFeatureHistoryTitle"));
+  setTextBySelector('[data-i18n="heroFeatureHistoryDesc"]', t("heroFeatureHistoryDesc"));
+  setTextBySelector('[data-i18n="configureAgentsBtn"]', t("configureAgentsBtn"));
+  setTextBySelector('[data-i18n="demoHint"]', t("demoHint"));
+  setTextBySelector('[data-i18n="traceReplayTitle"]', t("traceReplayTitle"));
+  setTextBySelector('[data-i18n="traceReplayPrev"]', t("traceReplayPrev"));
+  setTextBySelector('[data-i18n="traceReplayNext"]', t("traceReplayNext"));
+  setTextBySelector('[data-i18n="traceReplayPlay"]', t("traceReplayPlay"));
+  setTextBySelector('[data-i18n="traceReplayTotalEvents"]', t("traceReplayTotalEvents"));
+  setTextBySelector('[data-i18n="traceReplayDuration"]', t("traceReplayDuration"));
+  setTextBySelector('[data-i18n="traceReplayErrors"]', t("traceReplayErrors"));
+  setTextBySelector('[data-i18n="traceReplayAgent"]', t("traceReplayAgent"));
+  setTextBySelector('[data-i18n="traceReplaySelectRun"]', t("traceReplaySelectRun"));
+  document.querySelector('#trace-replay-prev')?.setAttribute('title', t("traceReplayPrevTitle"));
+  document.querySelector('#trace-replay-next')?.setAttribute('title', t("traceReplayNextTitle"));
+  document.querySelector('#trace-replay-play')?.setAttribute('title', t("traceReplayAutoPlayTitle"));
   if (elements.sidebarToggle) {
     elements.sidebarToggle.setAttribute("aria-label", t("toggleSidebar"));
   }
@@ -686,26 +675,8 @@ function renderStaticText() {
 
 // fetchWithTimeout is imported from ./app-helpers.js
 
-function formatJudgeType(type) {
-  const typeMap = {
-    "test-result": "judgeTestResult",
-    "lint-check": "judgeLintCheck",
-    "file-exists": "judgeFileExists",
-    "file-contains": "judgeFileContains",
-    "json-value": "judgeJsonValue",
-    glob: "judgeGlob",
-    "file-count": "judgeFileCount",
-    snapshot: "judgeSnapshot",
-    "json-schema": "judgeJsonSchema",
-    "patch-validation": "judgePatchValidation",
-    "token-efficiency": "judgeTokenEfficiency"
-  };
-  return t(typeMap[type] || "judgeCommand");
-}
-
-function statusClass(status) {
-  return `status-${status}`;
-}
+function formatJudgeType(type) { return formatJudgeTypeImpl(type, t); }
+// statusClass imported from task-utils.js
 
 // setHidden is imported from ./app-helpers.js
 
@@ -839,20 +810,38 @@ async function renderCommunityView() {
   }
 }
 
+/**
+ * Master render function. Call order matters:
+ *
+ * 1. renderStaticText() — sets all i18n text nodes (no DOM dependency)
+ * 2. renderLauncher()   — updates launcher panel (independent)
+ * 3. renderRunList()    — builds run list DOM (creates elements used by dashboard)
+ * 4. renderDashboard()  — reads run list DOM, renders comparison/verdict/agent detail
+ * 5. renderCommunityView() — async fetch, renders community leaderboard
+ *
+ * DO NOT reorder without verifying that downstream functions don't depend on
+ * DOM elements created by upstream functions. Specifically, renderDashboard()
+ * reads elements that renderRunList() creates.
+ */
 function render() {
   renderStaticText();
   if (elements.resultLoaderMessage) {
     elements.resultLoaderMessage.textContent = state.notice ?? "";
     elements.resultLoaderMessage.hidden = !state.notice;
   }
-  renderLauncher();
-  renderRunList();
+  try { renderLauncher(); } catch(e) { console.error("[TRACE] renderLauncher error:", e); }
+  try { renderRunList(); } catch(e) { console.error("[TRACE] renderRunList error:", e); }
+
+  // Update sticky bar visibility based on launcher panel visibility
+  updateStickyBarVisibility();
 
   if (!state.run) {
     setHidden(elements.runInfo, true);
     setHidden(elements.emptyState, false);
     setHidden(elements.dashboard, true);
     setHidden(elements.communitySection, true);
+    const wsHome = document.querySelector('.workspace-home');
+    if (wsHome) wsHome.classList.remove('hidden');
     traceReplay.hide(); // Clean up setInterval when navigating away
     elements.agentCount.textContent = "0";
     elements.agentList.className = "agent-list empty-state";
@@ -866,7 +855,50 @@ function render() {
   }
 
   renderDashboard(state.run);
+  const wsHome = document.querySelector('.workspace-home');
+  if (wsHome) wsHome.classList.add('hidden');
   renderCommunityView();
+}
+
+// Sticky bar visibility: show when launcher panel is not in viewport
+function updateStickyBarVisibility() {
+  if (!elements.stickyBenchmarkBar || !elements.launcherPanel) return;
+
+  const launcherRect = elements.launcherPanel.getBoundingClientRect();
+  const launcherVisible = launcherRect.top < window.innerHeight && launcherRect.bottom > 0;
+
+  // Update summary text based on configured agents
+  const selectedCount = document.querySelectorAll('#launcher-agents input[type="checkbox"]:checked').length;
+  if (elements.stickyBarSummary) {
+    elements.stickyBarSummary.innerHTML = selectedCount > 0
+      ? t('stickyBarAgentsConfigured', selectedCount)
+      : t('stickyBarHint');
+  }
+
+  // Show sticky bar only when launcher is not visible
+  setHidden(elements.stickyBenchmarkBar, launcherVisible);
+}
+
+// Listen to scroll to update sticky bar visibility
+let scrollTimeout;
+window.addEventListener('scroll', () => {
+  if (scrollTimeout) cancelAnimationFrame(scrollTimeout);
+  scrollTimeout = requestAnimationFrame(updateStickyBarVisibility);
+}, { passive: true });
+
+// Sticky bar button click: scroll to launcher and trigger run
+if (elements.stickyBarRunBtn) {
+  elements.stickyBarRunBtn.addEventListener('click', () => {
+    if (elements.launcherPanel) {
+      elements.launcherPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      // Focus the run button after scroll
+      setTimeout(() => {
+        if (elements.launcherRun) {
+          elements.launcherRun.focus();
+        }
+      }, 500);
+    }
+  });
 }
 
 async function handleFileSelection(event) {
@@ -1038,7 +1070,31 @@ elements.launcherScoreMode?.addEventListener("change", (event) => {
   state.launcherScoreMode = event.target.value;
   saveLauncherConfig();
 });
-elements.launcherAgents.addEventListener("change", (event) => {
+elements.launcherAgents?.addEventListener("change", (event) => {
+  const target = event.target;
+  if (target?.id === "launcher-global-model-enabled") {
+    state.launcherGlobalModelEnabled = target.checked;
+    saveLauncherConfig();
+    renderLauncher();
+    return;
+  }
+  if (target?.id === "launcher-global-model") {
+    state.launcherGlobalModelOverride = target.value;
+    saveLauncherConfig();
+    return;
+  }
+  if (target instanceof HTMLElement && target.dataset.globalModelAgentId) {
+    const agentId = target.dataset.globalModelAgentId;
+    if (/** @type {HTMLInputElement} */ (target).checked) {
+      if (!state.launcherGlobalModelAgentIds.includes(agentId)) {
+        state.launcherGlobalModelAgentIds = [...state.launcherGlobalModelAgentIds, agentId];
+      }
+    } else {
+      state.launcherGlobalModelAgentIds = state.launcherGlobalModelAgentIds.filter((id) => id !== agentId);
+    }
+    saveLauncherConfig();
+    return;
+  }
   if (event.target?.id === "launcher-add-codex-variant") {
     return;
   }
@@ -1047,7 +1103,7 @@ elements.launcherAgents.addEventListener("change", (event) => {
 elements.launcherAgents.addEventListener("input", () => {
   syncLauncherStateFromDom();
 });
-elements.launcherAgents.addEventListener("click", (event) => {
+elements.launcherAgents.addEventListener("click", async (event) => {
   const target = event.target;
   if (!(target instanceof HTMLElement)) {
     return;
@@ -1186,6 +1242,62 @@ elements.launcherAgents.addEventListener("click", (event) => {
   if (testRole?.endsWith("-variant-test") || testRole === "real-agent-test") {
     handleTestConnection(target);
   }
+
+  // Detect all agents button
+  if (target.id === "detect-all-agents") {
+    const agentCheckboxes = Array.from(
+      elements.launcherAgents.querySelectorAll('[data-role="real-agent"]')
+    );
+
+    target.disabled = true;
+    target.innerHTML = `<span class="spinner"></span> ${escapeHtml(t("testConnectionTesting"))}`;
+
+    const results = [];
+    for (const checkbox of agentCheckboxes) {
+      const agentId = checkbox.value;
+      const agentLabel = checkbox.parentElement?.querySelector("span")?.textContent || agentId;
+
+      try {
+        const response = await apiFetch("/api/preflight", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ baseAgentId: agentId, displayLabel: agentLabel })
+        });
+
+        if (response.ok) {
+          const result = await response.json();
+          results.push({
+            agentId,
+            agentLabel,
+            status: result.status,
+            installed: result.status === "ready" || result.status === "unverified"
+          });
+        } else {
+          results.push({ agentId, agentLabel, status: "error", installed: false });
+        }
+      } catch (error) {
+        results.push({ agentId, agentLabel, status: "error", installed: false });
+      }
+    }
+
+    target.disabled = false;
+    target.textContent = t("detectAllAgents");
+
+    const installed = results.filter(r => r.installed);
+    const notInstalled = results.filter(r => !r.installed);
+
+    let message = "";
+    if (installed.length > 0) {
+      message += `✓ ${installed.map(r => r.agentLabel).join(", ")}\n`;
+    }
+    if (notInstalled.length > 0) {
+      message += `✗ ${notInstalled.map(r => r.agentLabel).join(", ")}`;
+    }
+
+    if (message) {
+      alert(message);
+    }
+  }
 });
 elements.launcherRun.addEventListener("click", handleLauncherRun);
 elements.launcherToggle.addEventListener("click", () => {
@@ -1218,7 +1330,6 @@ elements.runList.addEventListener("click", (event) => {
     render();
     return;
   }
-
   const exportBtn = event.target.closest("[data-role='export-run']");
   if (exportBtn) {
     event.stopPropagation();
@@ -1271,23 +1382,19 @@ elements.runInfo.addEventListener("click", (event) => {
   }
 });
 
+elements.runList.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  const runButton = event.target.closest(".run-button[data-run-id]");
+  if (!runButton) return;
+  // Don't intercept Enter/Space on nested action buttons.
+  if (event.target.closest("[data-role]")) return;
+  event.preventDefault();
+  runButton.click();
+});
 elements.agentList.addEventListener("click", (event) => {
   const button = event.target.closest("[data-agent-id]");
-  if (!button || !state.run) {
-    return;
-  }
-
-  state.selectedAgentId = button.getAttribute("data-agent-id");
-  syncLocationState(state, "push");
-  renderAgentList(state.run);
-  renderCompareTableV2(state.run);
-  renderAgentTrendTableV2(state.run);
-  renderSelectedAgentV2();
-  setHidden(
-    elements.agentTrendSection,
-    !state.selectedAgentId || getAgentTrendRows(state.runs, state.run, state.selectedAgentId).length <= 1
-  );
-  // Scroll to compare table to show filter result
+  if (!button || !state.run) return;
+  selectAgent(button.getAttribute("data-agent-id"), state, selectionDeps);
   elements.agentCompareSection?.scrollIntoView({ behavior: "smooth", block: "start" });
 });
 
@@ -1313,37 +1420,15 @@ elements.compareTable.addEventListener("click", (event) => {
     return;
   }
 
-  state.selectedAgentId = clickedId;
   state.expandedCompareAgentId = null;
-  syncLocationState(state, "push");
-  renderAgentList(state.run);
-  renderCompareTableV2(state.run);
-  renderAgentTrendTableV2(state.run);
-  renderSelectedAgentV2();
-  setHidden(
-    elements.agentTrendSection,
-    !state.selectedAgentId || getAgentTrendRows(state.runs, state.run, state.selectedAgentId).length <= 1
-  );
+  selectAgent(clickedId, state, selectionDeps);
 });
 
 elements.comparisonBars.addEventListener("click", (event) => {
   const barRow = event.target.closest("[data-bar-agent-id]");
-  if (!barRow || !state.run) {
-    return;
-  }
-
-  state.selectedAgentId = barRow.getAttribute("data-bar-agent-id");
+  if (!barRow || !state.run) return;
   state.expandedCompareAgentId = null;
-  syncLocationState(state, "push");
-  renderAgentList(state.run);
-  renderCompareTableV2(state.run);
-  renderComparisonBars(state.run);
-  renderAgentTrendTableV2(state.run);
-  renderSelectedAgentV2();
-  setHidden(
-    elements.agentTrendSection,
-    !state.selectedAgentId || getAgentTrendRows(state.runs, state.run, state.selectedAgentId).length <= 1
-  );
+  selectAgent(barRow.getAttribute("data-bar-agent-id"), state, selectionDeps);
 });
 
 elements.compareTable.addEventListener("keydown", (event) => {
@@ -1364,45 +1449,44 @@ elements.comparisonBars.addEventListener("keydown", (event) => {
 
 elements.runCompareTable.addEventListener("click", (event) => {
   const row = event.target.closest("[data-compare-run-id]");
-  if (!row) {
-    return;
-  }
+  if (!row) return;
+  selectRun(row.getAttribute("data-compare-run-id"), state, selectionDeps);
+});
 
-  state.selectedRunId = row.getAttribute("data-compare-run-id");
-  updateCurrentRun();
-  syncLocationState(state, "push");
-  render();
+elements.runCompareTable.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  const row = event.target.closest("[data-compare-run-id]");
+  if (!row) return;
+  event.preventDefault();
+  row.click();
 });
 
 elements.runDiffTable.addEventListener("click", (event) => {
   const row = event.target.closest("[data-run-diff-agent-id]");
-  if (!row || !state.run) {
-    return;
-  }
+  if (!row || !state.run) return;
+  selectAgent(row.getAttribute("data-run-diff-agent-id"), state, selectionDeps);
+});
 
-  state.selectedAgentId = row.getAttribute("data-run-diff-agent-id");
-  syncLocationState(state, "push");
-  renderAgentList(state.run);
-  renderCompareTableV2(state.run);
-  renderRunDiffTableV2();
-  renderAgentTrendTableV2(state.run);
-  renderSelectedAgentV2();
-  setHidden(
-    elements.agentTrendSection,
-    !state.selectedAgentId || getAgentTrendRows(state.runs, state.run, state.selectedAgentId).length <= 1
-  );
+elements.runDiffTable.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  const row = event.target.closest("[data-run-diff-agent-id]");
+  if (!row || !state.run) return;
+  event.preventDefault();
+  row.click();
 });
 
 elements.agentTrendTable.addEventListener("click", (event) => {
   const row = event.target.closest("[data-agent-trend-run-id]");
-  if (!row) {
-    return;
-  }
+  if (!row) return;
+  selectRun(row.getAttribute("data-agent-trend-run-id"), state, selectionDeps);
+});
 
-  state.selectedRunId = row.getAttribute("data-agent-trend-run-id");
-  updateCurrentRun();
-  syncLocationState(state, "push");
-  render();
+elements.agentTrendTable.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  const row = event.target.closest("[data-agent-trend-run-id]");
+  if (!row) return;
+  event.preventDefault();
+  row.click();
 });
 
 elements.judgeSearch.addEventListener("input", (event) => {
@@ -1542,40 +1626,48 @@ initCrossRunEvents({
   renderCrossRunSelectionListImpl
 });
 
-// Feature 5: Sidebar toggle for mobile
+// Feature 5: Sidebar toggle for mobile, with focus management for accessibility.
+function setSidebarOpen(open) {
+  state.sidebarOpen = open;
+  elements.sidebar.classList.toggle("sidebar-open", open);
+  elements.sidebarBackdrop.classList.toggle("active", open);
+  elements.sidebarToggle.setAttribute("aria-expanded", String(open));
+  if (open) {
+    // Move focus into the sidebar so screen reader / keyboard users
+    // start inside the now-visible region.
+    const firstFocusable = /** @type {HTMLElement | null} */ (elements.sidebar.querySelector(
+      'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    ));
+    if (firstFocusable) setTimeout(() => firstFocusable.focus(), 0);
+  } else {
+    // Return focus to the toggle that opened the sidebar.
+    setTimeout(() => elements.sidebarToggle.focus(), 0);
+  }
+}
+
 elements.sidebarToggle.addEventListener("click", () => {
-  state.sidebarOpen = !state.sidebarOpen;
-  elements.sidebar.classList.toggle("sidebar-open", state.sidebarOpen);
-  elements.sidebarBackdrop.classList.toggle("active", state.sidebarOpen);
+  setSidebarOpen(!state.sidebarOpen);
 });
 
 elements.sidebarBackdrop.addEventListener("click", () => {
-  state.sidebarOpen = false;
-  elements.sidebar.classList.remove("sidebar-open");
-  elements.sidebarBackdrop.classList.remove("active");
+  setSidebarOpen(false);
 });
 
-// Error state handlers
-elements.errorRetry?.addEventListener("click", () => {
-  // Hide error, show empty state again
-  setHidden(elements.errorState, true);
-  setHidden(elements.emptyState, false);
+// Escape closes the open mobile sidebar.
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && state.sidebarOpen) {
+    event.preventDefault();
+    setSidebarOpen(false);
+  }
 });
 
-elements.errorBack?.addEventListener("click", () => {
-  // Reset to initial state
-  setHidden(elements.errorState, true);
-  setHidden(elements.emptyState, false);
-  setHidden(elements.dashboard, true);
-  state.run = null;
-  state.runs = [];
-  state.selectedRunId = null;
-  state.selectedAgentId = null;
-  state.notice = null;
-  persistCachedRuns();
-  syncLocationState(state);
-  render();
-});
+// Note: Global error state has been removed. Errors now display inline via state.notice
+
+// Initial render
+state.notice = null;
+persistCachedRuns();
+syncLocationState(state);
+render();
 
 // Demo button event listener
 if (elements.tryDemoBtn) {
@@ -1593,6 +1685,32 @@ if (elements.tryDemoBtn) {
     }
   });
 }
+
+// Configure Agents button - scroll to launcher panel
+const configureAgentsBtn = document.querySelector("#configure-agents-btn");
+if (configureAgentsBtn) {
+  configureAgentsBtn.addEventListener("click", () => {
+    const launcherSection = document.querySelector("#launcher-section");
+    if (launcherSection) {
+      launcherSection.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  });
+}
+
+// Event delegation for data-action buttons in empty states
+document.addEventListener("click", (event) => {
+  const actionBtn = event.target.closest("[data-action]");
+  if (!actionBtn) return;
+  const action = actionBtn.dataset.action;
+  if (action === "load-demo") {
+    loadDemoData();
+  } else if (action === "scroll-to-launcher") {
+    const launcherSection = document.querySelector("#launcher-section");
+    if (launcherSection) {
+      launcherSection.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }
+});
 
 // Expose for debugging and HTML onclick (localhost only)
 if (location.hostname === "localhost" || location.hostname === "127.0.0.1") {

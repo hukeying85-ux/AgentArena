@@ -8,7 +8,7 @@ import { escapeHtml } from "../app-helpers.js";
 // 色盲友好配色方案（6 个维度）
 // 使用亮度递增 + 饱和度差异，确保色弱用户可区分
 const CHART_COLORS = [
-  '#6366f1', // Indigo
+  '#d97706', // Copper
   '#10b981', // Emerald
   '#f59e0b', // Amber
   '#ef4444', // Red
@@ -17,7 +17,7 @@ const CHART_COLORS = [
 ];
 
 const CHART_COLORS_SOFT = [
-  'rgba(99, 102, 241, 0.15)',
+  'rgba(217, 119, 6, 0.18)',
   'rgba(16, 185, 129, 0.15)',
   'rgba(245, 158, 11, 0.15)',
   'rgba(239, 68, 68, 0.15)',
@@ -84,6 +84,16 @@ export function renderBarChart(container, data, options = {}) {
   svg.setAttribute('viewBox', `0 0 ${width} ${Math.max(height, chartHeight + 40)}`);
   svg.style.width = '100%';
   svg.style.height = 'auto';
+  // Accessibility: declare role + descriptive label so screen readers can identify
+  // the chart and read a textual summary of the contents.
+  svg.setAttribute('role', 'img');
+  const chartTitle = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+  chartTitle.textContent = '评分维度对比 / Score Dimensions Comparison';
+  svg.appendChild(chartTitle);
+  const ariaSummary = data.map((g) =>
+    `${g.group}: ` + g.dimensions.map((d) => `${d.name} ${d.value.toFixed(1)}`).join(', ')
+  ).join('; ');
+  svg.setAttribute('aria-label', `Score chart — ${ariaSummary}`);
 
   let yOffset = 20;
 
@@ -210,6 +220,16 @@ export function renderComparisonBarChart(container, agents, dimensions, options 
   svg.style.width = '100%';
   svg.style.height = 'auto';
   svg.style.overflow = 'visible';
+  // Accessibility: declare as image, embed a <title>, expose a short aria-label
+  // summary so screen readers can read the chart contents.
+  svg.setAttribute('role', 'img');
+  const cmpTitle = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+  cmpTitle.textContent = '多 Agent 评分维度对比 / Multi-agent Score Comparison';
+  svg.appendChild(cmpTitle);
+  const cmpSummary = agents.map((a) =>
+    `${a.name || a.label}: ` + (a.dimensions || []).map((d) => `${d.name} ${typeof d.value === 'number' ? d.value.toFixed(1) : d.value}`).join(', ')
+  ).join('; ');
+  svg.setAttribute('aria-label', `Comparison chart — ${cmpSummary}`);
 
   // 定义 pattern（色盲辅助）
   const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
@@ -403,9 +423,17 @@ export function renderRadarChart(canvas, data, options = {}) {
 
   if (!canvas || !data?.dimensions) return;
 
+  // Accessibility: canvas is opaque to assistive tech. Add role=img + an
+  // aria-label summary so screen readers describe the radar chart.
+  canvas.setAttribute('role', 'img');
+  const radarSummary = (data.dimensions || [])
+    .map((d) => `${d.name} ${typeof d.value === 'number' ? d.value.toFixed(1) : d.value}`)
+    .join(', ');
+  canvas.setAttribute('aria-label', `Radar chart — ${radarSummary || 'no data'}`);
+
   const ctx = canvas.getContext('2d');
   const dpr = window.devicePixelRatio || 1;
-  
+
   // 设置 Canvas 尺寸（处理 DPI 缩放）
   canvas.width = width * dpr;
   canvas.height = height * dpr;
@@ -537,9 +565,16 @@ export function renderMultiRadarChart(canvas, datasets, options = {}) {
 
   if (!canvas || !datasets || datasets.length === 0) return;
 
+  // Accessibility: canvas is opaque to assistive tech; provide role + summary.
+  canvas.setAttribute('role', 'img');
+  const multiSummary = datasets
+    .map((ds) => `${ds.name}: ` + (ds.dimensions || []).map((d) => `${d.name} ${typeof d.value === 'number' ? d.value.toFixed(1) : d.value}`).join(', '))
+    .join('; ');
+  canvas.setAttribute('aria-label', `Multi-agent radar — ${multiSummary || 'no data'}`);
+
   const ctx = canvas.getContext('2d');
   const dpr = window.devicePixelRatio || 1;
-  
+
   canvas.width = width * dpr;
   canvas.height = height * dpr;
   canvas.style.width = `${width}px`;
@@ -744,7 +779,8 @@ export function renderWeightSliders(container, currentWeights, onChange, options
       totalRow.style.borderTop = '1px solid var(--border, #e2e8f0)';
       totalRow.style.fontSize = '13px';
       totalRow.style.fontWeight = '500';
-      totalRow.innerHTML = `<span>总权重</span><span class="weight-total-value">${(getTotal() * 100).toFixed(0)}%</span>`;
+      const totalLabel = options.totalLabel ?? '总权重 / Total Weight';
+      totalRow.innerHTML = `<span>${escapeHtml(totalLabel)}</span><span class="weight-total-value">${(getTotal() * 100).toFixed(0)}%</span>`;
       wrapper.appendChild(totalRow);
     }
 

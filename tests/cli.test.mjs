@@ -1,3 +1,7 @@
+// Allow inline node -e in test fixture task packs. Production task packs
+// should use script files; tests use inline scripts for brevity.
+process.env.AGENTARENA_ALLOW_EVAL_IN_JUDGES = "1";
+
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
@@ -63,7 +67,10 @@ async function getAvailablePort() {
 async function startUiServer(cwd, extraArgs = [], envOverrides = {}) {
   const cliPath = CLI_ENTRY;
   const port = await getAvailablePort();
-  const child = spawn(process.execPath, [cliPath, "ui", "--host", "127.0.0.1", "--port", String(port), "--no-open", ...extraArgs], {
+  // Pre-generate an explicit auth token to avoid stdout/file race conditions.
+  // The CLI masks tokens in stdout for security, so parsing from stdout no longer works.
+  const authToken = `test-token-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  const child = spawn(process.execPath, [cliPath, "ui", "--host", "127.0.0.1", "--port", String(port), "--no-open", "--auth-token", authToken, ...extraArgs], {
     cwd,
     stdio: ["ignore", "pipe", "pipe"],
     env: {
@@ -84,7 +91,7 @@ async function startUiServer(cwd, extraArgs = [], envOverrides = {}) {
   const _started = await new Promise((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error(`UI server did not start.\nstdout:\n${stdout}\nstderr:\n${stderr}`)), 10000);
     const onData = () => {
-      if (stdout.includes("auth_token=")) {
+      if (stdout.includes("auth_token_file=")) {
         clearTimeout(timeout);
         resolve(true);
       }
@@ -93,9 +100,6 @@ async function startUiServer(cwd, extraArgs = [], envOverrides = {}) {
     child.on("error", reject);
     child.on("exit", (code) => reject(new Error(`UI server exited early with code ${code}.\nstdout:\n${stdout}\nstderr:\n${stderr}`)));
   });
-
-  const tokenMatch = stdout.match(/auth_token=(\S+)/);
-  const authToken = tokenMatch ? tokenMatch[1] : undefined;
 
   return {
     port,
@@ -507,7 +511,10 @@ test("agentarena run supports JSON output", { timeout: 60_000 }, async () => {
   );
 
   assert.equal(result.code, 0);
-  const payload = JSON.parse(result.stdout);
+  // Extract the result JSON from stdout (may be preceded by log lines)
+  const jsonStart = result.stdout.lastIndexOf("\n{");
+  const jsonStr = jsonStart >= 0 ? result.stdout.slice(jsonStart + 1) : result.stdout;
+  const payload = JSON.parse(jsonStr);
   assert.equal(payload.task.id, "cli-json");
   assert.equal(payload.results[0].agentId, "demo-fast");
   assert.equal(payload.results[0].baseAgentId, "demo-fast");

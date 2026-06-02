@@ -9,10 +9,12 @@ import {
   type BenchmarkRun,
   getDefaultWeights,
   isAbortError,
+  type ScoreMode,
   throwIfAborted,
 } from "@agentarena/core";
-import { normalizeSelections, runAgent } from "./agent-lifecycle.js";
+import { runAgent } from "./agent-lifecycle.js";
 import { agentConcurrency, mapWithConcurrency } from "./concurrency.js";
+import { normalizeSelections } from "./normalize-selections.js";
 import { resolveAndValidateRepo } from "./repo-resolution.js";
 import {
   createCancellationSummary,
@@ -23,12 +25,16 @@ import { collectResults } from "./result-collection.js";
 import { cleanupWorkspace, formatErrorDetails, formatErrorMessage, type WorkspaceCleanupResult } from "./workspace.js";
 import { prepareWorkspace } from "./workspace-prep.js";
 
-export type { AgentRunContext, normalizeSelections, runAgent, wrapWithTimeout } from "./agent-lifecycle.js";
-export type { agentConcurrency, agentExecuteTimeoutMs, MapWithConcurrencyResult, mapWithConcurrency, resolvePositiveInt } from "./concurrency.js";
-export { DEFAULT_AGENT_CONCURRENCY } from "./concurrency.js";
+export type { AgentRunContext } from "./agent-lifecycle.js";
+export { runAgent } from "./agent-lifecycle.js";
+export type { MapWithConcurrencyResult } from "./concurrency.js";
+export { agentConcurrency, agentExecuteTimeoutMs, DEFAULT_AGENT_CONCURRENCY, mapWithConcurrency, resolvePositiveInt } from "./concurrency.js";
+export { normalizeSelections } from "./normalize-selections.js";
 export type { RepoResolution, RepoResolutionOptions } from "./repo-resolution.js";
-export type { buildDiffPrecision, collectChangedFiles } from "./snapshot.js";
-export type { cleanupWorkspace, debugLog, formatErrorDetails, formatErrorMessage, WorkspaceCleanupResult } from "./workspace.js";
+export { buildDiffPrecision, collectChangedFiles } from "./snapshot.js";
+export { wrapWithTimeout } from "./timeout-utils.js";
+export type { WorkspaceCleanupResult } from "./workspace.js";
+export { cleanupWorkspace, debugLog, formatErrorDetails, formatErrorMessage } from "./workspace.js";
 export type { WorkspacePrep, WorkspacePrepOptions } from "./workspace-prep.js";
 
 export interface BenchmarkOptions {
@@ -45,7 +51,7 @@ export interface BenchmarkOptions {
   builtinReposRoot?: string;
   cancellation?: BenchmarkCancellation;
   onProgress?: (event: BenchmarkProgressEvent) => void | Promise<void>;
-  scoreMode?: string;
+  scoreMode?: ScoreMode;
   tokenBudget?: number;
   categories?: string[];
   debug?: boolean;

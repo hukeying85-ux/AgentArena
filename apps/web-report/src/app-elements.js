@@ -69,13 +69,6 @@ const elements = {
   agentCount: document.querySelector("#agent-count"),
   emptyState: document.querySelector("#empty-state"),
 
-  // Error state
-  errorState: document.querySelector("#error-state"),
-  errorTitle: document.querySelector("#error-title"),
-  errorMessage: document.querySelector("#error-message"),
-  errorRetry: document.querySelector("#error-retry"),
-  errorBack: document.querySelector("#error-back"),
-
   // Theme
   themeToggle: document.querySelector("#theme-toggle"),
   themeLabel: document.querySelector("#theme-label"),
@@ -189,7 +182,13 @@ const elements = {
   sidebar: document.querySelector(".sidebar"),
   skipLink: document.querySelector("#skip-link"),
   agentListHint: document.querySelector("#agent-list-hint"),
-  updateBannerText: document.querySelector("#update-banner-text")
+  updateBannerText: document.querySelector("#update-banner-text"),
+
+  // Sticky benchmark bar
+  stickyBenchmarkBar: document.querySelector("#sticky-benchmark-bar"),
+  stickyBarSummary: document.querySelector("#sticky-bar-summary"),
+  stickyBarRunBtn: document.querySelector("#sticky-bar-run-btn"),
+  stickyBarRunText: document.querySelector("#sticky-bar-run-text")
 };
 
 export { elements };

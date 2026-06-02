@@ -167,28 +167,38 @@ export type TaskJudge =
   | CompilationJudge;
 
 export interface JudgeTypeDescriptor {
-  type: string;
+  type: JudgeType;
   allowedFields: Set<string>;
   isCriticalByDefault: boolean;
 }
 
+/** All judge types declared by the TaskJudge discriminated union. */
+export type JudgeType = TaskJudge["type"];
+
 export class JudgeTypeRegistry {
-  private descriptors = new Map<string, JudgeTypeDescriptor>();
+  private descriptors = new Map<JudgeType, JudgeTypeDescriptor>();
 
   register(descriptor: JudgeTypeDescriptor): void {
     this.descriptors.set(descriptor.type, descriptor);
   }
 
+  /**
+   * Look up a registered judge type. Accepts `string` at the call boundary
+   * because runtime data (parsed YAML/JSON) carries unverified strings;
+   * callers must still narrow before relying on the returned descriptor.
+   * Returning `undefined` for unknown types is the explicit "not a known
+   * judge type" signal.
+   */
   get(type: string): JudgeTypeDescriptor | undefined {
-    return this.descriptors.get(type);
+    return this.descriptors.get(type as JudgeType);
   }
 
-  getAllTypes(): string[] {
+  getAllTypes(): JudgeType[] {
     return Array.from(this.descriptors.keys());
   }
 
   has(type: string): boolean {
-    return this.descriptors.has(type);
+    return this.descriptors.has(type as JudgeType);
   }
 }
 

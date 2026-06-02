@@ -292,6 +292,8 @@ export function createDetailFragments({
       newToggle?.addEventListener("click", () => {
         const isVisible = content.style.display !== "none";
         content.style.display = isVisible ? "none" : "block";
+        // Keep aria-expanded in sync so screen readers announce open/closed state.
+        newToggle.setAttribute("aria-expanded", String(!isVisible));
       });
     }
   }
@@ -390,6 +392,7 @@ export function createDetailFragments({
       newToggle?.addEventListener("click", () => {
         const isVisible = content.style.display !== "none";
         content.style.display = isVisible ? "none" : "block";
+        newToggle.setAttribute("aria-expanded", String(!isVisible));
         if (!isVisible) renderTable();
       });
     }

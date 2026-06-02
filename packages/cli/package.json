@@ -1,7 +1,7 @@
 {
   "name": "@agentarena/cli",
   "version": "0.1.0",
-  "description": "CLI entry point for AgentArena — ui, run, doctor, init-taskpack, init-ci, list-adapters",
+  "description": "CLI entry point for AgentArena — ui, run, doctor, init-taskpack, init-ci, list-adapters, clean",
   "type": "module",
   "engines": {
     "node": ">=22.0.0"

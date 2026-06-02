@@ -1,3 +1,7 @@
+// Allow inline node -e in test fixture task packs. Production task packs
+// should use script files; tests use inline scripts for brevity.
+process.env.AGENTARENA_ALLOW_EVAL_IN_JUDGES = "1";
+
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
@@ -146,13 +150,13 @@ test("file-count judge validates exact count", async () => {
 test("file-exists judge rejects path traversal", async () => {
   const workspace = await setupWorkspace();
 
-  await assert.rejects(
-    () => runJudge(
-      { id: "test-traversal", label: "Traversal", type: "file-exists", path: "../../etc/passwd" },
-      workspace, ALLOWED_NAMES
-    ),
-    { message: /path must stay inside the workspace/ }
+  const result = await runJudge(
+    { id: "test-traversal", label: "Traversal", type: "file-exists", path: "../../etc/passwd" },
+    workspace, ALLOWED_NAMES
   );
+
+  assert.equal(result.success, false);
+  assert.match(result.stderr, /path must stay inside the workspace/);
 
   await fs.rm(workspace, { recursive: true, force: true });
 });
@@ -193,7 +197,7 @@ test("command step aborts when signal is cancelled", async () => {
   await fs.rm(workspace, { recursive: true, force: true });
 });
 
-test("judges run sequentially in a shared workspace", async () => {
+test("judges can run concurrently in a shared workspace", async () => {
   const workspace = await setupWorkspace();
 
   const results = await runJudges(
@@ -208,7 +212,7 @@ test("judges run sequentially in a shared workspace", async () => {
         id: "read-marker",
         label: "read marker",
         type: "command",
-        command: "node -e \"process.exit(require('node:fs').existsSync('marker.txt') ? 0 : 1)\""
+        command: "node -e \"(async()=>{const fs=require('node:fs');const end=Date.now()+2000;while(Date.now()<end){if(fs.existsSync('marker.txt'))process.exit(0);await new Promise(r=>setTimeout(r,50));}process.exit(1);})()\""
       }
     ],
     workspace,

@@ -21,6 +21,15 @@ export function portableBasename(inputPath: string): string {
   return isWindowsLikePath(inputPath) ? path.win32.basename(inputPath) : path.posix.basename(inputPath);
 }
 
+/**
+ * Check if targetPath is inside workspacePath.
+ *
+ * SECURITY NOTE (TOCTOU): This function uses fs.realpath to resolve symlinks,
+ * but the target path could be modified between the realpath check and actual
+ * file access. For critical security boundaries, use fs.open() + fstat()
+ * on the opened file descriptor instead. This function provides best-effort
+ * protection suitable for the advisory sandbox model.
+ */
 export async function isPathInsideWorkspace(workspacePath: string, targetPath: string): Promise<boolean> {
   // Step 1: Use resolve to normalize and get absolute paths
   const resolvedWorkspace = path.resolve(workspacePath);
