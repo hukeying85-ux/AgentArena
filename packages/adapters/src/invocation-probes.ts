@@ -1,8 +1,8 @@
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { AdapterPreflightResult } from "@agentarena/core";
-import { ensureDirectory } from "@agentarena/core";
+import type { AdapterPreflightResult, PreflightResult } from "@agentarena/core";
+import { ensureDirectory, getHealthCache } from "@agentarena/core";
 import type { InvocationSpec } from "./adapter-capabilities.js";
 import { adapterWarn } from "./adapter-diagnostics.js";
 import { writeClaudeWorkspaceSettings } from "./claude-provider-profiles.js";
@@ -118,7 +118,7 @@ export async function probeInvocationVersion(
 
 export async function probeHelp(invocation: InvocationSpec, cwd: string): Promise<ProcessResult> {
   try {
-    return await runProcess(invocation.command, [...invocation.argsPrefix, "--help"], cwd, 30_000);
+    return await runProcess(invocation.command, [...invocation.argsPrefix, "--help"], cwd, 45_000);
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     return {
@@ -131,10 +131,139 @@ export async function probeHelp(invocation: InvocationSpec, cwd: string): Promis
   }
 }
 
-export async function probeClaudeLikeAuth(
+/**
+ * Fast CLI existence check — just runs `--version` with a short timeout.
+ * Returns in ~2 seconds. No network call, no auth check.
+ */
+export async function probeCliExists(
   invocation: InvocationSpec,
   cwd: string,
   environment?: NodeJS.ProcessEnv
+): Promise<{
+  found: boolean;
+  version?: string;
+  error?: string;
+}> {
+  try {
+    const result = await runProcess(
+      invocation.command,
+      [...invocation.argsPrefix, "--version"],
+      cwd,
+      5_000,
+      environment
+    );
+    const output = [result.stdout, result.stderr].join("\n").trim();
+    const version = extractVersionToken(output);
+    return {
+      found: result.exitCode === 0 || output.length > 0,
+      version
+    };
+  } catch (error) {
+    return {
+      found: false,
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
+/**
+ * Lightweight auth config check — verifies API key exists without making a network call.
+ * Returns in milliseconds. Only checks local configuration.
+ */
+export async function probeAuthConfig(
+  invocation: InvocationSpec,
+  environment?: NodeJS.ProcessEnv
+): Promise<{
+  configured: boolean;
+  hint?: string;
+}> {
+  const env = environment ?? process.env;
+  const command = invocation.command.toLowerCase();
+
+  // Claude Code: check ANTHROPIC_API_KEY or config file
+  if (command.includes("claude")) {
+    const hasKey = !!(env.ANTHROPIC_API_KEY || env.CLAUDE_API_KEY);
+    if (hasKey) return { configured: true };
+    // Check if there's a stored credential file
+    const homeDir = os.homedir();
+    const claudeConfigPath = path.join(homeDir, ".claude", "credentials.json");
+    try {
+      await fs.access(claudeConfigPath);
+      return { configured: true };
+    } catch {
+      return { configured: false, hint: "No ANTHROPIC_API_KEY set and no ~/.claude/credentials.json found" };
+    }
+  }
+
+  // Codex: check OPENAI_API_KEY
+  if (command.includes("codex")) {
+    return {
+      configured: !!env.OPENAI_API_KEY,
+      hint: env.OPENAI_API_KEY ? undefined : "No OPENAI_API_KEY set"
+    };
+  }
+
+  // Gemini: check GEMINI_API_KEY or GOOGLE_API_KEY
+  if (command.includes("gemini")) {
+    return {
+      configured: !!(env.GEMINI_API_KEY || env.GOOGLE_API_KEY),
+      hint: "No GEMINI_API_KEY or GOOGLE_API_KEY set"
+    };
+  }
+
+  // Aider: check OPENAI_API_KEY or ANTHROPIC_API_KEY
+  if (command.includes("aider")) {
+    return {
+      configured: !!(env.OPENAI_API_KEY || env.ANTHROPIC_API_KEY),
+      hint: "No OPENAI_API_KEY or ANTHROPIC_API_KEY set"
+    };
+  }
+
+  // Generic: assume configured if we can't determine
+  return { configured: true };
+}
+
+/**
+ * Three-stage preflight: CLI exists → Auth configured → Full auth probe (optional).
+ * Stages 1+2 are fast (~2s total), stage 3 is slow (~60s) and only runs when explicitly requested.
+ */
+export async function probeQuickPreflight(
+  invocation: InvocationSpec,
+  cwd: string,
+  environment?: NodeJS.ProcessEnv
+): Promise<{
+  cliExists: boolean;
+  cliVersion?: string;
+  authConfigured: boolean;
+  authHint?: string;
+  overallStatus: "ready" | "warning" | "blocked";
+}> {
+  const [cliResult, authResult] = await Promise.all([
+    probeCliExists(invocation, cwd, environment),
+    probeAuthConfig(invocation, environment)
+  ]);
+
+  let overallStatus: "ready" | "warning" | "blocked" = "ready";
+  if (!cliResult.found) {
+    overallStatus = "blocked";
+  } else if (!authResult.configured) {
+    overallStatus = "warning";
+  }
+
+  return {
+    cliExists: cliResult.found,
+    cliVersion: cliResult.version,
+    authConfigured: authResult.configured,
+    authHint: authResult.hint,
+    overallStatus
+  };
+}
+
+export async function probeClaudeLikeAuth(
+  invocation: InvocationSpec,
+  cwd: string,
+  environment?: NodeJS.ProcessEnv,
+  timeoutMs: number = 60_000
 ): Promise<{
   status: AdapterPreflightResult["status"];
   summary: string;
@@ -158,7 +287,7 @@ export async function probeClaudeLikeAuth(
         prompt
       ],
       cwd,
-      60_000,
+      timeoutMs,
       environment
     );
   } catch (error) {
@@ -209,6 +338,111 @@ export async function probeClaudeLikeAuth(
     summary: parsed.error ?? "CLI is installed but could not complete an authenticated probe.",
     details
   };
+}
+
+/**
+ * Fast auth probe with health cache integration.
+ * Returns in ≤5s (configurable) with structured failure reasons.
+ * Uses HealthCache to avoid redundant probes within TTL.
+ */
+export async function probeClaudeLikeAuthFast(
+  invocation: InvocationSpec,
+  cwd: string,
+  adapterId: string,
+  providerId: string,
+  environment?: NodeJS.ProcessEnv,
+  timeoutMs: number = 5_000,
+  options?: {
+    endpoint?: string;
+    useCache?: boolean;
+    forceProbe?: boolean;
+  }
+): Promise<PreflightResult> {
+  const useCache = options?.useCache !== false;
+  const forceProbe = options?.forceProbe === true;
+  const cache = getHealthCache();
+
+  // Check cache first (unless forced)
+  if (useCache && !forceProbe) {
+    const cached = await cache.get(adapterId, providerId, options?.endpoint);
+    if (cached) {
+      return {
+        adapter: cached.adapterId,
+        provider: cached.providerId,
+        status: cached.status,
+        summary: cached.summary,
+        reason: cached.reason,
+        suggestedAction: cached.suggestedAction,
+        details: cached.details,
+        fromCache: true,
+        timestamp: cached.timestamp,
+      };
+    }
+  }
+
+  // Run the actual probe with short timeout
+  const result = await probeClaudeLikeAuth(invocation, cwd, environment, timeoutMs);
+
+  // Build structured result - map unverified to unverified, keep others as-is
+  const status = result.status;
+  const preflightResult: PreflightResult = {
+    adapter: adapterId,
+    provider: providerId,
+    status,
+    summary: result.summary,
+    details: result.details,
+    fromCache: false,
+    timestamp: Date.now(),
+  };
+
+  // Add structured failure info for blocked status
+  if (result.status === "blocked") {
+    preflightResult.reason = result.summary;
+    preflightResult.suggestedAction = [];
+
+    // Analyze failure reason and suggest actions
+    const summaryLower = result.summary.toLowerCase();
+    const detailsStr = result.details?.join(" ").toLowerCase() ?? "";
+
+    if (summaryLower.includes("timed out") || detailsStr.includes("timed out")) {
+      preflightResult.suggestedAction.push(
+        "Check network connectivity",
+        "Verify API endpoint is reachable",
+        "Increase probe timeout with --probe-timeout"
+      );
+    } else if (summaryLower.includes("auth") || detailsStr.includes("api key") || detailsStr.includes("unauthorized")) {
+      preflightResult.suggestedAction.push(
+        "Verify API key is correct",
+        "Check ANTHROPIC_API_KEY environment variable",
+        "Run 'agentarena doctor --probe-auth' to test authentication"
+      );
+    } else if (summaryLower.includes("not found") || summaryLower.includes("command not found")) {
+      preflightResult.suggestedAction.push(
+        "Install the required CLI tool",
+        "Check PATH environment variable"
+      );
+    } else {
+      preflightResult.suggestedAction.push(
+        "Check CLI installation",
+        "Verify authentication credentials",
+        "Run 'agentarena doctor' for detailed diagnostics"
+      );
+    }
+  }
+
+  // Cache the result (even failures, to avoid repeated slow probes)
+  if (useCache) {
+    await cache.set(adapterId, providerId, preflightResult.status, preflightResult.summary, {
+      endpoint: options?.endpoint,
+      reason: preflightResult.reason,
+      suggestedAction: preflightResult.suggestedAction,
+      details: preflightResult.details,
+      // Cache failures for shorter duration (1 min vs 5 min for success)
+      ttlMs: preflightResult.status === "ready" ? undefined : 60_000,
+    });
+  }
+
+  return preflightResult;
 }
 
 export async function probeClaudeProfileAuth(

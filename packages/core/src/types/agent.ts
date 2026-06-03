@@ -152,3 +152,40 @@ export interface AgentAdapter {
   preflight(options?: AdapterPreflightOptions): Promise<AdapterPreflightResult>;
   execute(context: AdapterExecutionContext): Promise<AdapterExecutionResult>;
 }
+
+/**
+ * Structured preflight result with fast-failure semantics.
+ * Used by HealthCache and the improved preflight system.
+ */
+export interface PreflightResult {
+  /** Adapter ID */
+  adapter: string;
+  /** Provider ID (e.g., "official", "mimo") */
+  provider: string;
+  /** Overall status */
+  status: AdapterPreflightStatus;
+  /** Human-readable summary */
+  summary: string;
+  /** Structured failure reason (when blocked/warning) */
+  reason?: string;
+  /** Suggested actions to resolve the issue */
+  suggestedAction?: string[];
+  /** Optional details */
+  details?: string[];
+  /** Whether this result came from cache */
+  fromCache?: boolean;
+  /** Timestamp of the check */
+  timestamp: number;
+}
+
+/**
+ * Options for preflight with configurable timeout.
+ */
+export interface PreflightOptions {
+  /** Probe timeout in milliseconds (default: 5000) */
+  probeTimeoutMs?: number;
+  /** Whether to use health cache (default: true) */
+  useCache?: boolean;
+  /** Force re-probe even if cached (default: false) */
+  forceProbe?: boolean;
+}

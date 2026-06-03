@@ -18,6 +18,7 @@ export {
   writeClaudeWorkspaceSettings
 } from "./claude-provider-profiles.js";
 export { loadAdapterPlugins, registerExternalAdapters } from "./plugin-registry.js";
+export { probeAuthConfig, probeCliExists, probeClaudeLikeAuthFast, probeQuickPreflight } from "./invocation-probes.js";
 
 import { parseClaudeEvents, parseCodexEvents, parseGeminiEvents } from "./event-parsers.js";
 import { agentTimeoutMs, formatTimeoutMessage, runProcess, terminateProcessTree } from "./process-utils.js";

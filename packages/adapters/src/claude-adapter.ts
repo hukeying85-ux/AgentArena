@@ -10,10 +10,10 @@ import type {
 } from "@agentarena/core";
 import { CLAUDE_CODE_CAPABILITY, type InvocationSpec } from "./adapter-capabilities.js";
 import { formatAdapterError } from "./adapter-diagnostics.js";
-import { buildAgentPrompt, createPreflightResult } from "./adapter-helpers.js";
+import { buildAgentPrompt, createPreflightResult, savePromptArtifact } from "./adapter-helpers.js";
 import { getClaudeProviderProfileSecret, writeClaudeWorkspaceSettings } from "./claude-provider-profiles.js";
 import { parseClaudeEvents } from "./event-parsers.js";
-import { probeClaudeLikeAuth, probeClaudeProfileAuth, probeHelp, probeInvocationVersion } from "./invocation-probes.js";
+import { probeClaudeLikeAuth, probeClaudeLikeAuthFast, probeClaudeProfileAuth, probeHelp, probeInvocationVersion } from "./invocation-probes.js";
 import { agentTimeoutMs, runProcess } from "./process-utils.js";
 import { resolveClaudeRuntime } from "./runtime-resolution.js";
 
@@ -120,6 +120,7 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
     }
   ): Promise<AdapterExecutionResult> {
     const prompt = buildAgentPrompt(context);
+    await savePromptArtifact(prompt, context.workspacePath, context);
     const invocation = await this.resolveInvocation();
     const args = [
       ...invocation.argsPrefix,
@@ -194,6 +195,15 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
 
     const parsed = parseClaudeEvents(execution.stdout);
 
+    // Emit tool_use trace events for each tool call detected in the stream
+    for (const tc of parsed.toolCalls) {
+      await context.trace({
+        type: "adapter.tool_use",
+        message: tc.name,
+        metadata: { toolName: tc.name, input: tc.input }
+      });
+    }
+
     let summary: string;
     if (execution.error) {
       summary = `${this.title} process error: ${execution.error}`;
@@ -221,9 +231,24 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
         costKnown: parsed.costKnown,
         resolvedRuntime,
         parsedError: parsed.error,
-        stderr: execution.stderr.trim()
+        stderr: execution.stderr.trim(),
+        stdout: execution.stdout,
+        workspacePath: context.workspacePath
       }
     });
+
+    // Save stdout/stderr to files for debugging
+    try {
+      const fs = await import("node:fs/promises");
+      const stdoutPath = context.workspacePath + "/agent-stdout.jsonl";
+      await fs.default.writeFile(stdoutPath, execution.stdout, "utf8");
+      if (execution.stderr.trim()) {
+        const stderrPath = context.workspacePath + "/agent-stderr.log";
+        await fs.default.writeFile(stderrPath, execution.stderr, "utf8");
+      }
+    } catch {
+      // Best effort — don't fail the run if we can't write the file
+    }
 
     return {
       status: execution.exitCode === 0 && !execution.error && !parsed.error ? "success" : "failed",
@@ -311,14 +336,43 @@ export class ClaudeCodeAdapter extends ClaudeLikeAdapter {
     }
 
     if (options?.probeAuth) {
-      const authProbe =
-        resolved.profile.kind === "official"
-          ? await probeClaudeLikeAuth(invocation, process.cwd())
-          : await probeClaudeProfileAuth(
-              invocation,
+      // Use fast probe with cache for third-party providers (they are more fragile)
+      if (resolved.profile.kind !== "official") {
+        const fastResult = await probeClaudeLikeAuthFast(
+          invocation,
+          process.cwd(),
+          this.id,
+          resolved.profile.id,
+          {
+            ...process.env,
+            ...(await writeClaudeWorkspaceSettings(
+              process.cwd(),
               resolved.profile.id,
               options?.selection?.config.model ?? resolved.profile.primaryModel
-            );
+            ).then(r => r.environment).catch(() => ({})))
+          },
+          5_000, // 5s timeout for fast probe
+          {
+            useCache: true,
+            forceProbe: false,
+          }
+        );
+        return createPreflightResult(
+          options?.selection,
+          this.id,
+          this.title,
+          this.kind,
+          this.capability,
+          fastResult.status,
+          fastResult.summary,
+          resolvedRuntime,
+          invocation.displayCommand,
+          fastResult.details
+        );
+      }
+
+      // Official provider: use standard probe
+      const authProbe = await probeClaudeLikeAuth(invocation, process.cwd());
       return createPreflightResult(
         options?.selection,
         this.id,

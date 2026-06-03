@@ -18,6 +18,7 @@ export interface ParsedArgs {
   outputPath?: string;
   locale?: string;
   probeAuth: boolean;
+  probeTimeout?: number;
   strict: boolean;
   updateSnapshots: boolean;
   cleanupWorkspaces: boolean;
@@ -117,6 +118,7 @@ Doctor Command:
   Options:
     --agents <list>            Comma-separated list of agents to check (default: all)
     --probe-auth               Test authentication for each adapter
+    --probe-timeout <ms>       Timeout for auth probes in milliseconds (default: 5000)
     --strict                   Exit with error if any adapter is not ready
     --json                     Output results as JSON
 
@@ -362,6 +364,18 @@ export function parseArgs(argv: string[]): ParsedArgs {
       case "--probe-auth":
         parsed.probeAuth = true;
         break;
+      case "--probe-timeout": {
+        const timeoutValue = args.shift();
+        if (!timeoutValue) {
+          throw new Error("--probe-timeout requires a number in milliseconds. Example: --probe-timeout 5000");
+        }
+        const value = Number.parseInt(timeoutValue, 10);
+        if (!Number.isInteger(value) || value <= 0 || value > 120000) {
+          throw new Error(`--probe-timeout must be a positive integer between 1 and 120000. Got: ${timeoutValue}`);
+        }
+        parsed.probeTimeout = value;
+        break;
+      }
       case "--strict":
         parsed.strict = true;
         break;

@@ -1,6 +1,7 @@
 export * from "./cancellation.js";
 export * from "./env.js";
 export * from "./fs-utils.js";
+export * from "./health-cache.js";
 export * from "./logging.js";
 export * from "./metrics.js";
 export * from "./paths.js";
