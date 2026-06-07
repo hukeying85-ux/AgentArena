@@ -242,16 +242,16 @@ export async function runBenchmarkCommand(
   const csvPath = path.join(benchmark.outputPath, "results.csv");
   await fs.writeFile(csvPath, generateCsv(benchmark), "utf8");
 
-  // Generate decision report
-  // TODO: expose as CLI flags (--team-size, --daily-runs)
-  // These defaults represent a typical small team scenario for cost projection.
-  // teamSize=10: average dev team size for ROI calculations
-  // dailyRuns=5: conservative estimate of benchmark runs per day
+  // Generate decision report. Cost/ROI projections assume a team size and daily
+  // run count; both default to a small-team scenario and are overridable via
+  // --team-size / --daily-runs.
   const DEFAULT_TEAM_SIZE = 10;
   const DEFAULT_DAILY_RUNS = 5;
+  const teamSize = parsed.teamSize ?? DEFAULT_TEAM_SIZE;
+  const dailyRuns = parsed.dailyRuns ?? DEFAULT_DAILY_RUNS;
   const decisionReport = generateDecisionReport(benchmark, {
-    teamSize: DEFAULT_TEAM_SIZE,
-    dailyRuns: DEFAULT_DAILY_RUNS,
+    teamSize,
+    dailyRuns,
   });
   const decisionReportPath = path.join(
     benchmark.outputPath,

@@ -228,6 +228,72 @@ test("agentarena run --agent-timeout validates and is accepted", { timeout: 30_0
   }
 });
 
+test("agentarena run --team-size and --daily-runs affect the decision report", { timeout: 60_000 }, async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-cli-"));
+  try {
+    const repoPath = path.join(tempDir, "repo");
+    const outputPath = path.join(tempDir, "output-team");
+    const taskPath = path.join(tempDir, "task-team.json");
+
+    await mkdir(repoPath, { recursive: true });
+    await writeFile(path.join(repoPath, "README.md"), "# Temp Repo\n", "utf8");
+    await writeJson(taskPath, {
+      schemaVersion: "agentarena.taskpack/v1",
+      id: "cli-team",
+      title: "CLI Team",
+      prompt: "Run with team cost settings",
+      judges: [
+        { id: "pass", type: "command", label: "Always pass", command: "node -e \"process.exit(0)\"" }
+      ]
+    });
+
+    const result = await runCli(
+      [
+        "run",
+        "--repo",
+        repoPath,
+        "--task",
+        taskPath,
+        "--agents",
+        "demo-fast",
+        "--output",
+        outputPath,
+        "--locale",
+        "en",
+        "--team-size",
+        "3",
+        "--daily-runs",
+        "7"
+      ],
+      path.resolve(".")
+    );
+
+    assert.equal(result.code, 0);
+    const entries = await readdir(outputPath, { withFileTypes: true });
+    const runDir = entries.find((entry) => entry.isDirectory());
+    assert.ok(runDir, "Expected a run output subdirectory");
+
+    const decisionReport = await readFile(path.join(outputPath, runDir.name, "decision-report.md"), "utf8");
+    assert.match(decisionReport, /Team cost estimate \(3 people .* 7 runs\/day\)/);
+
+    const badTeamSize = await runCli(
+      ["run", "--team-size", "0"],
+      path.resolve(".")
+    );
+    assert.notEqual(badTeamSize.code, 0);
+    assert.match((badTeamSize.stderr || "") + (badTeamSize.stdout || ""), /--team-size requires a positive integer/);
+
+    const badDailyRuns = await runCli(
+      ["run", "--daily-runs", "0"],
+      path.resolve(".")
+    );
+    assert.notEqual(badDailyRuns.code, 0);
+    assert.match((badDailyRuns.stderr || "") + (badDailyRuns.stdout || ""), /--daily-runs requires a positive integer/);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("agentarena run exits with code 1 on failed benchmark", { timeout: 60_000 }, async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-cli-"));
   try {

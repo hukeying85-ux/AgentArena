@@ -24,6 +24,8 @@ export interface ParsedArgs {
   cleanupWorkspaces: boolean;
   dryRun: boolean;
   agentTimeout?: number;
+  teamSize?: number;
+  dailyRuns?: number;
   maxConcurrency?: number;
   json: boolean;
   templateName?: string;
@@ -80,6 +82,10 @@ Run Command:
     --probe-auth               Test adapter authentication before running
     --update-snapshots         Update snapshot files if they differ
     --cleanup-workspaces       Remove agent workspace directories after run
+    --dry-run                  Print the resolved run plan without executing agents
+    --agent-timeout <ms>       Per-agent execution timeout in milliseconds
+    --team-size <n>            Team size used for decision-report cost estimates (default: 10)
+    --daily-runs <n>           Runs per day used for decision-report cost estimates (default: 5)
     --max-concurrency <n>      Maximum number of agents to run in parallel (default: min(4, cpuCount))
     --json                     Output results as JSON
     --verbose, -v              Show verbose error messages with stack traces
@@ -411,6 +417,24 @@ export function parseArgs(argv: string[]): ParsedArgs {
           );
         }
         parsed.agentTimeout = agentTimeoutValue;
+        break;
+      }
+      case "--team-size": {
+        const rawTeamSize = args.shift();
+        const teamSizeValue = Number(rawTeamSize);
+        if (!rawTeamSize || !Number.isInteger(teamSizeValue) || teamSizeValue <= 0) {
+          throw new Error("--team-size requires a positive integer (number of developers).");
+        }
+        parsed.teamSize = teamSizeValue;
+        break;
+      }
+      case "--daily-runs": {
+        const rawDailyRuns = args.shift();
+        const dailyRunsValue = Number(rawDailyRuns);
+        if (!rawDailyRuns || !Number.isInteger(dailyRunsValue) || dailyRunsValue <= 0) {
+          throw new Error("--daily-runs requires a positive integer (benchmark runs per day).");
+        }
+        parsed.dailyRuns = dailyRunsValue;
         break;
       }
       case "--template":
