@@ -335,6 +335,25 @@ export async function runBenchmarkCommand(
     const totalCount = scoredBenchmark.results.length;
     console.log(`\nSummary: ${successCount}/${totalCount} agents succeeded`);
 
+    // Run-level totals so the first question after a run ("what did this cost
+    // me?") is answered without mentally summing per-agent lines.
+    const totalTokens = scoredBenchmark.results.reduce(
+      (sum, r) => sum + (r.tokenUsage ?? 0),
+      0,
+    );
+    const costResults = scoredBenchmark.results.filter((r) => r.costKnown);
+    const totalCost = costResults.reduce(
+      (sum, r) => sum + (r.estimatedCostUsd ?? 0),
+      0,
+    );
+    const costCoverage =
+      costResults.length === totalCount
+        ? ""
+        : ` (cost known for ${costResults.length}/${totalCount})`;
+    console.log(
+      `Total: ${totalTokens} tokens | $${totalCost.toFixed(2)}${costCoverage}`,
+    );
+
     const topRec = decisionReport.recommendations.find(
       (r) => r.recommendation === "recommended",
     );

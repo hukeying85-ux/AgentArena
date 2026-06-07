@@ -93,6 +93,15 @@ export function buildBenchmarkOutputSummary(
         total: result.judgeResults.length
       }
     })),
+    totals: {
+      tokens: scoredBenchmark.results.reduce((sum, result) => sum + (result.tokenUsage ?? 0), 0),
+      costUsd: scoredBenchmark.results
+        .filter((result) => result.costKnown)
+        .reduce((sum, result) => sum + (result.estimatedCostUsd ?? 0), 0),
+      costKnownCount: scoredBenchmark.results.filter((result) => result.costKnown).length,
+      agentCount: scoredBenchmark.results.length,
+      successCount: scoredBenchmark.results.filter((result) => result.status === "success").length
+    },
     report
   };
 }
