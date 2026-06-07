@@ -4,14 +4,7 @@ import {
   buildCiWorkflow,
   TASKPACK_TEMPLATES,
 } from "../templates.js";
-import { type ParsedTaskPackMetadataFile, WORKSPACE_ROOT } from "./shared.js";
-
-const OFFICIAL_TASKPACK_ROOT = path.join(
-  WORKSPACE_ROOT,
-  "examples",
-  "taskpacks",
-  "official",
-);
+import { OFFICIAL_TASKPACK_ROOT, type ParsedTaskPackMetadataFile } from "./shared.js";
 
 type OfficialTaskPackSummary = {
   id: string;

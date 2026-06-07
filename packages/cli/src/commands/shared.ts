@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { listAvailableAdapters } from "@agentarena/adapters";
@@ -12,11 +13,27 @@ export const CLI_PACKAGE_ROOT = path.resolve(
   ".."
 );
 export const WORKSPACE_ROOT = path.resolve(CLI_PACKAGE_ROOT, "..", "..");
-export const OFFICIAL_TASKPACK_ROOT = path.join(
-  WORKSPACE_ROOT,
-  "examples",
-  "taskpacks",
-  "official"
+export const CLI_ASSETS_ROOT = path.join(CLI_PACKAGE_ROOT, "assets");
+
+function resolveCliAssetPath(assetSegments: string[], workspaceSegments: string[]): string {
+  const packagedPath = path.join(CLI_ASSETS_ROOT, ...assetSegments);
+  if (existsSync(packagedPath)) {
+    return packagedPath;
+  }
+  return path.join(WORKSPACE_ROOT, ...workspaceSegments);
+}
+
+export const WEB_REPORT_DIST_ROOT = resolveCliAssetPath(
+  ["web-report"],
+  ["apps", "web-report", "dist"]
+);
+export const OFFICIAL_TASKPACK_ROOT = resolveCliAssetPath(
+  ["taskpacks", "official"],
+  ["examples", "taskpacks", "official"]
+);
+export const BUILTIN_REPOS_ROOT = resolveCliAssetPath(
+  ["taskpacks", "repos"],
+  ["examples", "taskpacks", "repos"]
 );
 
 export interface UiRunPayload {

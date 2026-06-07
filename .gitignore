@@ -55,6 +55,7 @@ docs/notes/*.md
 docs/images/*.png
 scripts/BeszelTray.spec
 examples/taskpacks/task-packs.json
+packages/cli/assets/
 
 # Process/temp files
 findings.md

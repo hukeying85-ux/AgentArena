@@ -41,10 +41,10 @@ import {
   resolveReportLocale,
   type UiRunPayload,
   type UiRunStatus,
-  WORKSPACE_ROOT,
+  WEB_REPORT_DIST_ROOT,
 } from "./shared.js";
 
-export const WEB_REPORT_DIST_ROOT = path.join(WORKSPACE_ROOT, "apps", "web-report", "dist");
+export { WEB_REPORT_DIST_ROOT };
 
 export function sendApiResponse(
   response: http.ServerResponse,
