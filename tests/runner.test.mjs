@@ -3,15 +3,100 @@
 process.env.AGENTARENA_ALLOW_EVAL_IN_JUDGES = "1";
 
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { runBenchmark } from "../packages/runner/dist/index.js";
+import { assertWindowsGitAskpassSafeUrl, createAskpassScript } from "../packages/runner/dist/repo-resolution.js";
 
 async function writeJson(filePath, value) {
   await writeFile(filePath, JSON.stringify(value, null, 2), "utf8");
 }
+
+async function fileExists(filePath) {
+  try {
+    await access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function quoteWindowsCmdArgument(value) {
+  if (/["\r\n]/.test(value)) {
+    throw new Error("Test helper cannot quote values containing double quotes or newlines.");
+  }
+  return `"${value.replace(/\\+$/u, (slashes) => `${slashes}${slashes}`)}"`;
+}
+
+async function runWindowsCmd(commandLine, env) {
+  return await new Promise((resolve, reject) => {
+    const child = spawn(process.env.ComSpec ?? process.env.COMSPEC ?? "cmd.exe", ["/d", "/s", "/v:off", "/c", `"${commandLine}"`], {
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+      windowsVerbatimArguments: true
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", reject);
+    child.on("close", (code) => resolve({ code, stdout, stderr }));
+  });
+}
+
+test(
+  "Windows git askpass wrapper treats cmd metacharacters as prompt text",
+  { skip: process.platform !== "win32" ? "Windows-specific askpass wrapper behavior" : false },
+  async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-askpass-test-"));
+    const markerPath = path.join(tempDir, "injected.txt");
+    const askpass = await createAskpassScript();
+
+    try {
+      const markerArgPath = markerPath.replace(/\\/g, "/");
+      const prompt = `Username for https://example.com/repo&echo injected>${markerArgPath}.git`;
+      const result = await runWindowsCmd(
+        `${quoteWindowsCmdArgument(askpass.scriptPath)} ${quoteWindowsCmdArgument(prompt)}`,
+        {
+          ...process.env,
+          GIT_ASKPASS_USER: "git-user",
+          GIT_ASKPASS_PASS: "git-pass"
+        }
+      );
+
+      assert.equal(result.code, 0, result.stderr);
+      assert.equal(result.stdout, "git-user");
+      assert.equal(await fileExists(markerPath), false);
+    } finally {
+      await askpass.cleanup();
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  }
+);
+
+test(
+  "Windows authenticated URL repoSource rejects cmd expansion characters",
+  { skip: process.platform !== "win32" ? "Windows-specific askpass wrapper behavior" : false },
+  () => {
+    assert.doesNotThrow(() => assertWindowsGitAskpassSafeUrl("https://example.com/repo&branch=main.git"));
+    assert.throws(
+      () => assertWindowsGitAskpassSafeUrl("https://example.com/repo%25PATH%25.git"),
+      /Authenticated URL repoSource/
+    );
+    assert.throws(
+      () => assertWindowsGitAskpassSafeUrl('https://example.com/repo"x.git'),
+      /Authenticated URL repoSource/
+    );
+  }
+);
 
 test("runBenchmark passes only allowlisted env vars to setup, judges, teardown, and agents", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-runner-"));

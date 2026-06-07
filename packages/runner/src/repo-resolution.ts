@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { TaskPack } from "@agentarena/core";
-import { isInternalUrl, resolveRepoSource } from "@agentarena/core";
+import { hasInternalDnsResolution, isInternalUrl, resolveRepoSource } from "@agentarena/core";
 import { loadTaskPack } from "@agentarena/taskpacks";
 
 function redactToken(input: string, token: string): string {
@@ -10,7 +10,17 @@ function redactToken(input: string, token: string): string {
   return input.split(token).join("***");
 }
 
-async function createAskpassScript(): Promise<{ scriptPath: string; cleanup: () => Promise<void> }> {
+export function assertWindowsGitAskpassSafeUrl(repoUrl: string): void {
+  if (process.platform !== "win32") return;
+  if (/[%"\r\n]/.test(repoUrl)) {
+    throw new Error(
+      "Authenticated URL repoSource contains characters that are not supported on Windows. " +
+      "Remove %, double quotes, and newlines from the URL before using Git authentication."
+    );
+  }
+}
+
+export async function createAskpassScript(): Promise<{ scriptPath: string; cleanup: () => Promise<void> }> {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "agentarena-askpass-"));
   const isWindows = process.platform === "win32";
   const askpassMjs = path.join(tmpDir, "askpass.mjs");
@@ -19,7 +29,11 @@ async function createAskpassScript(): Promise<{ scriptPath: string; cleanup: () 
   let scriptPath: string;
   if (isWindows) {
     const cmdPath = path.join(tmpDir, "askpass.cmd");
-    await fs.writeFile(cmdPath, `@node "${askpassMjs}" %*\r\n`);
+    await fs.writeFile(
+      cmdPath,
+      `@echo off\r\nsetlocal DisableDelayedExpansion\r\n"${process.execPath}" "${askpassMjs}" "%~1"\r\n`,
+      "utf8"
+    );
     scriptPath = cmdPath;
   } else {
     await fs.writeFile(askpassMjs, `#!/usr/bin/env node\n${mjsContent}`, { mode: 0o700 });
@@ -88,6 +102,9 @@ export async function resolveAndValidateRepo(
         if (isInternalUrl(repoUrl)) {
           throw new Error(`Cannot clone from internal/private URL: "${repoUrl}". Only public internet URLs are allowed.`);
         }
+        if (await hasInternalDnsResolution(repoUrl)) {
+          throw new Error(`Cannot clone from URL that resolves to an internal/private address: "${repoUrl}". Only public internet URLs are allowed.`);
+        }
         const parentDir = path.dirname(repoPath);
         await fs.mkdir(parentDir, { recursive: true });
         const { execFile } = await import("node:child_process");
@@ -112,6 +129,7 @@ export async function resolveAndValidateRepo(
         };
 
         if (hasAuth) {
+          assertWindowsGitAskpassSafeUrl(repoUrl);
           askpass = await createAskpassScript();
           cloneEnv.GIT_ASKPASS = askpass.scriptPath;
           if (gitAuthToken) {

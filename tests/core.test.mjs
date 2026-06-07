@@ -5,6 +5,7 @@ import {
   createAgentSelection,
   diffSnapshots,
   formatDuration,
+  hasInternalDnsResolution,
   isInternalUrl,
   isPathInsideWorkspace,
   isWindowsLikePath,
@@ -214,6 +215,10 @@ test("resolveRepoSource rejects invalid builtin names and unsupported schemes", 
 
 test("isInternalUrl blocks localhost", () => {
   assert.equal(isInternalUrl("http://localhost:3000/api"), true);
+});
+
+test("hasInternalDnsResolution detects localhost DNS resolution", async () => {
+  assert.equal(await hasInternalDnsResolution("http://localhost:3000/api"), true);
 });
 
 test("isInternalUrl blocks 127.0.0.1", () => {
