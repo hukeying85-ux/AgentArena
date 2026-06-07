@@ -95,6 +95,68 @@ test("demo adapter execution returns normalized benchmark output", async () => {
   await rm(tempDir, { recursive: true, force: true });
 });
 
+// A3: Claude Code & Cursor (ClaudeLikeAdapter.executeClaudeLike) now collect the
+// changed-files hint via getChangedFilesFromGit instead of hardcoding []. The
+// full execute() path needs a real `claude` binary, so we test the git
+// integration the fix relies on directly (no CLI required).
+import { execFile as execFileCb } from "node:child_process";
+import { promisify } from "node:util";
+const execFileAsyncForTest = promisify(execFileCb);
+
+async function initGitRepo(dir) {
+  await execFileAsyncForTest("git", ["init", "-q"], { cwd: dir });
+  await execFileAsyncForTest("git", ["config", "user.email", "t@example.com"], { cwd: dir });
+  await execFileAsyncForTest("git", ["config", "user.name", "Test"], { cwd: dir });
+  await execFileAsyncForTest("git", ["commit", "--allow-empty", "-q", "-m", "init"], { cwd: dir });
+}
+
+test("getChangedFilesFromGit reports modified tracked files with reliable=true", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "agentarena-gitdiff-"));
+  try {
+    await initGitRepo(dir);
+    // Commit a tracked file, then modify it so `git diff HEAD` reports it.
+    await writeFile(path.join(dir, "changed.txt"), "original\n");
+    await execFileAsyncForTest("git", ["add", "changed.txt"], { cwd: dir });
+    await execFileAsyncForTest("git", ["commit", "-q", "-m", "add file"], { cwd: dir });
+    await writeFile(path.join(dir, "changed.txt"), "modified content\n");
+
+    const result = await __testUtils.getChangedFilesFromGit(dir);
+
+    assert.equal(result.reliable, true);
+    assert.ok(result.files.includes("changed.txt"), `expected changed.txt in ${JSON.stringify(result.files)}`);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("getChangedFilesFromGit returns empty reliable result for a clean repo", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "agentarena-gitclean-"));
+  try {
+    await initGitRepo(dir);
+
+    const result = await __testUtils.getChangedFilesFromGit(dir);
+
+    assert.equal(result.reliable, true);
+    assert.deepEqual(result.files, []);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("getChangedFilesFromGit never invents changed files for a non-git directory", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "agentarena-nogit-"));
+  try {
+    const result = await __testUtils.getChangedFilesFromGit(dir);
+
+    // A non-git directory must never yield phantom changed files. (The helper's
+    // `reliable` flag for this case is git-version/platform dependent, so we
+    // only assert the safety-critical property here.)
+    assert.deepEqual(result.files, []);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("parseCodexEvents extracts file changes, tokens, and thread ids", () => {
   const stdout = [
     JSON.stringify({ type: "thread.started", thread_id: "thread-123" }),

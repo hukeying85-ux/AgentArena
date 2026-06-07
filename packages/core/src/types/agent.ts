@@ -94,6 +94,13 @@ export interface AdapterExecutionResult {
   costKnown: boolean;
   changedFilesHint: string[];
   resolvedRuntime?: AgentResolvedRuntime;
+  /**
+   * False when the reported tokenUsage cannot be trusted (e.g. a fallback
+   * transport was used, the authoritative result event was missing, or the
+   * count looked suspicious). Absent/true means the count is authoritative.
+   * Consumers must not derive a token-efficiency score from unreliable counts.
+   */
+  tokenUsageReliable?: boolean;
   tokenUsageBreakdown?: {
     inputTokens: number;
     outputTokens: number;

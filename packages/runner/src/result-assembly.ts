@@ -92,7 +92,11 @@ export function buildFinalResult(
   const tokenUsage = adapterResult.tokenUsage;
   const tokenBudget = task.metadata?.tokenBudget;
   const tokenUsageBreakdown = adapterResult.tokenUsageBreakdown;
+  // Don't derive an efficiency score from unreliable/fallback token data —
+  // leaving it undefined excludes it from scoring (the correct behavior).
+  const tokenUsageReliable = adapterResult.tokenUsageReliable;
   const tokenEfficiencyScore =
+    tokenUsageReliable !== false &&
     tokenUsage && tokenBudget && Number.isFinite(tokenBudget) && Number.isFinite(tokenUsage) && tokenBudget > 0
       ? Math.min(1, tokenBudget / tokenUsage)
       : undefined;
@@ -103,8 +107,8 @@ export function buildFinalResult(
   const patchValidationResult = patchValidationJudgeResult
     ? {
         resolved: patchValidationJudgeResult.success,
-        failToPassResults: [],
-        passToPassResults: []
+        failToPassResults: patchValidationJudgeResult.failToPassResults ?? [],
+        passToPassResults: patchValidationJudgeResult.passToPassResults ?? []
       }
     : undefined;
 
@@ -167,6 +171,7 @@ export function buildFinalResult(
     tokenUsage: adapterResult.tokenUsage,
     estimatedCostUsd: adapterResult.estimatedCostUsd,
     costKnown: adapterResult.costKnown,
+    tokenUsageReliable: adapterResult.tokenUsageReliable,
     changedFiles,
     changedFilesHint: collectedFiles,
     setupResults,

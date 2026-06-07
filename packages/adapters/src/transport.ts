@@ -46,6 +46,10 @@ export interface TransportResult {
     toolCalls?: Array<{ name: string; input?: unknown }>;
     sessionId?: string;
     error?: string;
+    /** True when a "result" event was seen but produced zero tokens (count may be wrong). */
+    tokenCountSuspicious?: boolean;
+    /** True when the authoritative cumulative "result" event was seen. */
+    tokenUsageFromResultEvent?: boolean;
   };
   /** Which transport produced this result */
   transportId: string;
@@ -112,6 +116,8 @@ export class StreamJsonTransport implements Transport {
         toolCalls: parsed.toolCalls,
         sessionId: parsed.sessionId,
         error: parsed.error,
+        tokenCountSuspicious: parsed.tokenCountSuspicious,
+        tokenUsageFromResultEvent: parsed.tokenUsageFromResultEvent,
       },
       transportId: this.id,
       shouldFallback,

@@ -71,6 +71,8 @@ export interface JudgeResult {
   label: string;
   type: TaskJudge["type"];
   critical?: boolean;
+  /** Relative weight in weighted pass-ratio scoring; defaults to 1. Propagated from the judge config. */
+  weight?: number;
   command?: string;
   parser?: string;
   target?: string;
@@ -87,6 +89,15 @@ export interface JudgeResult {
   totalCount?: number;
   warningCount?: number;
   errorCount?: number;
+  /**
+   * Per-test outcomes for the patch-validation judge's fail-to-pass set.
+   * Populated only by patch-validation; absent for all other judge types.
+   * Status vocabulary: "pass" (test passed), "fail" (test ran but failed),
+   * "error" (required test was not found in the report).
+   */
+  failToPassResults?: Array<{ test: string; status: "pass" | "fail" | "error" }>;
+  /** Per-test outcomes for the patch-validation judge's pass-to-pass set. */
+  passToPassResults?: Array<{ test: string; status: "pass" | "fail" | "error" }>;
 }
 
 export interface DiffPrecisionSummary {
@@ -161,6 +172,13 @@ export interface AgentRunResult {
   tokenUsage: number;
   estimatedCostUsd: number;
   costKnown: boolean;
+  /**
+   * False when the reported tokenUsage is from an unreliable source (fallback
+   * transport / missing authoritative total / suspicious count). Absent means
+   * legacy/unknown — treat as reliable. Drives whether tokenEfficiencyScore is
+   * computed.
+   */
+  tokenUsageReliable?: boolean;
   changedFiles: string[];
   changedFilesHint: string[];
   setupResults: CommandStepResult[];

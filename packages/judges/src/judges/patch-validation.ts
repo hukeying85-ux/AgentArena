@@ -11,6 +11,23 @@ import {
   resolveJudgeWorkingDirectory,
 } from "../shared.js";
 
+type RequiredTestResult = ReturnType<typeof checkRequiredTests>[number];
+type ReportedTestStatus = "pass" | "fail" | "error";
+
+/**
+ * Map a `checkRequiredTests` result to the structured per-test outcome carried
+ * on JudgeResult. "pass" stays "pass"; a missing required test ("not_found")
+ * becomes "error"; every other status ("fail", "skip", "pending") is "fail".
+ */
+function toReportedResults(
+  results: RequiredTestResult[]
+): Array<{ test: string; status: ReportedTestStatus }> {
+  return results.map((r) => ({
+    test: r.name,
+    status: r.status === "pass" ? "pass" : r.status === "not_found" ? "error" : "fail"
+  }));
+}
+
 export async function runPatchValidationJudge(
   judge: PatchValidationJudge,
   workspacePath: string,
@@ -35,14 +52,16 @@ export async function runPatchValidationJudge(
     let success: boolean;
     let stdoutMessage: string;
     let stderrMessage: string;
+    let failToPassResults: RequiredTestResult[] = [];
+    let passToPassResults: RequiredTestResult[] = [];
 
     if (hasSpecificTests) {
       const testDetails = extractTestDetails(payload, summary.parser);
 
-      const failToPassResults = checkRequiredTests(testDetails, failToPassRequired);
+      failToPassResults = checkRequiredTests(testDetails, failToPassRequired);
       const allFailToPassPassed = failToPassResults.every(r => r.status === "pass");
 
-      const passToPassResults = checkRequiredTests(testDetails, passToPassRequired);
+      passToPassResults = checkRequiredTests(testDetails, passToPassRequired);
       const allPassToPassPassed = passToPassResults.every(r => r.status === "pass");
 
       const noUnexpectedFailures = summary.failedCount === 0 ||
@@ -87,6 +106,12 @@ export async function runPatchValidationJudge(
       failedCount: summary.failedCount,
       skippedCount: summary.skippedCount,
       totalCount: summary.totalCount,
+      ...(hasSpecificTests
+        ? {
+            failToPassResults: toReportedResults(failToPassResults),
+            passToPassResults: toReportedResults(passToPassResults)
+          }
+        : {}),
       critical: judge.critical ?? false
     };
   } catch (error) {

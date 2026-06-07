@@ -107,7 +107,9 @@ export async function getChangedFilesFromGit(workspacePath: string): Promise<Cha
   } catch (error: unknown) {
     const stderr = (error instanceof Error && "stderr" in error) ? String((error as NodeJS.ErrnoException & { stderr?: string }).stderr ?? "") : "";
     const rawCode = (error instanceof Error && "code" in error) ? (error as Record<string, unknown>).code : undefined;
-    if (stderr.includes("not a git repository") || rawCode === 128 || rawCode === "128") {
+    // Match case-insensitively: some Windows git builds emit "Not a git repository"
+    // (capital N) and/or exit code 129, not just lowercase + 128.
+    if (stderr.toLowerCase().includes("not a git repository") || rawCode === 128 || rawCode === "128" || rawCode === 129 || rawCode === "129") {
       return { files: [], reliable: true };
     }
     const message = error instanceof Error ? error.message : String(error);

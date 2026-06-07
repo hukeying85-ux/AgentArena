@@ -37,27 +37,43 @@ export function testPassRatio(result: BenchmarkRun["results"][number]): number {
 }
 
 /**
- * Critical judge pass ratio.
+ * Weighted pass ratio for a set of judges: Σ(weightᵢ·passedᵢ) / Σ(weightᵢ),
+ * using `weight ?? 1`. Returns 1 for an empty set (vacuously true). With all
+ * weights defaulting to 1, this equals the count-based ratio (backward-compat).
+ */
+function weightedJudgePassRatio(judges: BenchmarkRun["results"][number]["judgeResults"]): number {
+  if (judges.length === 0) {
+    return 1;
+  }
+  let weightedPassed = 0;
+  let totalWeight = 0;
+  for (const judge of judges) {
+    const weight = judge.weight ?? 1;
+    totalWeight += weight;
+    if (judge.success) {
+      weightedPassed += weight;
+    }
+  }
+  // All-zero weights would make the ratio undefined; treat as vacuously true.
+  return totalWeight > 0 ? weightedPassed / totalWeight : 1;
+}
+
+/**
+ * Critical judge pass ratio (weight-based).
  * Returns 1 when there are no critical judges (vacuously true: all 0 of 0 passed).
  */
 export function criticalJudgePassRatio(result: BenchmarkRun["results"][number]): number {
   const criticalJudges = result.judgeResults.filter((j) => j.critical === true);
-  if (criticalJudges.length === 0) {
-    return 1;
-  }
-  return criticalJudges.filter((j) => j.success).length / criticalJudges.length;
+  return weightedJudgePassRatio(criticalJudges);
 }
 
 /**
- * Non-critical judge pass ratio.
+ * Non-critical judge pass ratio (weight-based).
  * Returns 1 when there are no non-critical judges (vacuously true).
  */
 export function nonCriticalJudgePassRatio(result: BenchmarkRun["results"][number]): number {
   const nonCriticalJudges = result.judgeResults.filter((j) => j.critical !== true);
-  if (nonCriticalJudges.length === 0) {
-    return 1;
-  }
-  return nonCriticalJudges.filter((j) => j.success).length / nonCriticalJudges.length;
+  return weightedJudgePassRatio(nonCriticalJudges);
 }
 
 /** Whether any critical judge failed. */

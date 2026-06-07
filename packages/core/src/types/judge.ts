@@ -11,6 +11,8 @@ export interface CommandExecutionSpec {
 export interface CommandJudge extends CommandExecutionSpec {
   type: "command";
   critical?: boolean;
+  /** Relative weight in weighted pass-ratio scoring; defaults to 1 (equal). */
+  weight?: number;
 }
 
 export interface TestResultJudge extends CommandExecutionSpec {
@@ -19,6 +21,8 @@ export interface TestResultJudge extends CommandExecutionSpec {
   reportFile?: string;
   passOnNoTests?: boolean;
   critical?: boolean;
+  /** Relative weight in weighted pass-ratio scoring; defaults to 1 (equal). */
+  weight?: number;
 }
 
 export interface LintCheckJudge extends CommandExecutionSpec {
@@ -27,6 +31,8 @@ export interface LintCheckJudge extends CommandExecutionSpec {
   reportFile?: string;
   maxWarnings?: number;
   critical?: boolean;
+  /** Relative weight in weighted pass-ratio scoring; defaults to 1 (equal). */
+  weight?: number;
 }
 
 export interface FileExistsJudge {
@@ -35,6 +41,8 @@ export interface FileExistsJudge {
   type: "file-exists";
   path: string;
   critical?: boolean;
+  /** Relative weight in weighted pass-ratio scoring; defaults to 1 (equal). */
+  weight?: number;
 }
 
 export interface FileContainsJudge {
@@ -46,6 +54,8 @@ export interface FileContainsJudge {
   regex?: boolean;
   flags?: string;
   critical?: boolean;
+  /** Relative weight in weighted pass-ratio scoring; defaults to 1 (equal). */
+  weight?: number;
 }
 
 export interface JsonValueJudge {
@@ -56,6 +66,8 @@ export interface JsonValueJudge {
   pointer: string;
   expected: unknown;
   critical?: boolean;
+  /** Relative weight in weighted pass-ratio scoring; defaults to 1 (equal). */
+  weight?: number;
 }
 
 export interface GlobJudge {
@@ -66,6 +78,8 @@ export interface GlobJudge {
   minMatches?: number;
   maxMatches?: number;
   critical?: boolean;
+  /** Relative weight in weighted pass-ratio scoring; defaults to 1 (equal). */
+  weight?: number;
 }
 
 export interface FileCountJudge {
@@ -77,6 +91,8 @@ export interface FileCountJudge {
   min?: number;
   max?: number;
   critical?: boolean;
+  /** Relative weight in weighted pass-ratio scoring; defaults to 1 (equal). */
+  weight?: number;
 }
 
 export interface SnapshotJudge {
@@ -86,6 +102,8 @@ export interface SnapshotJudge {
   path: string;
   snapshotPath: string;
   critical?: boolean;
+  /** Relative weight in weighted pass-ratio scoring; defaults to 1 (equal). */
+  weight?: number;
 }
 
 export interface JsonSchemaJudge {
@@ -96,6 +114,8 @@ export interface JsonSchemaJudge {
   schema?: Record<string, unknown>;
   schemaPath?: string;
   critical?: boolean;
+  /** Relative weight in weighted pass-ratio scoring; defaults to 1 (equal). */
+  weight?: number;
 }
 
 export interface PatchValidationJudge extends CommandExecutionSpec {
@@ -104,6 +124,8 @@ export interface PatchValidationJudge extends CommandExecutionSpec {
   failToPassTests?: string[];
   passToPassTests?: string[];
   critical?: boolean;
+  /** Relative weight in weighted pass-ratio scoring; defaults to 1 (equal). */
+  weight?: number;
 }
 
 export interface TokenEfficiencyJudge {
@@ -112,6 +134,8 @@ export interface TokenEfficiencyJudge {
   type: "token-efficiency";
   tokenBudget?: number;
   critical?: boolean;
+  /** Relative weight in weighted pass-ratio scoring; defaults to 1 (equal). */
+  weight?: number;
 }
 
 export interface DirectoryExistsJudge {
@@ -120,6 +144,8 @@ export interface DirectoryExistsJudge {
   type: "directory-exists";
   path: string;
   critical?: boolean;
+  /** Relative weight in weighted pass-ratio scoring; defaults to 1 (equal). */
+  weight?: number;
 }
 
 export interface RegexMatchJudge {
@@ -133,6 +159,8 @@ export interface RegexMatchJudge {
   minMatches?: number;
   maxMatches?: number;
   critical?: boolean;
+  /** Relative weight in weighted pass-ratio scoring; defaults to 1 (equal). */
+  weight?: number;
 }
 
 export interface CompilationJudge {
@@ -147,6 +175,8 @@ export interface CompilationJudge {
   tool?: "auto" | "npm" | "pnpm" | "yarn" | "cargo" | "go" | "make" | "gradle" | "maven";
   buildArgs?: string[];
   critical?: boolean;
+  /** Relative weight in weighted pass-ratio scoring; defaults to 1 (equal). */
+  weight?: number;
 }
 
 export type TaskJudge =

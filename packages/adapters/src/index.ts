@@ -25,6 +25,7 @@ export { createClaudeTransportChain, RawTransport, StreamJsonTransport, TextTran
 import { parseClaudeEvents, parseCodexEvents, parseGeminiEvents } from "./event-parsers.js";
 import { agentTimeoutMs, formatTimeoutMessage, runProcess, terminateProcessTree } from "./process-utils.js";
 import { readCodexConfigDefaults, resolveClaudeRuntime, resolveCodexRuntime } from "./runtime-resolution.js";
+import { getChangedFilesFromGit } from "./adapter-helpers.js";
 
 export const __testUtils = {
   parseCodexEvents,
@@ -36,5 +37,6 @@ export const __testUtils = {
   runProcessForTest: runProcess,
   terminateProcessTree,
   agentTimeoutMs,
-  formatTimeoutMessage
+  formatTimeoutMessage,
+  getChangedFilesFromGit
 };

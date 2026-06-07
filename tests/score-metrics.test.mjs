@@ -93,6 +93,26 @@ test("criticalJudgePassRatio computes ratio for critical judges", () => {
   assert.equal(criticalJudgePassRatio(result), 0.5);
 });
 
+test("criticalJudgePassRatio applies per-judge weight (passing weight 3, failing weight 1 → 0.75)", () => {
+  const result = makeResult({
+    judgeResults: [
+      { type: "test-result", success: true, critical: true, weight: 3 },
+      { type: "lint-check", success: false, critical: true, weight: 1 },
+    ],
+  });
+  assert.equal(criticalJudgePassRatio(result), 0.75);
+});
+
+test("criticalJudgePassRatio applies per-judge weight reversed (passing weight 1, failing weight 3 → 0.25)", () => {
+  const result = makeResult({
+    judgeResults: [
+      { type: "test-result", success: true, critical: true, weight: 1 },
+      { type: "lint-check", success: false, critical: true, weight: 3 },
+    ],
+  });
+  assert.equal(criticalJudgePassRatio(result), 0.25);
+});
+
 // --- nonCriticalJudgePassRatio ---
 
 test("nonCriticalJudgePassRatio returns 1 when no non-critical judges", () => {
@@ -100,6 +120,36 @@ test("nonCriticalJudgePassRatio returns 1 when no non-critical judges", () => {
     judgeResults: [{ type: "test-result", success: true, critical: true }],
   });
   assert.equal(nonCriticalJudgePassRatio(result), 1);
+});
+
+test("nonCriticalJudgePassRatio with equal (default) weights, one pass one fail → 0.5", () => {
+  const result = makeResult({
+    judgeResults: [
+      { type: "file-exists", success: true, critical: false },
+      { type: "file-contains", success: false, critical: false },
+    ],
+  });
+  assert.equal(nonCriticalJudgePassRatio(result), 0.5);
+});
+
+test("nonCriticalJudgePassRatio applies per-judge weight (passing weight 3, failing weight 1 → 0.75)", () => {
+  const result = makeResult({
+    judgeResults: [
+      { type: "file-exists", success: true, critical: false, weight: 3 },
+      { type: "file-contains", success: false, critical: false, weight: 1 },
+    ],
+  });
+  assert.equal(nonCriticalJudgePassRatio(result), 0.75);
+});
+
+test("nonCriticalJudgePassRatio applies per-judge weight reversed (passing weight 1, failing weight 3 → 0.25)", () => {
+  const result = makeResult({
+    judgeResults: [
+      { type: "file-exists", success: true, critical: false, weight: 1 },
+      { type: "file-contains", success: false, critical: false, weight: 3 },
+    ],
+  });
+  assert.equal(nonCriticalJudgePassRatio(result), 0.25);
 });
 
 // --- hasCriticalJudgeFailure ---
@@ -250,4 +300,36 @@ test("failToPassScore computes ratio for patch-validation judges", () => {
 
 test("passToPassScore returns 0 when no data", () => {
   assert.equal(passToPassScore(makeResult()), 0);
+});
+
+test("passToPassScore returns ratio from populated passToPassResults (1 of 2 → 0.5)", () => {
+  const result = makeResult({
+    sweBench: {
+      patchValidationResult: {
+        resolved: false,
+        failToPassResults: [],
+        passToPassResults: [
+          { test: "a", status: "pass" },
+          { test: "b", status: "fail" },
+        ],
+      },
+    },
+  });
+  assert.equal(passToPassScore(result), 0.5);
+});
+
+test("passToPassScore returns 1 when all passToPassResults pass", () => {
+  const result = makeResult({
+    sweBench: {
+      patchValidationResult: {
+        resolved: true,
+        failToPassResults: [],
+        passToPassResults: [
+          { test: "a", status: "pass" },
+          { test: "b", status: "pass" },
+        ],
+      },
+    },
+  });
+  assert.equal(passToPassScore(result), 1);
 });

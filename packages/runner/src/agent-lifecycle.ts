@@ -426,6 +426,29 @@ export async function runAgent(
 
   const { setupResults, earlyResult: earlyResult2 } = await runSetupCommands(preflight, context);
   if (earlyResult2) {
+    // Contract (see runAgent docs): once the workspace exists, teardown ALWAYS
+    // runs on cancellation. A cancel landing in the setup phase still has a
+    // prepared workspace, so run cleanup and attach the results before returning.
+    // runTeardownCommands ignores the aborted cancellation signal in this case.
+    if (earlyResult2.status === "cancelled" && (task.teardownCommands?.length ?? 0) > 0) {
+      const setupCancelTeardownController = new AbortController();
+      const setupCancelTeardownHandle = setTimeout(
+        () => setupCancelTeardownController.abort(),
+        TEARDOWN_TIMEOUT_MS
+      );
+      try {
+        const { teardownResults: cancelTeardownResults } = await runTeardownCommands(
+          preflight,
+          undefined,
+          undefined,
+          context,
+          setupCancelTeardownController.signal
+        );
+        return { ...earlyResult2, teardownResults: cancelTeardownResults };
+      } finally {
+        clearTimeout(setupCancelTeardownHandle);
+      }
+    }
     return earlyResult2;
   }
 

@@ -459,6 +459,74 @@ test("patch-validation judge passes when test suite command succeeds", async () 
   await fs.rm(workspace, { recursive: true, force: true });
 });
 
+// A Jest-shaped report with per-assertion results. `extractTestDetails` reads
+// testResults[].assertionResults[].{title,fullName,status}; the aggregate
+// counters satisfy parseTestSummary. Statuses use the normalized "pass"/"fail"
+// vocabulary the patch-validation judge compares against.
+function jestReportJson({ assertions, numPassed, numFailed }) {
+  const payload = {
+    numTotalTests: assertions.length,
+    numPassedTests: numPassed,
+    numFailedTests: numFailed,
+    numPendingTests: 0,
+    success: numFailed === 0,
+    testResults: [
+      {
+        assertionResults: assertions.map((a) => ({
+          title: a.name,
+          fullName: a.name,
+          status: a.status
+        }))
+      }
+    ]
+  };
+  return JSON.stringify(payload);
+}
+
+test("patch-validation judge populates failToPass/passToPass results with statuses", async () => {
+  const workspace = await setupWorkspace();
+
+  // f2p_a passes, f2p_b fails; p2p_a passes; p2p_missing is absent (→ error).
+  const report = jestReportJson({
+    assertions: [
+      { name: "f2p_a", status: "pass" },
+      { name: "f2p_b", status: "fail" },
+      { name: "p2p_a", status: "pass" }
+    ],
+    numPassed: 2,
+    numFailed: 1
+  });
+
+  const result = await runJudge(
+    {
+      id: "pv-results",
+      label: "Patch validation results",
+      type: "patch-validation",
+      testSuite: `node -e "console.log(JSON.stringify(${JSON.stringify(report)}))"`,
+      failToPassTests: ["f2p_a", "f2p_b"],
+      passToPassTests: ["p2p_a", "p2p_missing"]
+    },
+    workspace,
+    ALLOWED_NAMES
+  );
+
+  assert.equal(result.type, "patch-validation");
+  assert.ok(Array.isArray(result.failToPassResults), "failToPassResults should be an array");
+  assert.ok(Array.isArray(result.passToPassResults), "passToPassResults should be an array");
+
+  assert.deepEqual(result.failToPassResults, [
+    { test: "f2p_a", status: "pass" },
+    { test: "f2p_b", status: "fail" }
+  ]);
+  // Missing test maps "not_found" → "error".
+  assert.deepEqual(result.passToPassResults, [
+    { test: "p2p_a", status: "pass" },
+    { test: "p2p_missing", status: "error" }
+  ]);
+
+  await fs.rm(workspace, { recursive: true, force: true });
+});
+
 // ===== variance-analysis tests =====
 
 import { computeVarianceAnalysis, formatVarianceReport } from "../packages/report/dist/index.js";

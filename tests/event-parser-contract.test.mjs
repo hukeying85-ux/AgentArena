@@ -107,6 +107,7 @@ describe("event-parser contracts", () => {
       // result event: 2000 + 600 + 100 + 300 = 3000
       assert.equal(result.tokenUsage, 3000);
       assert.equal(result.tokenCountSuspicious, false, "Normal output should not be flagged");
+      assert.equal(result.tokenUsageFromResultEvent, true, "Authoritative result event was present");
     });
 
     it("extracts cost from result event", () => {
@@ -121,6 +122,8 @@ describe("event-parser contracts", () => {
       const partial = '{"type":"assistant","message":{"content":[{"type":"text","text":"hello"}],"usage":{"input_tokens":100,"output_tokens":50,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}\n';
       const result = parseStreamJsonEvents(partial, "test");
       assert.equal(result.tokenUsage, 150);
+      // No authoritative result event → the per-message sum is not trustworthy.
+      assert.equal(result.tokenUsageFromResultEvent, false, "No result event seen");
     });
 
     it("warns when result event produces zero tokens", () => {

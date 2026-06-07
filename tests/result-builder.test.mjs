@@ -1,5 +1,6 @@
 import assert from "node:assert";
 import { describe, it } from "node:test";
+import { buildFinalResult } from "../packages/runner/dist/result-assembly.js";
 import { buildChangedFiles, createBaseResult, createCancellationSummary, createCancelledRunResult, createSkippedRunResult, mergeResolvedRuntime, summarizeCommandStepFailure } from "../packages/runner/dist/result-builder.js";
 
 const mockPreflight = {
@@ -142,5 +143,71 @@ describe("result-builder", () => {
       assert.ok(result.includes("preflight"));
       assert.ok(result.includes("cancelled"));
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A4: tokenUsageReliable guards tokenEfficiencyScore in buildFinalResult
+// ---------------------------------------------------------------------------
+
+describe("buildFinalResult tokenUsageReliable handling", () => {
+  function makeContext(tokenBudget) {
+    return {
+      adapter: { title: "Test Adapter", kind: "external" },
+      workspacePath: "/workspace",
+      tracePath: "/trace",
+      task: { id: "t", metadata: tokenBudget === undefined ? {} : { tokenBudget } }
+    };
+  }
+
+  function makeAdapterResult(overrides = {}) {
+    return {
+      status: "success",
+      summary: "done",
+      tokenUsage: 1000,
+      estimatedCostUsd: 0,
+      costKnown: false,
+      changedFilesHint: [],
+      ...overrides
+    };
+  }
+
+  function build(adapterResult, tokenBudget) {
+    return buildFinalResult(
+      mockPreflight,
+      makeContext(tokenBudget),
+      adapterResult,
+      undefined, // adapterError
+      Date.now() - 1000, // startedAt
+      [], // setupResults
+      [], // judgeResults
+      [], // teardownResults
+      { added: [], changed: [], removed: [], skippedLargeFiles: [] }, // diff
+      [], // changedFiles
+      [], // collectedFiles
+      undefined, // diffPrecision
+      false, // cancelled
+      true // success
+    );
+  }
+
+  it("does NOT compute tokenEfficiencyScore when tokenUsageReliable is false", () => {
+    const result = build(makeAdapterResult({ tokenUsageReliable: false }), 2000);
+    assert.equal(result.tokenUsageReliable, false);
+    assert.equal(result.tokenEfficiencyScore, undefined);
+  });
+
+  it("computes tokenEfficiencyScore when tokenUsageReliable is true", () => {
+    const result = build(makeAdapterResult({ tokenUsageReliable: true }), 2000);
+    assert.equal(result.tokenUsageReliable, true);
+    // budget 2000 / usage 1000 = 2, clamped to 1
+    assert.equal(result.tokenEfficiencyScore, 1);
+  });
+
+  it("computes tokenEfficiencyScore when reliability is unspecified (legacy → treated reliable)", () => {
+    const result = build(makeAdapterResult(), 4000);
+    assert.equal(result.tokenUsageReliable, undefined);
+    // budget 4000 / usage 1000 = 4, clamped to 1
+    assert.equal(result.tokenEfficiencyScore, 1);
   });
 });

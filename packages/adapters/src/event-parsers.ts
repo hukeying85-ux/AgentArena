@@ -288,6 +288,13 @@ export function parseStreamJsonEvents(
    * the result as "data may be inaccurate" in the UI/report.
    */
   tokenCountSuspicious: boolean;
+  /**
+   * True when the authoritative cumulative "result" event was seen. That event
+   * carries the final total; without it, tokenUsage is a per-message sum that
+   * can double-count cache-read tokens across turns. Callers should treat a
+   * false value as "token total not authoritative".
+   */
+  tokenUsageFromResultEvent: boolean;
 } {
   let tokenUsage = 0;
   let estimatedCostUsd = 0;
@@ -399,7 +406,8 @@ export function parseStreamJsonEvents(
     sessionId,
     error,
     toolCalls,
-    tokenCountSuspicious
+    tokenCountSuspicious,
+    tokenUsageFromResultEvent: resultEventSeen
   };
 }
 

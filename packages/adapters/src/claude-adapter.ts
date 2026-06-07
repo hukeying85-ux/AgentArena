@@ -11,7 +11,7 @@ import type {
 import { type ToolCallRecord, writeExecutionEvidence } from "@agentarena/core";
 import { CLAUDE_CODE_CAPABILITY, type InvocationSpec } from "./adapter-capabilities.js";
 import { formatAdapterError } from "./adapter-diagnostics.js";
-import { buildAgentPrompt, createPreflightResult, savePromptArtifact } from "./adapter-helpers.js";
+import { buildAgentPrompt, createPreflightResult, getChangedFilesFromGit, savePromptArtifact } from "./adapter-helpers.js";
 import { getClaudeProviderProfileSecret, writeClaudeWorkspaceSettings } from "./claude-provider-profiles.js";
 import { probeClaudeLikeAuth, probeClaudeLikeAuthFast, probeHelp, probeInvocationVersion } from "./invocation-probes.js";
 import { preflightTimeoutMs, transportTimeoutMs } from "./process-utils.js";
@@ -228,6 +228,10 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
       summary = `${this.title} failed with exit code ${execution.exitCode}.`;
     }
 
+    // Collect the changed-files hint from git so the runner can compute diff
+    // precision. Mirrors base-cli-adapter; reliability is surfaced in the trace.
+    const changed = await getChangedFilesFromGit(context.workspacePath);
+
     await context.trace({
       type: eventType,
       message: execution.exitCode === 0 ? `${finishLabel} finished` : `${finishLabel} failed`,
@@ -246,7 +250,9 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
         stdout: execution.stdout,
         workspacePath: context.workspacePath,
         transportUsed: transportResult.transportId,
-        usedFallback
+        usedFallback,
+        changedFilesHint: changed.files,
+        changedFilesHintReliable: changed.reliable
       }
     });
 
@@ -300,13 +306,24 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
       // Best effort — don't fail the run if evidence writing fails
     }
 
+    // Token usage is only trustworthy when: no transport fallback was used
+    // (fallback transports may not surface token data), the count wasn't flagged
+    // suspicious (result event seen but zero tokens), AND an authoritative
+    // cumulative total was present (the "result" event — without it the
+    // per-message sum can double-count cache-read tokens across turns).
+    const tokenUsageReliable =
+      !usedFallback &&
+      !(parsed?.tokenCountSuspicious ?? false) &&
+      (parsed ? parsed.tokenUsageFromResultEvent !== false : true);
+
     return {
       status,
       summary,
       tokenUsage: parsed?.tokenUsage ?? 0,
       estimatedCostUsd: parsed?.estimatedCostUsd ?? 0,
       costKnown: parsed?.costKnown ?? false,
-      changedFilesHint: [],
+      tokenUsageReliable,
+      changedFilesHint: changed.files,
       resolvedRuntime
     };
   }

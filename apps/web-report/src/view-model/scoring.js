@@ -270,6 +270,29 @@ const FAILED_SCORE_BAND = { min: 10, max: 40 };
 const CRITICAL_FAIL_SCORE_BAND = { min: 50, max: 70 };
 
 /**
+ * Weighted pass ratio for a set of judges: Σ(weightᵢ·passedᵢ) / Σ(weightᵢ),
+ * using `weight ?? 1`. Returns 1 for an empty set (vacuously true).
+ * Mirrors `weightedJudgePassRatio` in packages/report/src/score-metrics.ts.
+ * @param {Array<{success?: boolean, weight?: number}>} judges
+ * @returns {number}
+ */
+function weightedJudgePassRatio(judges) {
+  if (judges.length === 0) {
+    return 1;
+  }
+  let weightedPassed = 0;
+  let totalWeight = 0;
+  for (const judge of judges) {
+    const weight = judge.weight ?? 1;
+    totalWeight += weight;
+    if (judge.success) {
+      weightedPassed += weight;
+    }
+  }
+  return totalWeight > 0 ? weightedPassed / totalWeight : 1;
+}
+
+/**
  * Compute all individual score components for a result within a run.
  * Mirrors `computeScoreComponents()` from packages/report/src/scoring.ts.
  * @param {Object} result
@@ -289,13 +312,13 @@ export function computeScoreComponents(result, run) {
     testsScore = 1;
   }
 
-  // criticalJudgePassRatio
+  // criticalJudgePassRatio (weight-based — mirrors backend score-metrics.ts)
   const criticalJudges = result.judgeResults.filter(j => j.critical === true);
-  const criticalJudgesScore = criticalJudges.length === 0 ? 1 : criticalJudges.filter(j => j.success).length / criticalJudges.length;
+  const criticalJudgesScore = weightedJudgePassRatio(criticalJudges);
 
-  // nonCriticalJudgePassRatio
+  // nonCriticalJudgePassRatio (weight-based — mirrors backend score-metrics.ts)
   const nonCriticalJudges = result.judgeResults.filter(j => j.critical !== true);
-  const nonCriticalJudgesScore = nonCriticalJudges.length === 0 ? 1 : nonCriticalJudges.filter(j => j.success).length / nonCriticalJudges.length;
+  const nonCriticalJudgesScore = weightedJudgePassRatio(nonCriticalJudges);
 
   // hasCriticalJudgeFailure
   const hasCriticalFailure = result.judgeResults.some(j => j.critical === true && !j.success);

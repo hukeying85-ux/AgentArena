@@ -163,7 +163,10 @@ export async function runJudge(
     metrics.judgeExecutionTotal.inc({ type: judge.type, status });
     metrics.judgeExecutionDurationSeconds.observe({ type: judge.type }, durationSeconds);
   }
-  return result ?? { judgeId: judge.id, type: judge.type, success: false, label: judge.label, exitCode: null, stdout: "", stderr: "Judge did not produce a result", durationMs: 0 };
+  const resolved = result ?? { judgeId: judge.id, type: judge.type, success: false, label: judge.label, exitCode: null, stdout: "", stderr: "Judge did not produce a result", durationMs: 0 };
+  // Attach the judge's weight centrally so individual runners don't each have to.
+  // Default 1 preserves legacy equal-weight scoring.
+  return { ...resolved, weight: judge.weight ?? 1 };
 }
 
 const COMMAND_BASED_TYPES = new Set(["command", "test-result", "lint-check", "compilation", "patch-validation"]);

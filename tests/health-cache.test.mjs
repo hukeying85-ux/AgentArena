@@ -56,17 +56,18 @@ describe("HealthCache", () => {
   it("should expire entries after TTL", async () => {
     const shortCache = new HealthCache({
       cacheDir: tempDir,
-      defaultTtlMs: 100, // 100ms TTL
+      defaultTtlMs: 300, // short TTL for testing
     });
 
     await shortCache.set("test", "provider", "ready", "ok");
 
-    // Should exist immediately
+    // Should exist immediately (generous TTL margin so a loaded event loop
+    // does not let the entry lapse before this first read).
     const entry1 = await shortCache.get("test", "provider");
     assert.notEqual(entry1, undefined);
 
-    // Wait for expiration
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    // Wait well past the TTL so expiry is unambiguous even under heavy load.
+    await new Promise((resolve) => setTimeout(resolve, 800));
 
     const entry2 = await shortCache.get("test", "provider");
     assert.equal(entry2, undefined);

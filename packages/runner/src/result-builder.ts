@@ -27,6 +27,7 @@ interface BaseResultOptions {
   tokenUsage?: number;
   estimatedCostUsd?: number;
   costKnown?: boolean;
+  tokenUsageReliable?: boolean;
   changedFiles?: string[];
   changedFilesHint?: string[];
   setupResults?: CommandStepResult[];
@@ -66,6 +67,7 @@ export function createBaseResult(options: BaseResultOptions): AgentRunResult {
     tokenUsage: options.tokenUsage ?? 0,
     estimatedCostUsd: options.estimatedCostUsd ?? 0,
     costKnown: options.costKnown ?? false,
+    tokenUsageReliable: options.tokenUsageReliable,
     changedFiles: options.changedFiles ?? [],
     changedFilesHint: options.changedFilesHint ?? [],
     setupResults: options.setupResults ?? [],
