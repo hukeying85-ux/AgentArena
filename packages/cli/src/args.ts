@@ -26,6 +26,7 @@ export interface ParsedArgs {
   agentTimeout?: number;
   teamSize?: number;
   dailyRuns?: number;
+  repeat?: number;
   maxConcurrency?: number;
   json: boolean;
   templateName?: string;
@@ -86,6 +87,7 @@ Run Command:
     --agent-timeout <ms>       Per-agent execution timeout in milliseconds
     --team-size <n>            Team size used for decision-report cost estimates (default: 10)
     --daily-runs <n>           Runs per day used for decision-report cost estimates (default: 5)
+    --repeat <n>               Run the same benchmark multiple times for variance/trend confidence
     --max-concurrency <n>      Maximum number of agents to run in parallel (default: min(4, cpuCount))
     --json                     Output results as JSON
     --verbose, -v              Show verbose error messages with stack traces
@@ -435,6 +437,15 @@ export function parseArgs(argv: string[]): ParsedArgs {
           throw new Error("--daily-runs requires a positive integer (benchmark runs per day).");
         }
         parsed.dailyRuns = dailyRunsValue;
+        break;
+      }
+      case "--repeat": {
+        const rawRepeat = args.shift();
+        const repeatValue = Number(rawRepeat);
+        if (!rawRepeat || !Number.isInteger(repeatValue) || repeatValue <= 0) {
+          throw new Error("--repeat requires a positive integer. Example: --repeat 5");
+        }
+        parsed.repeat = repeatValue;
         break;
       }
       case "--template":

@@ -21,6 +21,62 @@ import {
   resolveReportLocale,
 } from "./shared.js";
 
+const MAX_VARIANCE_BYTES = 50 * 1024 * 1024;
+const MAX_HISTORICAL_RUNS = 50;
+
+async function loadHistoricalRuns(
+  runsDir: string,
+  currentRunId: string,
+): Promise<BenchmarkRun[]> {
+  const dirents = await fs.readdir(runsDir, { withFileTypes: true });
+  const candidatePaths: string[] = [];
+
+  for (const dirent of dirents) {
+    if (dirent.isFile() && dirent.name.endsWith(".json")) {
+      candidatePaths.push(path.join(runsDir, dirent.name));
+    } else if (dirent.isDirectory()) {
+      candidatePaths.push(path.join(runsDir, dirent.name, "summary.json"));
+    }
+  }
+
+  const candidates = (
+    await Promise.all(
+      candidatePaths.map(async (filePath) => {
+        try {
+          const stat = await fs.stat(filePath);
+          return { filePath, mtimeMs: stat.mtimeMs };
+        } catch {
+          return null;
+        }
+      }),
+    )
+  )
+    .filter((candidate): candidate is { filePath: string; mtimeMs: number } => candidate !== null)
+    .sort((a, b) => b.mtimeMs - a.mtimeMs)
+    .slice(0, MAX_HISTORICAL_RUNS);
+
+  const runs: BenchmarkRun[] = [];
+  let totalBytesRead = 0;
+  for (const candidate of candidates) {
+    try {
+      const content = await fs.readFile(candidate.filePath, "utf8");
+      totalBytesRead += content.length;
+      if (totalBytesRead > MAX_VARIANCE_BYTES) {
+        console.warn(`[agentarena] Variance analysis stopped: exceeded ${Math.round(MAX_VARIANCE_BYTES / (1024 * 1024))}MB memory limit`);
+        break;
+      }
+      const run = JSON.parse(content) as BenchmarkRun;
+      if (run.runId && run.runId !== currentRunId) {
+        runs.push(run);
+      }
+    } catch {
+      // Ignore corrupt or partial historical run files.
+    }
+  }
+
+  return runs;
+}
+
 export async function runBenchmarkCommand(
   parsed: ParsedArgs,
 ): Promise<void> {
@@ -99,6 +155,7 @@ export async function runBenchmarkCommand(
   }
 
   const selections = normalizeCliSelections(parsed);
+  const repeatCount = parsed.repeat ?? 1;
 
   // --probe-timeout is a doctor-only option (it tunes the auth-probe timeout in
   // `agentarena doctor`). The run preflight does not consume it, so warn rather
@@ -121,10 +178,17 @@ export async function runBenchmarkCommand(
     }
   }
 
-  const runStartMs = Date.now();
+  const jsonSummaries: ReturnType<typeof buildBenchmarkOutputSummary>[] = [];
+
+  for (let repeatIndex = 0; repeatIndex < repeatCount; repeatIndex++) {
+    const runNumber = repeatIndex + 1;
+    const runStartMs = Date.now();
 
   if (parsed.format !== "json") {
     console.log(`\nStarting AgentArena benchmark...`);
+    if (repeatCount > 1) {
+      console.log(`Repeat: ${runNumber}/${repeatCount}`);
+    }
     console.log(`Repository: ${parsed.repoPath}`);
     console.log(`Task: ${parsed.taskPath}`);
     console.log(`Agents: ${parsed.agentIds.join(", ")}`);
@@ -148,6 +212,7 @@ export async function runBenchmarkCommand(
             outputPath: resolvedOutput,
             scoreMode: parsed.scoreMode ?? "practical",
             tokenBudget: parsed.tokenBudget ?? null,
+            repeat: repeatCount,
             maxConcurrency: parsed.maxConcurrency ?? null,
             probeAuth: parsed.probeAuth,
             agents: selections.map((selection) => ({
@@ -166,6 +231,7 @@ export async function runBenchmarkCommand(
       console.log(`  Output:       ${resolvedOutput}`);
       console.log(`  Score mode:   ${parsed.scoreMode ?? "practical"}`);
       console.log(`  Token budget: ${parsed.tokenBudget ?? "(task default)"}`);
+      console.log(`  Repeat:       ${repeatCount}`);
       console.log(`  Concurrency:  ${parsed.maxConcurrency ?? "(default)"}`);
       console.log(`  Probe auth:   ${parsed.probeAuth ? "yes" : "no"}`);
       console.log("  Agents:");
@@ -268,42 +334,22 @@ export async function runBenchmarkCommand(
   let varianceReportText: string | null = null;
   let trendReportPath: string | null = null;
   try {
-    const allRunFiles = await fs.readdir(runsDir);
-    const jsonFiles = allRunFiles.filter((f) => f.endsWith(".json")).slice(-50);
-    const previousRuns: (BenchmarkRun | null)[] = [];
-    let totalBytesRead = 0;
-    const MAX_VARIANCE_BYTES = 50 * 1024 * 1024; // 50MB limit for variance analysis
-
-    for (const f of jsonFiles) {
-      try {
-        const content = await fs.readFile(
-          path.join(runsDir, f),
-          "utf8",
-        );
-        totalBytesRead += content.length;
-        if (totalBytesRead > MAX_VARIANCE_BYTES) {
-          console.warn(`[agentarena] Variance analysis stopped: exceeded ${Math.round(MAX_VARIANCE_BYTES / (1024 * 1024))}MB memory limit`);
-          break;
-        }
-        previousRuns.push(JSON.parse(content) as BenchmarkRun);
-      } catch {
-        previousRuns.push(null);
-      }
-    }
+    const previousRuns = await loadHistoricalRuns(runsDir, benchmark.runId);
 
     const comparableRuns = previousRuns.filter(
       (r): r is BenchmarkRun =>
-        r !== null && r.task?.id === benchmark.task?.id,
+        r.task?.id === benchmark.task?.id,
     );
     if (comparableRuns.length > 1) {
-      const varianceReport = computeVarianceAnalysis(comparableRuns);
+      const comparisonRuns = [...comparableRuns, benchmark];
+      const varianceReport = computeVarianceAnalysis(comparisonRuns);
       varianceReportText = formatVarianceReport(varianceReport);
 
       // Multi-run trend: aggregate the prior comparable runs together with the
       // current run (already in memory — no extra scan) and write a trend.md
       // artifact summarizing per-agent performance across runs.
       try {
-        const trendComparison = aggregateMultiRuns([...comparableRuns, benchmark]);
+        const trendComparison = aggregateMultiRuns(comparisonRuns);
         const trendReport = formatMultiRunReport(trendComparison);
         trendReportPath = path.join(benchmark.outputPath, "trend.md");
         await fs.writeFile(trendReportPath, trendReport, "utf8");
@@ -316,14 +362,9 @@ export async function runBenchmarkCommand(
     console.warn(`[agentarena] Variance analysis skipped: ${varianceError instanceof Error ? varianceError.message : String(varianceError)}`);
   }
 
+  const outputSummary = buildBenchmarkOutputSummary(benchmark, report);
   if (parsed.format === "json") {
-    console.log(
-      JSON.stringify(
-        buildBenchmarkOutputSummary(benchmark, report),
-        null,
-        2,
-      ),
-    );
+    jsonSummaries.push(outputSummary);
   } else {
     console.log(`\nAgentArena run complete: ${scoredBenchmark.runId}`);
     console.log(
@@ -449,6 +490,22 @@ export async function runBenchmarkCommand(
 
   if (benchmark.results.some((result) => result.status !== "success")) {
     process.exitCode = 1;
+  }
+  if (cancelled) {
+    break;
+  }
+}
+
+  if (parsed.format === "json") {
+    console.log(
+      JSON.stringify(
+        repeatCount === 1
+          ? jsonSummaries[0]
+          : { repeat: repeatCount, runs: jsonSummaries },
+        null,
+        2,
+      ),
+    );
   }
 
   // Auto-cleanup old runs (keep most recent 50 by default)

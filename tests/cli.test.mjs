@@ -768,6 +768,69 @@ test("agentarena run writes a trend.md when >=2 prior comparable runs exist", { 
   }
 });
 
+test("agentarena run --repeat creates repeated runs and a trend report", { timeout: 90_000 }, async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-cli-"));
+  try {
+    const repoPath = path.join(tempDir, "repo");
+    const outputPath = path.join(tempDir, "output-repeat");
+    const taskPath = path.join(tempDir, "task-repeat.json");
+
+    await mkdir(repoPath, { recursive: true });
+    await writeFile(path.join(repoPath, "README.md"), "# Temp Repo\n", "utf8");
+
+    await writeJson(taskPath, {
+      schemaVersion: "agentarena.taskpack/v1",
+      id: "cli-repeat",
+      title: "CLI Repeat",
+      prompt: "Run repeatedly",
+      judges: [
+        {
+          id: "pass",
+          type: "command",
+          label: "Always pass",
+          command: "node -e \"process.exit(0)\""
+        }
+      ]
+    });
+
+    const result = await runCli(
+      ["run", "--repo", repoPath, "--task", taskPath, "--agents", "demo-fast", "--output", outputPath, "--repeat", "3"],
+      path.resolve(".")
+    );
+
+    assert.equal(result.code, 0);
+    assert.match(result.stdout, /Repeat: 1\/3/);
+    assert.match(result.stdout, /Repeat: 3\/3/);
+    assert.match(result.stdout, /Trend report:/);
+
+    const entries = await readdir(outputPath, { withFileTypes: true });
+    const runDirs = entries.filter((entry) => entry.isDirectory());
+    assert.equal(runDirs.length, 3);
+
+    let trendContent = "";
+    for (const runDir of runDirs) {
+      try {
+        trendContent = await readFile(path.join(outputPath, runDir.name, "trend.md"), "utf8");
+        break;
+      } catch {
+        // Only the final repeat is expected to have enough history for trend.md.
+      }
+    }
+    assert.ok(trendContent, "Expected one repeated run to write trend.md");
+    assert.match(trendContent, /Multi-Run Agent Comparison/);
+    assert.match(trendContent, /\*\*Total Runs\*\*: 3/);
+
+    const badRepeat = await runCli(
+      ["run", "--repeat", "0"],
+      path.resolve(".")
+    );
+    assert.notEqual(badRepeat.code, 0);
+    assert.match((badRepeat.stderr || "") + (badRepeat.stdout || ""), /--repeat requires a positive integer/);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("agentarena init-ci writes a benchmark workflow", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-cli-"));
   try {
