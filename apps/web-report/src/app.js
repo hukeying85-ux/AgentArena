@@ -1825,6 +1825,8 @@ elements.downloadShareSvg.addEventListener("click", () => {
 
 const initialLocationState = readLocationState();
 state.language = initialLocationState.language ?? readStorage("agentarena.webReport.language") ?? "zh-CN";
+state.selectedRunId = initialLocationState.runId;
+state.selectedAgentId = initialLocationState.agentId;
 document.documentElement.lang = state.language === "zh-CN" ? "zh-CN" : "en";
 
 const savedScoreConfig = loadScoreConfig();

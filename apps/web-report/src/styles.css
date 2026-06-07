@@ -3589,19 +3589,20 @@ details.launcher-section > *:not(summary) {
   right: 6px;
   display: flex;
   gap: 4px;
-  opacity: 0;
-  z-index: 10;
+  opacity: 1;
+  z-index: 20;
   /* Solid background to prevent text bleed-through */
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 3px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-  pointer-events: none;
+  pointer-events: auto;
   transition: opacity var(--transition-fast);
 }
 
-.run-button:hover .run-actions {
+.run-button:hover .run-actions,
+.run-button:focus-within .run-actions {
   opacity: 1;
   pointer-events: auto;
 }

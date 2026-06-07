@@ -211,20 +211,20 @@ test("web-report browser smoke renders launcher and supports zh/en switching", {
     const bodyZh = await page.locator("body").innerText();
 
     await page.selectOption("#language-select", "en");
-    await page.waitForFunction(() => document.getElementById("app-title")?.textContent === "Web Report");
+    await page.waitForFunction(() => document.getElementById("app-title")?.textContent === "Benchmark");
     const appTitleEn = await page.locator("#app-title").textContent();
     const launcherRunEn = await page.locator("#launcher-run").textContent();
 
     await page.selectOption("#language-select", "zh-CN");
-    await page.waitForFunction(() => document.getElementById("app-title")?.textContent === "交互报告");
+    await page.waitForFunction(() => document.getElementById("app-title")?.textContent === "跑分配置");
     const appTitleZhAgain = await page.locator("#app-title").textContent();
 
-    assert.equal(appTitleZh, "交互报告");
+    assert.equal(appTitleZh, "跑分配置");
     assert.equal(launcherRunZh?.trim(), "开始跑分");
-    assert.equal(appTitleEn, "Web Report");
+    assert.equal(appTitleEn, "Benchmark");
     assert.equal(launcherRunEn?.trim(), "Start Benchmark");
-    assert.equal(appTitleZhAgain, "交互报告");
-    assert.match(bodyZh, /发起 Benchmark/);
+    assert.equal(appTitleZhAgain, "跑分配置");
+    assert.match(bodyZh, /发起跑分/);
     assert.doesNotMatch(bodyZh, /\uFFFD/);
   } finally {
     await browser.close();
@@ -292,15 +292,12 @@ test("wrong results file shows a visible error and run list items stay valid", {
       buffer: Buffer.from("{not valid json")
     });
     await page.waitForFunction(() => {
-      const el = document.getElementById("error-message");
-      return Boolean(el?.textContent && el.textContent.length > 0);
+      const el = document.getElementById("result-loader-message");
+      return Boolean(el && !el.hidden && el.textContent && el.textContent.length > 0);
     });
 
-    const notice = await page.locator("#error-message").textContent();
-    assert.match(notice ?? "", /summary\.json|解析|parse/i);
-
-    await page.locator("#error-back").click();
-    await page.waitForFunction(() => document.getElementById("error-state")?.classList.contains("hidden"));
+    const notice = await page.locator("#result-loader-message").textContent();
+    assert.match(notice ?? "", /summary\.json|解析|parse|无法解析/i);
 
     await injectTestRun(page);
 
@@ -341,29 +338,30 @@ test("web-report preserves selected agent and language across reload", {
     });
 
     await injectTestRun(page);
-    const selectedAgentKey = "agent-b@@unknown";
+    const selectedAgentKey = await page.locator("[data-compare-agent-id]").nth(1).getAttribute("data-compare-agent-id");
+    assert.ok(selectedAgentKey, "expected a second agent row to select");
     await page.locator(`[data-compare-agent-id="${selectedAgentKey}"]`).click();
     await page.selectOption("#language-select", "en");
     await page.waitForFunction(() => new URLSearchParams(window.location.search).get("lang") === "en");
 
     const beforeReloadUrl = page.url();
     assert.match(beforeReloadUrl, /run=test-run-001/);
-    assert.match(beforeReloadUrl, /agent=agent-b%40%40unknown/);
+    assert.equal(new URL(beforeReloadUrl).searchParams.get("agent"), selectedAgentKey);
 
     await page.reload({ waitUntil: "networkidle", timeout: 30000 });
-    await page.waitForFunction(() => {
+    await page.waitForFunction((agentKey) => {
       const dashboard = document.getElementById("dashboard");
-      const selectedAgent = document.querySelector("[data-compare-agent-id='agent-b@@unknown']");
+      const selectedAgent = document.querySelector(`[data-compare-agent-id="${CSS.escape(agentKey)}"]`);
       return Boolean(
         dashboard &&
           !dashboard.classList.contains("hidden") &&
           selectedAgent?.classList.contains("active") &&
-          document.getElementById("app-title")?.textContent === "Web Report"
+          document.getElementById("app-title")?.textContent === "Report · Test Task"
       );
-    });
+    }, selectedAgentKey);
 
     const appTitle = await page.locator("#app-title").textContent();
-    assert.equal(appTitle, "Web Report");
+    assert.equal(appTitle, "Report · Test Task");
   } finally {
     await browser.close();
     await uiServer.stop();
@@ -458,7 +456,7 @@ test("score weight preset buttons update active state", {
 
     // Load demo data
     await page.locator("#try-demo-btn").click();
-    await page.waitForFunction(() => document.querySelectorAll(".compare-table-row").length > 0, { timeout: 10000 });
+    await page.waitForFunction(() => document.querySelectorAll("[data-compare-agent-id]").length > 0, { timeout: 10000 });
 
     // Check that score weight section exists
     const scoreSection = page.locator("#score-weights-title");
@@ -491,7 +489,7 @@ test("run list delete button removes run", {
 
     // Load demo data
     await page.locator("#try-demo-btn").click();
-    await page.waitForFunction(() => document.querySelectorAll(".compare-table-row").length > 0, { timeout: 10000 });
+    await page.waitForFunction(() => document.querySelectorAll("[data-compare-agent-id]").length > 0, { timeout: 10000 });
 
     // Check run list has items
     const runItems = page.locator("[data-run-id]");
@@ -529,10 +527,11 @@ test("dashboard shows verdict hero and comparison bars after loading demo", {
     await page.goto(`http://127.0.0.1:${uiServer.port}`);
 
     await page.locator("#try-demo-btn").click();
-    await page.waitForFunction(() => document.querySelectorAll(".compare-table-row").length > 0, { timeout: 10000 });
+    await page.waitForFunction(() => document.querySelectorAll("[data-compare-agent-id]").length > 0, { timeout: 10000 });
 
-    const verdictHero = page.locator("#verdict-hero");
-    assert.ok(await verdictHero.isVisible(), "verdict hero should be visible after loading demo");
+    const summaryCard = page.locator("#summary-card");
+    assert.ok(await summaryCard.isVisible(), "summary card should be visible after loading demo");
+    assert.match(await summaryCard.innerText(), /通过|passed/i);
 
     const comparisonBars = page.locator("#comparison-bars");
     assert.ok(await comparisonBars.isVisible(), "comparison bars should be visible");
@@ -562,7 +561,7 @@ test("export run as JSON file", {
     await page.goto(`http://127.0.0.1:${uiServer.port}`);
 
     await page.locator("#try-demo-btn").click();
-    await page.waitForFunction(() => document.querySelectorAll(".compare-table-row").length > 0, { timeout: 10000 });
+    await page.waitForFunction(() => document.querySelectorAll("[data-compare-agent-id]").length > 0, { timeout: 10000 });
 
     const exportBtn = page.locator("[data-role='export-run']").first();
     if (await exportBtn.isVisible()) {

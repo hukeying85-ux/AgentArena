@@ -22,10 +22,10 @@ export { loadAdapterPlugins, registerExternalAdapters } from "./plugin-registry.
 export type { Transport, TransportChainOptions, TransportChainResult, TransportResult } from "./transport.js";
 export { createClaudeTransportChain, RawTransport, StreamJsonTransport, TextTransport, TransportChain } from "./transport.js";
 
+import { getChangedFilesFromGit } from "./adapter-helpers.js";
 import { parseClaudeEvents, parseCodexEvents, parseGeminiEvents } from "./event-parsers.js";
 import { agentTimeoutMs, formatTimeoutMessage, runProcess, terminateProcessTree } from "./process-utils.js";
 import { readCodexConfigDefaults, resolveClaudeRuntime, resolveCodexRuntime } from "./runtime-resolution.js";
-import { getChangedFilesFromGit } from "./adapter-helpers.js";
 
 export const __testUtils = {
   parseCodexEvents,

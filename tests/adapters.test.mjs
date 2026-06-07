@@ -99,8 +99,10 @@ test("demo adapter execution returns normalized benchmark output", async () => {
 // changed-files hint via getChangedFilesFromGit instead of hardcoding []. The
 // full execute() path needs a real `claude` binary, so we test the git
 // integration the fix relies on directly (no CLI required).
+
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
+
 const execFileAsyncForTest = promisify(execFileCb);
 
 async function initGitRepo(dir) {

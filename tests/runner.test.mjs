@@ -1174,7 +1174,7 @@ test("runBenchmark surfaces a non-fatal task compatibility warning without throw
 
   // A compatibility warning was surfaced via progress metadata.
   const compatEvent = events.find(
-    (event) => event.metadata && event.metadata.compatibility
+    (event) => event.metadata?.compatibility
   );
   assert.ok(compatEvent, "Expected a progress event carrying compatibility metadata");
   assert.equal(compatEvent.metadata.compatibility.status, "warning");
@@ -1235,7 +1235,7 @@ test("runBenchmark reports a passing compatibility check for a compatible task",
   });
 
   const compatEvent = events.find(
-    (event) => event.metadata && event.metadata.compatibility
+    (event) => event.metadata?.compatibility
   );
   assert.ok(compatEvent, "Expected a compatibility progress event");
   assert.equal(compatEvent.metadata.compatibility.status, "compatible");

@@ -3,25 +3,10 @@
  * Tests the StreamJsonTransport → TextTransport fallback chain.
  */
 import assert from "node:assert/strict";
-import { describe, it, mock } from "node:test";
+import { describe, it } from "node:test";
 
-// We need to mock process-utils and event-parsers before importing transport.
-// Use node:test's module mocking.
-
-const mockRunProcess = mock.fn();
-const mockParseClaudeEvents = mock.fn(() => ({
-  summaryFromEvents: "Test summary",
-  tokenUsage: 100,
-  estimatedCostUsd: 0.01,
-  costKnown: true,
-  toolCalls: [],
-  sessionId: "test-session",
-  error: null,
-}));
-
-// Override the modules by modifying the dist files' imports at runtime.
-// Since we can't easily mock ESM imports, we test the public API by
-// verifying class construction and properties that don't require process execution.
+// Verify the public API by checking class construction and properties that do
+// not require process execution.
 
 const {
   StreamJsonTransport,

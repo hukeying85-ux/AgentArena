@@ -383,7 +383,6 @@ async function findLatestSummaryJson(): Promise<string | null> {
         await fs.access(summaryPath);
         return summaryPath;
       } catch {
-        continue;
       }
     }
   } catch {

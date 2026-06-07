@@ -553,7 +553,8 @@ function renderAgentTrendTableV2(run) {
 
 
 function renderPreflights(run) {
-  elements.preflights.innerHTML = run.preflights
+  const preflights = Array.isArray(run.preflights) ? run.preflights : [];
+  elements.preflights.innerHTML = preflights
     .map(
       (preflight) => `
         <article class="preflight-card ${escapeHtml(preflight.status)}">

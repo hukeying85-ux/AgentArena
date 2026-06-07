@@ -14,7 +14,6 @@ import {
   saveClaudeProviderProfile,
   setClaudeProviderProfileSecret,
 } from "../packages/adapters/dist/claude-provider-profiles.js";
-import { getHealthCache, resetHealthCache } from "../packages/core/dist/health-cache.js";
 
 const { appDataRoot, secretTarget } = __providerProfileTestUtils;
 

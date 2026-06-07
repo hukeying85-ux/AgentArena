@@ -7,11 +7,11 @@
  *
  * @see docs/adr/ADR-001-adapter-cli-contract.md
  */
+import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
-import assert from "node:assert/strict";
+import { fileURLToPath } from "node:url";
 
 // We need to import from the built output since the source is TypeScript.
 // The test runner runs after `pnpm build`, so dist/ should exist.
