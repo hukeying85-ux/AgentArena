@@ -365,6 +365,7 @@ export async function executeCommand(
       cwd
     };
   }
+  throwIfCancelled(signal);
 
   return await new Promise((resolve, reject) => {
     const child = spawn(spawnSpec.command, spawnSpec.args, {
@@ -440,6 +441,9 @@ export async function executeCommand(
     }, timeoutMs);
 
     signal?.addEventListener("abort", cancelExecution, { once: true });
+    if (signal?.aborted) {
+      cancelExecution();
+    }
 
     child.stdout.on("data", (chunk: Buffer) => {
       if (stdoutTruncated) return;
