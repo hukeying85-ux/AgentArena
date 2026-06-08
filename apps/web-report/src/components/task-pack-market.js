@@ -8,6 +8,63 @@ import { h } from '../utils/dom.js';
 
 // Task pack registry URL (GitHub raw)
 const TASK_PACK_REGISTRY_URL = 'https://raw.githubusercontent.com/agentarena/agentarena/main/task-packs.json';
+const TASK_PACK_IMPORT_URL_ERROR = 'Only HTTPS GitHub task pack JSON URLs are supported.';
+
+function assertSafeGitHubPathSegments(segments) {
+  if (segments.some((segment) => !/^[A-Za-z0-9._~-]+$/.test(segment) || segment === '.' || segment === '..')) {
+    throw new Error(TASK_PACK_IMPORT_URL_ERROR);
+  }
+}
+
+/**
+ * Convert supported GitHub task pack URLs to raw JSON URLs.
+ * @param {string} inputUrl
+ * @returns {string}
+ */
+export function resolveTaskPackImportUrl(inputUrl) {
+  let parsed;
+  try {
+    parsed = new URL(String(inputUrl ?? '').trim());
+  } catch {
+    throw new Error(TASK_PACK_IMPORT_URL_ERROR);
+  }
+
+  if (parsed.protocol !== 'https:') {
+    throw new Error(TASK_PACK_IMPORT_URL_ERROR);
+  }
+  if (parsed.username || parsed.password || parsed.search || parsed.hash) {
+    throw new Error(TASK_PACK_IMPORT_URL_ERROR);
+  }
+
+  const host = parsed.hostname.toLowerCase();
+  const segments = parsed.pathname.split('/').filter(Boolean);
+  assertSafeGitHubPathSegments(segments);
+
+  if (host === 'github.com') {
+    const [user, repo, kind, branch, ...fileSegments] = segments;
+    if (user && repo && !kind && !branch) {
+      return `https://raw.githubusercontent.com/${user}/${repo}/main/taskpack.json`;
+    }
+    if (user && repo && kind === 'blob' && branch && fileSegments.length > 0) {
+      const filePath = fileSegments.join('/');
+      if (!filePath.toLowerCase().endsWith('.json')) {
+        throw new Error(TASK_PACK_IMPORT_URL_ERROR);
+      }
+      return `https://raw.githubusercontent.com/${user}/${repo}/${branch}/${filePath}`;
+    }
+    throw new Error(TASK_PACK_IMPORT_URL_ERROR);
+  }
+
+  if (host === 'raw.githubusercontent.com' && segments.length >= 4) {
+    const filePath = segments.slice(3).join('/');
+    if (!filePath.toLowerCase().endsWith('.json')) {
+      throw new Error(TASK_PACK_IMPORT_URL_ERROR);
+    }
+    return parsed.href;
+  }
+
+  throw new Error(TASK_PACK_IMPORT_URL_ERROR);
+}
 
 /**
  * Task Pack Market class
@@ -113,19 +170,11 @@ export class TaskPackMarket {
    * @returns {string} raw content URL
    */
   _convertToRawUrl(url) {
-    const blobMatch = url.match(/github\.com\/([^/]+)\/([^/]+)\/blob\/([^/]+)\/(.+)/);
-    if (blobMatch) {
-      const [, user, repo, branch, path] = blobMatch;
-      return `https://raw.githubusercontent.com/${user}/${repo}/${branch}/${path}`;
+    try {
+      return resolveTaskPackImportUrl(url);
+    } catch {
+      throw new Error(this.t('marketInvalidUrl'));
     }
-
-    const repoMatch = url.match(/github\.com\/([^/]+)\/([^/]+)\/?$/);
-    if (repoMatch) {
-      const [, user, repo] = repoMatch;
-      return `https://raw.githubusercontent.com/${user}/${repo}/main/taskpack.json`;
-    }
-
-    return url;
   }
 
   /**

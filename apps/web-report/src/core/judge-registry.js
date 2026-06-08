@@ -169,12 +169,28 @@ class JudgeRegistry {
 
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
+        const timeoutError = new Error(`Worker communication timeout (${timeoutMs}ms)`);
         this._pendingMessages.delete(id);
-        reject(new Error(`Worker communication timeout (${timeoutMs}ms)`));
+        if (this._worker === worker) {
+          try { worker.terminate(); } catch { /* best-effort cleanup */ }
+          this._worker = null;
+          for (const [pendingId, pending] of this._pendingMessages) {
+            this._pendingMessages.delete(pendingId);
+            clearTimeout(pending.timer);
+            pending.reject(new Error('Judge worker was reset after a communication timeout'));
+          }
+        }
+        reject(timeoutError);
       }, timeoutMs);
 
       this._pendingMessages.set(id, { resolve, reject, timer });
-      worker.postMessage({ type, id, payload });
+      try {
+        worker.postMessage({ type, id, payload });
+      } catch (err) {
+        this._pendingMessages.delete(id);
+        clearTimeout(timer);
+        reject(err instanceof Error ? err : new Error(String(err)));
+      }
     });
   }
 

@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { resolveTaskPackImportUrl } from "../apps/web-report/src/components/task-pack-market.js";
+import { judgeRegistry } from "../apps/web-report/src/core/judge-registry.js";
 import { safeExternalHref } from "../apps/web-report/src/launcher/module.js";
 import { safeTraceCategoryClass } from "../apps/web-report/src/trace-replay.js";
 import { TraceReplayer } from "../apps/web-report/src/trace-replay-bridge.js";
@@ -47,6 +49,84 @@ test("safeTraceCategoryClass strips markup and attribute-breaking characters", (
   assert.equal(safeTraceCategoryClass("<script>alert(1)</script>"), "script-alert-1-script");
   assert.equal(safeTraceCategoryClass(""), "other");
   assert.equal(safeTraceCategoryClass("---"), "other");
+});
+
+test("resolveTaskPackImportUrl accepts HTTPS GitHub task pack JSON URLs", () => {
+  assert.equal(
+    resolveTaskPackImportUrl("https://github.com/example/repo"),
+    "https://raw.githubusercontent.com/example/repo/main/taskpack.json"
+  );
+  assert.equal(
+    resolveTaskPackImportUrl("https://github.com/example/repo/blob/main/taskpack.json"),
+    "https://raw.githubusercontent.com/example/repo/main/taskpack.json"
+  );
+  assert.equal(
+    resolveTaskPackImportUrl("https://raw.githubusercontent.com/example/repo/main/taskpack.json"),
+    "https://raw.githubusercontent.com/example/repo/main/taskpack.json"
+  );
+});
+
+test("resolveTaskPackImportUrl rejects non-GitHub or non-HTTPS import URLs", () => {
+  assert.throws(() => resolveTaskPackImportUrl("http://github.com/example/repo"), /HTTPS GitHub/);
+  assert.throws(() => resolveTaskPackImportUrl("https://example.com/taskpack.json"), /HTTPS GitHub/);
+  assert.throws(() => resolveTaskPackImportUrl("javascript:alert(1)"), /HTTPS GitHub/);
+  assert.throws(() => resolveTaskPackImportUrl("data:application/json,%7B%7D"), /HTTPS GitHub/);
+  assert.throws(() => resolveTaskPackImportUrl("https://github.com/example/repo/blob/main/taskpack.yaml"), /HTTPS GitHub/);
+  assert.throws(() => resolveTaskPackImportUrl("https://github.com/example/repo/blob/main/taskpack.json?raw=1"), /HTTPS GitHub/);
+  assert.throws(() => resolveTaskPackImportUrl("https://github.com/example/repo/blob/main/%2E%2E/taskpack.json"), /HTTPS GitHub/);
+});
+
+test("judgeRegistry terminates a stuck worker after communication timeout", async () => {
+  const originalWorker = globalThis.Worker;
+  const originalWorkerInstance = judgeRegistry._worker;
+  const originalHmacKey = judgeRegistry._hmacKey;
+  const originalHmacKeyPromise = judgeRegistry._hmacKeyPromise;
+  const workers = [];
+
+  class HangingWorker {
+    constructor(url) {
+      this.url = url;
+      this.messages = [];
+      this.terminated = false;
+      workers.push(this);
+    }
+
+    postMessage(message) {
+      this.messages.push(message);
+    }
+
+    terminate() {
+      this.terminated = true;
+    }
+  }
+
+  try {
+    globalThis.Worker = HangingWorker;
+    judgeRegistry._worker = null;
+    judgeRegistry._pendingMessages.clear();
+    judgeRegistry._hmacKey = null;
+    judgeRegistry._hmacKeyPromise = Promise.resolve(null);
+
+    await assert.rejects(
+      () => judgeRegistry._sendToWorker("evaluate", { judgeId: "stuck", context: {} }, 5),
+      /Worker communication timeout/
+    );
+
+    assert.equal(workers.length, 1);
+    assert.equal(workers[0].terminated, true);
+    assert.equal(judgeRegistry._worker, null);
+    assert.equal(judgeRegistry._pendingMessages.size, 0);
+  } finally {
+    if (originalWorker === undefined) {
+      delete globalThis.Worker;
+    } else {
+      globalThis.Worker = originalWorker;
+    }
+    judgeRegistry._worker = originalWorkerInstance;
+    judgeRegistry._hmacKey = originalHmacKey;
+    judgeRegistry._hmacKeyPromise = originalHmacKeyPromise;
+    judgeRegistry._pendingMessages.clear();
+  }
 });
 
 function createRun(runId, taskTitle, overrides = {}) {

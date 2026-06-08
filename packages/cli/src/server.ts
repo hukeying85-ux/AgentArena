@@ -19,6 +19,7 @@ const RATE_LIMIT_EXPENSIVE_PATHS = new Set([
   "/api/run/cancel",
   "/api/preflight",
   "/api/quick-preflight",
+  "/api/check-compatibility",
   "/api/create-adhoc-taskpack",
   "/api/provider-profiles"
 ]);

@@ -149,6 +149,20 @@ test("extractCommunityEntry handles missing resolvedRuntime", () => {
   assert.equal(entry.agentResults[0].version, "unknown");
 });
 
+test("extractCommunityEntry rejects path-like run and task IDs", () => {
+  assert.throws(
+    () => extractCommunityEntry(makeMockRun({ runId: "../index" }), "testuser"),
+    /runId contains unsupported characters/
+  );
+
+  const run = makeMockRun();
+  run.task.id = "task/../../index";
+  assert.throws(
+    () => extractCommunityEntry(run, "testuser"),
+    /task\.id contains unsupported characters/
+  );
+});
+
 test("buildLeaderboardEntries creates entries from single run", () => {
   const run = makeMockRun();
   const entry = extractCommunityEntry(run, "testuser");

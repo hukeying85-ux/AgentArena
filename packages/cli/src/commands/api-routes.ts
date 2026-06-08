@@ -28,6 +28,7 @@ import {
 import { checkTaskCompatibility } from "@agentarena/runner";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { jsonResponse } from "../server.js";
+import { validateRunPayload } from "./run-payload-validator.js";
 
 /**
  * Wrap an API handler with structured error logging and a safe error envelope.
@@ -576,23 +577,23 @@ export async function handleInstallGuides(): Promise<ApiResponse> {
  * Returns compatibility status and individual check results.
  */
 export async function handleCheckCompatibility(rawBody: string): Promise<ApiResponse> {
-  let body: { taskPath: string; repoPath: string };
+  let body: { taskPath?: unknown; repoPath?: unknown };
   try {
-    body = JSON.parse(rawBody) as { taskPath: string; repoPath: string };
+    body = JSON.parse(rawBody) as { taskPath?: unknown; repoPath?: unknown };
   } catch {
     return jsonResponse({ error: "Invalid JSON in request body." }, 400);
   }
-  if (!body.taskPath?.trim()) {
-    return jsonResponse({ error: "taskPath is required." }, 400);
-  }
-  if (!body.repoPath?.trim()) {
-    return jsonResponse({ error: "repoPath is required." }, 400);
+  const validationError = validateRunPayload(body as { repoPath: string; taskPath: string });
+  if (validationError) {
+    return jsonResponse({ error: validationError }, 400);
   }
 
   try {
     const { loadTaskPack } = await import("@agentarena/taskpacks");
-    const taskPack = await loadTaskPack(body.taskPath);
-    const result = await checkTaskCompatibility(taskPack, body.repoPath);
+    const taskPath = path.resolve(body.taskPath as string);
+    const repoPath = path.resolve(body.repoPath as string);
+    const taskPack = await loadTaskPack(taskPath);
+    const result = await checkTaskCompatibility(taskPack, repoPath);
     return jsonResponse(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

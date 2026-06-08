@@ -5,11 +5,13 @@
  * so they can be tested without starting an HTTP server.
  */
 import assert from "node:assert/strict";
+import path from "node:path";
 import test from "node:test";
 
 import {
   handleAdaptersList,
   handleAdhocTaskpacksList,
+  handleCheckCompatibility,
   handleCreateAdhocTaskpack,
   handlePreflight,
   handleProviderProfileCreate,
@@ -41,6 +43,28 @@ test("handlePreflight: returns 200 for valid demo-fast selection", async () => {
   assert.equal(res.statusCode, 200);
   const body = JSON.parse(res.body);
   assert.ok(body.status || body.preflight, "should return preflight result");
+});
+
+// ─── handleCheckCompatibility tests ───
+
+test("handleCheckCompatibility: returns 400 for non-string paths", async () => {
+  const res = await handleCheckCompatibility(JSON.stringify({
+    repoPath: 123,
+    taskPath: path.join(process.cwd(), "examples", "taskpacks", "demo-repo-health.json")
+  }));
+  assert.equal(res.statusCode, 400);
+  const body = JSON.parse(res.body);
+  assert.match(body.error, /repoPath.*string/i);
+});
+
+test("handleCheckCompatibility: rejects paths outside cwd", async () => {
+  const res = await handleCheckCompatibility(JSON.stringify({
+    repoPath: path.dirname(process.cwd()),
+    taskPath: path.join(process.cwd(), "examples", "taskpacks", "demo-repo-health.json")
+  }));
+  assert.equal(res.statusCode, 400);
+  const body = JSON.parse(res.body);
+  assert.match(body.error, /within the current working directory/i);
 });
 
 // ─── handleAdaptersList tests ───

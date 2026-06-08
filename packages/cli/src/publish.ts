@@ -15,6 +15,14 @@ import type { ParsedArgs } from "./args.js";
 const DEFAULT_GITHUB_OWNER = "agentarena";
 const DEFAULT_GITHUB_REPO = "leaderboard-data";
 const MAX_RETRIES = 3;
+const COMMUNITY_PATH_SEGMENT_PATTERN = /^[a-zA-Z0-9._-]{1,128}$/;
+
+function safeCommunityPathSegment(value: string, label: string): string {
+  if (!COMMUNITY_PATH_SEGMENT_PATTERN.test(value) || value === "." || value === "..") {
+    throw new Error(`${label} contains unsupported characters for community publishing.`);
+  }
+  return value;
+}
 
 function getGitHubOwner(): string {
   return process.env.AGENTARENA_COMMUNITY_OWNER ?? DEFAULT_GITHUB_OWNER;
@@ -143,6 +151,8 @@ export function extractCommunityEntry(
   publishedBy: string
 ): CommunityRunEntry {
   const sanitized = sanitizeRun(run);
+  const runId = safeCommunityPathSegment(sanitized.runId, "runId");
+  const taskPackId = safeCommunityPathSegment(sanitized.task?.id ?? "unknown", "task.id");
 
   const agentResults: CommunityAgentResult[] = sanitized.results.map((result) => {
     const judgeResults = result.judgeResults ?? [];
@@ -169,10 +179,10 @@ export function extractCommunityEntry(
 
   return {
     schemaVersion: "agentarena.community-run/v1",
-    runId: sanitized.runId,
+    runId,
     publishedAt: new Date().toISOString(),
     publishedBy,
-    taskPackId: sanitized.task?.id ?? "unknown",
+    taskPackId,
     taskTitle: sanitized.task?.title ?? "Unknown Task",
     scoreMode: sanitized.scoreMode && isScoreMode(sanitized.scoreMode) ? sanitized.scoreMode : "balanced",
     agentResults,

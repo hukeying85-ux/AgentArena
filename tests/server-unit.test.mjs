@@ -139,6 +139,14 @@ test("checkRateLimit: blocks expensive path requests over the expensive limit", 
   assert.ok(result.retryAfterMs > 0);
 });
 
+test("checkRateLimit: check-compatibility is treated as expensive", () => {
+  const ip = `test-compatibility-expensive-${Date.now()}`;
+  for (let i = 0; i < 30; i++) {
+    checkRateLimit(ip, "/api/check-compatibility");
+  }
+  assert.equal(checkRateLimit(ip, "/api/check-compatibility").allowed, false);
+});
+
 test("checkRateLimit: different IPs have independent limits", () => {
   const ip1 = `test-ip1-${Date.now()}`;
   const ip2 = `test-ip2-${Date.now()}`;

@@ -497,7 +497,8 @@ const en = {
   marketImportFailed: (err) => `Import failed: ${err}`,
   marketLoadFailed: (status) => `Load failed: ${status}`,
   marketFetchFailed: (status) => `Failed to fetch task pack: ${status}`,
-  marketInvalidFormat: 'Invalid task pack format'
+  marketInvalidFormat: 'Invalid task pack format',
+  marketInvalidUrl: 'Only HTTPS GitHub task pack JSON URLs are supported'
 };
 
 const zhCN = {
@@ -1189,7 +1190,8 @@ const zhCN = {
   marketImportFailed: (err) => `导入失败: ${err}`,
   marketLoadFailed: (status) => `加载失败: ${status}`,
   marketFetchFailed: (status) => `无法获取任务包: ${status}`,
-  marketInvalidFormat: '无效的任务包格式'
+  marketInvalidFormat: '无效的任务包格式',
+  marketInvalidUrl: '仅支持 HTTPS GitHub 任务包 JSON URL'
 };
 
 export const MESSAGES = {
