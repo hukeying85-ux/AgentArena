@@ -179,6 +179,10 @@ export function isInternalUrl(urlString: string): boolean {
  */
 export async function hasInternalDnsResolution(urlString: string): Promise<boolean> {
   try {
+    if (isInternalUrl(urlString)) {
+      return true;
+    }
+
     const { promises: dnsPromises } = await import("node:dns");
     const parsed = new URL(urlString);
     const hostname = parsed.hostname.toLowerCase();
