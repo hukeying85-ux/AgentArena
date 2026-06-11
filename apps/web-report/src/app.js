@@ -27,8 +27,7 @@ import {
   persistCachedRuns as persistCachedRunsImpl,
   readStorage,
   restoreCachedRuns as restoreCachedRunsImpl,
-  restoreRunsFromIndexedDB,
-  writeStorage
+  restoreRunsFromIndexedDB
 } from "./result-cache.js";
 import { createResultLoaders } from "./results/loaders.js";
 import {
@@ -41,6 +40,8 @@ import {
   updateScoreWeight as updateScoreWeightImpl
 } from "./score-config.js";
 import { selectAgent, selectRun } from "./selection-handlers.js";
+import { initShareActions } from "./share-actions.js";
+import { initSidebar } from "./sidebar.js";
 import {
   baselineTaskWarning as baselineTaskWarningImpl,
   formatJudgeType as formatJudgeTypeImpl,
@@ -50,19 +51,17 @@ import {
   translateDifficulty as translateDifficultyImpl,
 } from "./task-utils.js";
 import { createTraceReplayModule } from "./trace-replay.js";
+import { initUiPreferences } from "./ui-preferences.js";
 import { formatDuration } from "./utils/format.js";
 import { resultStore } from "./utils/storage.js";
 import {
   baseAgentLabel,
   buildLeaderboard,
-  buildPrTable,
   buildShareCard,
-  buildShareCardSvg,
   clearCachedCommunityData,
   DEFAULT_SCORE_WEIGHTS,
   diffPrecisionScore,
   fetchCommunityIndex,
-  findCommunityRank,
   findJudgeByType,
   formatCompositeScore,
   formatDiffPrecisionMetric,
@@ -1521,14 +1520,6 @@ if (elements.backToLauncher) {
     }
   });
 }
-elements.languageSelect.addEventListener("change", (event) => {
-  state.language = String(event.target.value ?? "en");
-  document.documentElement.lang = state.language === "zh-CN" ? "zh-CN" : "en";
-  writeStorage("agentarena.webReport.language", state.language);
-  syncLocationState(state, "push");
-  render();
-});
-
 elements.runList.addEventListener("click", (event) => {
   const deleteBtn = event.target.closest("[data-role='delete-run']");
   if (deleteBtn) {
@@ -1799,53 +1790,8 @@ elements.runCompareScope.addEventListener("change", (event) => {
   renderRunCompareTable();
 });
 
-// Share menu dropdown toggle logic
-document.querySelectorAll(".share-menu-toggle").forEach((btn) => {
-  btn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    const menu = btn.closest(".share-menu");
-    document.querySelectorAll(".share-menu.open").forEach((m) => {
-      if (m !== menu) m.classList.remove("open");
-    });
-    menu.classList.toggle("open");
-  });
-});
-
-document.addEventListener("click", () => {
-  for (const m of document.querySelectorAll(".share-menu.open")) {
-    m.classList.remove("open");
-  }
-});
-
-elements.copyShareCard.addEventListener("click", async () => {
-  if (!state.run) {
-    return;
-  }
-
-    await copyToClipboard(buildShareCard(state.run, { scoreWeights: state.scoreWeights, scoreModeLabel: getScoreModeLabel() }), t("copySummary"));
-});
-
-elements.copyPrTable.addEventListener("click", async () => {
-  if (!state.run) {
-    return;
-  }
-
-    await copyToClipboard(buildPrTable(state.run, { scoreWeights: state.scoreWeights, scoreModeLabel: getScoreModeLabel() }), t("copyPrTable"));
-});
-
-elements.downloadShareSvg.addEventListener("click", () => {
-  if (!state.run) {
-    return;
-  }
-
-  const communityRank = state.communityData ? findCommunityRank(state.run, state.communityData) : null;
-  downloadTextFile(
-    `agentarena-${state.run.runId}.svg`,
-    buildShareCardSvg(state.run, { scoreWeights: state.scoreWeights, scoreModeLabel: getScoreModeLabel(), communityRank }),
-    "image/svg+xml"
-  );
-  elements.clipboardStatus.textContent = t("svgDownloaded");
-});
+// Share button wiring (copy card, PR table, SVG download, dropdown toggles)
+initShareActions({ getScoreModeLabel, copyToClipboard, downloadTextFile, t });
 
 const initialLocationState = readLocationState();
 state.language = initialLocationState.language ?? readStorage("agentarena.webReport.language") ?? "zh-CN";
@@ -1886,41 +1832,6 @@ initCrossRunEvents({
   renderCommunityView,
   renderCrossRunCompareImpl,
   renderCrossRunSelectionListImpl
-});
-
-// Feature 5: Sidebar toggle for mobile, with focus management for accessibility.
-function setSidebarOpen(open) {
-  state.sidebarOpen = open;
-  elements.sidebar.classList.toggle("sidebar-open", open);
-  elements.sidebarBackdrop.classList.toggle("active", open);
-  elements.sidebarToggle.setAttribute("aria-expanded", String(open));
-  if (open) {
-    // Move focus into the sidebar so screen reader / keyboard users
-    // start inside the now-visible region.
-    const firstFocusable = /** @type {HTMLElement | null} */ (elements.sidebar.querySelector(
-      'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
-    ));
-    if (firstFocusable) setTimeout(() => firstFocusable.focus(), 0);
-  } else {
-    // Return focus to the toggle that opened the sidebar.
-    setTimeout(() => elements.sidebarToggle.focus(), 0);
-  }
-}
-
-elements.sidebarToggle.addEventListener("click", () => {
-  setSidebarOpen(!state.sidebarOpen);
-});
-
-elements.sidebarBackdrop.addEventListener("click", () => {
-  setSidebarOpen(false);
-});
-
-// Escape closes the open mobile sidebar.
-document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && state.sidebarOpen) {
-    event.preventDefault();
-    setSidebarOpen(false);
-  }
 });
 
 // Note: Global error state has been removed. Errors now display inline via state.notice
@@ -1980,19 +1891,6 @@ if (location.hostname === "localhost" || location.hostname === "127.0.0.1") {
   window.applyRuns = applyRuns;
   window.state = state;
 }
-
-// Theme toggle
-const savedTheme = readStorage("theme") || "dark";
-document.documentElement.setAttribute('data-theme', savedTheme);
-if (elements.themeLabel) elements.themeLabel.textContent = savedTheme === "dark" ? t("themeLabelLight") : t("themeLabelDark");
-
-elements.themeToggle?.addEventListener("click", () => {
-  const current = document.documentElement.getAttribute('data-theme');
-  const next = current === "dark" ? "light" : "dark";
-  document.documentElement.setAttribute("data-theme", next);
-  writeStorage("theme", next);
-  renderStaticText();
-});
 
 // Update banner handling
 const updateBanner = document.getElementById('update-banner');
@@ -2144,6 +2042,11 @@ function showIndexedDBWarning() {
 // Run initialization
 detectService();
 syncLocationState(state);
+
+// Wire extracted UI modules before first render
+initUiPreferences({ render, renderStaticText, t });
+initSidebar();
+
 render();
 initNewModules().catch((err) => {
   console.warn("[agentarena] Module initialization failed:", err);

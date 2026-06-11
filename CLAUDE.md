@@ -15,6 +15,10 @@ AgentArena — local-first benchmark and replay tool for comparing AI coding age
 - Build: `pnpm -r build` (TypeScript compilation + file copy for web-report)
 - i18n: `apps/web-report/src/i18n.js` exports `translate()` and `localizeText()`, app.js wraps them as `t()` and `localText()`
 
+## Package Dependency Graph
+
+`packages/core` is the leaf dependency — it imports nothing from other AgentArena packages. All other packages depend on `core` (and sometimes on each other) but there are no circular dependencies. This clean layering keeps `core` as a stable foundation for shared types and utilities.
+
 ## Packages
 
 | Package | Purpose |

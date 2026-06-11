@@ -23,6 +23,10 @@ import {
   resolveReportLocale,
 } from "./shared.js";
 
+// 50 MB cap on historical run data loaded into memory for variance analysis.
+// Each run summary JSON is typically 50-200 KB; 50 MB accommodates ~250-1000
+// runs while preventing OOM on resource-constrained CI machines. Loading stops
+// as soon as the cumulative byte count exceeds this threshold.
 const MAX_VARIANCE_BYTES = 50 * 1024 * 1024;
 const MAX_HISTORICAL_RUNS = 50;
 

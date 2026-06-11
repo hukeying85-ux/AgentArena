@@ -30,6 +30,10 @@ interface RateLimitEntry {
 }
 
 const RATE_LIMIT_MAX_STORE_SIZE = 10_000;
+// In-memory rate limit store keyed by client IP. Appropriate for AgentArena's
+// local-first design: each user runs their own server instance, so a shared
+// external store (Redis, etc.) would add complexity with no benefit. Entries are
+// periodically pruned by startRateLimitCleanup() and bounded by MAX_STORE_SIZE.
 const rateLimitStore = new Map<string, RateLimitEntry>();
 
 // Proxy trust configuration
@@ -181,6 +185,9 @@ export function generateAuthToken(): string {
  * across every request. Previously this was constructed on every CORS check,
  * adding hundreds of needless allocations per second under load.
  */
+// Soft-capped at 16 entries. In practice only 1-2 host:port keys are ever
+// created (single local server), so 16 prevents unbounded growth from edge
+// cases (e.g. dynamic port allocation in tests) without affecting normal use.
 const corsOriginCache = new Map<string, Set<string>>();
 
 function buildAllowedOrigins(host: string, port: number): Set<string> {
@@ -307,6 +314,11 @@ export function jsonResponse(data: unknown, statusCode = 200): { statusCode: num
       "X-Frame-Options": "DENY",
       "X-Content-Type-Options": "nosniff",
       "Referrer-Policy": "strict-origin-when-cross-origin",
+      // 'unsafe-inline' for style-src is required because web-report is a
+      // vanilla JS SPA with no bundler — components inject <style> blocks at
+      // runtime for dynamic theming and scoped styles. A nonce-based CSP would
+      // require a build step that the no-framework architecture deliberately
+      // avoids.
       "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'self'; form-action 'self'",
       // Prevent caching of API responses that may contain sensitive data
       "Pragma": "no-cache"

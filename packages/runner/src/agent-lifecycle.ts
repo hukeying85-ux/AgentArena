@@ -369,42 +369,23 @@ export async function recordFinalEvents(
 /**
  * Execute a single agent run through the full benchmark pipeline.
  *
- * STATE MACHINE (implicit — no state variable, each phase returns or continues):
+ * **Error propagation strategy:** This function never throws. All errors
+ * (adapter failures, judge failures, snapshot failures, teardown failures,
+ * timeouts, cancellation) are caught, logged, and folded into the returned
+ * `AgentRunResult` as structured fields (`status`, `adapterError`, `judgeError`,
+ * `teardownError`, `cancelled`). The caller can inspect the result to determine
+ * what went wrong without needing try/catch. The only exception is if the
+ * trace recorder itself fails to close, which is swallowed in the finally block.
  *
- *   1. createAgentRunContext   — allocate workspace, trace recorder, abort controller
- *   2. setupWorkspaceAndPrechecks — copy repo, check preflight status
- *      → returns early if preflight blocked
- *   3. runSetupCommands        — run task setup commands
- *      → returns early if any setup command fails
- *   4. createBeforeSnapshot    — snapshot workspace before agent runs
- *   5. executeAgent            — run adapter with timeout + cancellation
- *   6. collectChangedFiles     — git diff for changed file detection
- *   7. runJudgesAndAfterSnapshot — run judges + after-snapshot + diff
- *   8. runTeardownCommands     — cleanup commands (ALWAYS runs, even on cancel)
- *   9. buildFinalResult        — assemble the result object
+ * **Pipeline phases:** createAgentRunContext -> setupWorkspaceAndPrechecks ->
+ * runSetupCommands -> createBeforeSnapshot -> executeAgent -> collectChangedFiles ->
+ * runJudgesAndAfterSnapshot -> runTeardownCommands -> buildFinalResult.
  *
- * CRITICAL BEHAVIORS:
- *
- * - Teardown failure marks the ENTIRE run as failed, even if agent + all judges
- *   passed. This is intentional: a failing cleanup script indicates an
- *   environment problem that invalidates the benchmark.
- *
- * - Cancellation is a three-layer system:
- *   (a) BenchmarkCancellation.signal → forwarded to adapter's AbortController
- *   (b) Adapter timeout → SIGTERM → grace period → SIGKILL
- *   (c) Teardown ignores cancellation if adapter/judges already aborted
- *       (teardownShouldIgnoreCancellation), ensuring cleanup always runs
- *
- * - Timeout is double-layered:
- *   (a) Adapter gets agentTimeoutMs() + 5s grace period (AGENT_EXECUTE_TIMEOUT_GRACE_MS)
- *   (b) Teardown gets TEARDOWN_TIMEOUT_MS (30s)
- *
- * - changedFilesHint (agent-claimed) vs changedFiles (git diff):
- *   If git is unreliable (snapshot failed), the hint becomes the primary source.
- *   The diffReliable flag tracks this but is NOT surfaced to the user in the UI.
- *
- * - success requires ALL of: adapter succeeded, no adapter error, no judge error,
- *   all judges passed, no teardown error, all teardown passed.
+ * **Critical behaviors:**
+ * - Teardown failure marks the ENTIRE run as failed (intentional: environment problem).
+ * - Teardown ALWAYS runs, even on cancellation (three-layer cancellation system).
+ * - Timeout is double-layered: adapter timeout + grace period, teardown gets 30s.
+ * - success requires ALL of: adapter succeeded, no errors, all judges passed, all teardown passed.
  */
 export async function runAgent(
   repoPath: string,

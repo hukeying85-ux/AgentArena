@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { promises as fs } from "node:fs";
 import type http from "node:http";
 import path from "node:path";
@@ -534,27 +535,31 @@ export function createRequestHandler(ctx: RequestContext) {
         try {
           let body = await fs.readFile(filePath);
 
-          // Auto-inject auth token into index.html for localhost (seamless first-time UX).
+          // SECURITY: Auth token injection for localhost UX (nonce-based CSP)
           //
-          // SECURITY RATIONALE:
-          // - Meta tag is injected server-side only for localhost connections
-          // - Self-removing script reads token into sessionStorage and deletes the meta tag
-          // - sessionStorage is tab-scoped and cleared on tab close (not persistent)
-          // - The meta tag exists in the DOM for <1ms before the script removes it
-          // - Risk: if an attacker can inject content before this script runs, they could
-          //   exfiltrate the token. Mitigated by localhost-only + CORS + CSP headers.
-          // - The token is NOT persisted in saved pages, screenshots, or printouts
-          //
-          // SECURITY: The cleanup script MUST appear before any other <script> tags so
-          // it executes synchronously before third-party or app scripts can read the
-          // meta tag. We inject both the meta tag and its cleanup script immediately
-          // before </head> to guarantee this ordering.
-          if (ctx.isLocalhost && filePath.endsWith("index.html") && ctx.authToken) {
+          // Acceptable trade-off for a localhost-only dev tool:
+          // - The meta tag and inline script exist briefly in the HTML response.
+          // - A per-request CSP nonce restricts script execution to only the
+          //   cleanup script; any injected <script> without the nonce is blocked.
+          // - The meta tag is the FIRST thing the script reads, and .remove()
+          //   is called immediately after copying to sessionStorage.
+          // - sessionStorage is tab-scoped (not persisted across tabs or restarts).
+          // - The server only injects this for 127.0.0.1/localhost connections.
+          // - Risk: brief token visibility in raw HTTP response body (localhost only).
+          //   Mitigated by: localhost binding + CORS + CSP nonce + no-cache headers.
+          // - The token is NOT persisted in saved pages, screenshots, or printouts.
+          const isInjectingToken = ctx.isLocalhost && filePath.endsWith("index.html") && ctx.authToken;
+          const cspNonce = isInjectingToken ? randomBytes(16).toString("base64") : "";
+
+          if (isInjectingToken) {
             let html = body.toString("utf8");
             const metaTag = `<meta name="agentarena-auth-token" content="${escapeHtmlAttribute(ctx.authToken)}">`;
-            const cleanupScript = `<script>(function(){var m=document.querySelector('meta[name="agentarena-auth-token"]');if(m){try{sessionStorage.setItem('agentarena-auth-token',m.getAttribute('content'))}catch(e){/* ignore: sessionStorage may be unavailable */}m.remove()}})();</script>`;
-            // Place cleanup script immediately after meta tag, before any other scripts,
-            // to ensure synchronous removal before other JS can access the token.
+            // Nonce restricts execution to this single script tag only.
+            // The first action is reading + removing the meta tag so no other
+            // script (even same-origin) can access it after this point.
+            const cleanupScript = `<script nonce="${cspNonce}">(function(){var m=document.querySelector('meta[name="agentarena-auth-token"]');if(m){try{sessionStorage.setItem('agentarena-auth-token',m.getAttribute('content'))}catch(e){/* ignore: sessionStorage may be unavailable */}m.remove()}})();</script>`;
+            // Inject meta tag and its cleanup script immediately before </head>
+            // so they execute before any app scripts.
             const injection = `  ${metaTag}\n  ${cleanupScript}\n`;
             if (html.includes("</head>")) {
               html = html.replace("</head>", `${injection}</head>`);
@@ -564,10 +569,14 @@ export function createRequestHandler(ctx: RequestContext) {
             body = Buffer.from(html, "utf8");
           }
 
+          const scriptSrcPolicy = cspNonce
+            ? `script-src 'self' 'nonce-${cspNonce}'`
+            : "script-src 'self'";
+
           response.writeHead(200, {
             "Content-Type": detectContentType(filePath),
             "Cache-Control": "no-store",
-            "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://raw.githubusercontent.com",
+            "Content-Security-Policy": `default-src 'self'; ${scriptSrcPolicy}; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://raw.githubusercontent.com`,
             "X-Frame-Options": "DENY",
             "X-Content-Type-Options": "nosniff",
             "Referrer-Policy": "strict-origin-when-cross-origin",
