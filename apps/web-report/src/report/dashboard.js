@@ -1045,7 +1045,7 @@ function getFailureDiagnostic(result, task) {
   } else if (failedJudges.length > 0) {
     cause = `Validation failed after the agent ran: ${failedJudges.length} judge(s) failed.`;
     for (const judge of failedJudges.slice(0, 3)) {
-      evidence.push(`${judge.label}: ${firstNonEmptyLine(judge.stderr) || firstNonEmptyLine(judge.stdout) || "failed"}`);
+      evidence.push(`${judge.label || judge.judgeId || "Judge"}: ${firstNonEmptyLine(judge.stderr) || firstNonEmptyLine(judge.stdout) || "failed"}`);
     }
     if (mentionsMissingPath(combinedText)) {
       fixes.push("Check whether the task pack expects files that this repo does not contain, then use a matching repo or adjust the task pack paths.");
