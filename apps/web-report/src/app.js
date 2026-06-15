@@ -1525,8 +1525,7 @@ elements.runList.addEventListener("click", (event) => {
   if (deleteBtn) {
     event.stopPropagation();
     const runId = deleteBtn.getAttribute("data-run-id");
-    const confirmMsg = t("deleteRunConfirm");
-    if (!confirm(confirmMsg)) return;
+    if (!confirm(t("deleteRunConfirm"))) return;
     state.runs = state.runs.filter((r) => r.runId !== runId);
     state.markdownByRunId.delete(runId);
     if (state.selectedRunId === runId) {

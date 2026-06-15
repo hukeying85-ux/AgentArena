@@ -125,8 +125,8 @@ export function createTraceReplayModule({ escapeHtml, t }) {
       return;
     }
 
-    // Find first result with a trace path
-    const firstResult = run.results.find(r => r.tracePath);
+    // Find first result with a trace path (check both tracePath and traceFile)
+    const firstResult = run.results.find(r => r.tracePath || r.traceFile);
     if (!firstResult) {
       currentTimeline = null;
       showEmpty();

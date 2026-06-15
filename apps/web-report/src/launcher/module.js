@@ -1867,6 +1867,8 @@ export function createLauncherModule(deps) {
       state.availableProviderProfiles = result.profiles ?? state.availableProviderProfiles;
     }
 
+    // Sync DOM state before rebuilding variants to preserve user edits
+    syncLauncherStateFromDom();
     syncClaudeVariantsWithProfiles();
     state.launcherProviderEditor = null;
   }
@@ -1880,6 +1882,7 @@ export function createLauncherModule(deps) {
       throw new Error(result.error || localText("删除 Provider 配置失败。", "Failed to delete provider profile."));
     }
     state.availableProviderProfiles = result.profiles ?? [];
+    syncLauncherStateFromDom();
     syncClaudeVariantsWithProfiles();
   }
 

@@ -114,6 +114,8 @@ const en = {
   compareStatusUnknown: "Unknown",
   judgeFilterEmpty: "No judges match the current filters. Try adjusting your filter criteria.",
   shareMenuLabel: "More…",
+  shareMenuCopyLabel: "More copy…",
+  shareMenuExportLabel: "More export…",
   chartDiffPrecision: "Diff Precision",
   chartJudgePassRate: "Judge Pass Rate",
   compareSortStatus: "Status",
@@ -211,6 +213,10 @@ const en = {
   builtinRepoBadge: "Built-in",
   builtinRepoLabel: "🚀 Use built-in demo repo (no local project needed)",
   markdownNotLoaded: "Not loaded",
+  linkedToCurrentRun: "Linked to selected run",
+  standaloneMarkdown: "Standalone markdown",
+  highlights: "Highlights",
+  loadRunForHighlights: "Load a run to see summary highlights.",
   crossRunCompareTitle: "Cross-Run Compare",
   crossRunDescription:
     "Select multiple runs to compare agent performance across different model configurations.",
@@ -349,6 +355,10 @@ const en = {
   teamSizeLabel: "Team Size",
   dailyRunsLabel: "Daily Runs",
   recalculateBtn: "Recalculate",
+  costPerRun: "Cost/Run",
+  monthlyCost: "Monthly Cost",
+  vsCheapest: "vs Cheapest",
+  cheapestLabel: "Cheapest",
 
   // Launcher
   launcherRunButton: "Start Benchmark",
@@ -414,8 +424,8 @@ const en = {
   crossRunBaseAgentLabel: "Base Agent",
   crossRunBestModelLabel: "Best Model",
   crossRunBestProviderLabel: "Best Provider",
-  crossRunSelectedRuns: "Selected {count} runs, {comparableCount} meet fair comparison rules, {excludedCount} excluded due to inconsistent conditions.",
-  crossRunAllRunsMeetRules: "Comparing {count} runs; all meet fair comparison rules.",
+  crossRunSelectedRuns: (count, comparableCount, excludedCount) => `Selected ${count} runs, ${comparableCount} meet fair comparison rules, ${excludedCount} excluded due to inconsistent conditions.`,
+  crossRunAllRunsMeetRules: (count) => `Comparing ${count} runs; all meet fair comparison rules.`,
 
   // Credit items
   issueResolutionCreditLabel: "Issue Resolution Mode",
@@ -620,6 +630,8 @@ const zhCN = {
   compareStatusUnknown: "未知",
   judgeFilterEmpty: "没有匹配的 Judge，尝试调整筛选条件。",
   shareMenuLabel: "更多…",
+  shareMenuCopyLabel: "更多复制…",
+  shareMenuExportLabel: "更多导出…",
   chartDiffPrecision: "Diff 精准度",
   chartJudgePassRate: "Judge 通过率",
   compareSortStatus: "状态",
@@ -932,8 +944,8 @@ const zhCN = {
   crossRunBaseAgentLabel: "基础 Agent",
   crossRunBestModelLabel: "最佳模型",
   crossRunBestProviderLabel: "最佳 Provider",
-  crossRunSelectedRuns: "已选 {count} 个运行，其中 {comparableCount} 个进入公平对比，{excludedCount} 个因前提不一致被排除。",
-  crossRunAllRunsMeetRules: "对比 {count} 个运行，全部满足公平对比条件。",
+  crossRunSelectedRuns: (count, comparableCount, excludedCount) => `已选 ${count} 个运行，其中 ${comparableCount} 个进入公平对比，${excludedCount} 个因前提不一致被排除。`,
+  crossRunAllRunsMeetRules: (count) => `对比 ${count} 个运行，全部满足公平对比条件。`,
 
   // Dashboard - Run Info
   archivedScoreMode: "归档评分模式",
