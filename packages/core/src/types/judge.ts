@@ -118,8 +118,15 @@ export interface JsonSchemaJudge {
   weight?: number;
 }
 
-export interface PatchValidationJudge extends CommandExecutionSpec {
+export interface PatchValidationJudge {
+  id: string;
+  label: string;
   type: "patch-validation";
+  command?: string;
+  cwd?: string;
+  timeoutMs?: number;
+  envAllowList?: string[];
+  env?: Record<string, string>;
   testSuite: string;
   failToPassTests?: string[];
   passToPassTests?: string[];

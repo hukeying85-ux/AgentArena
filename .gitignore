@@ -69,3 +69,8 @@ e2e/
 docs/architecture-audit-*
 docs/session-status-*
 scripts/architecture-audit*
+
+# Temp files
+stderr.txt
+test-output*.txt
+test-ux-*.png

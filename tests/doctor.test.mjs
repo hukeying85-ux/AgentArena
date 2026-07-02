@@ -129,6 +129,35 @@ describe("doctor", () => {
       }
     });
 
+    it("restores the preflight timeout environment after a custom probe timeout", async () => {
+      const originalExitCode = process.exitCode;
+      const originalLog = console.log;
+      const originalTimeout = process.env.AGENTARENA_PREFLIGHT_TIMEOUT_MS;
+      const logs = [];
+      console.log = (...args) => logs.push(args.join(" "));
+      process.env.AGENTARENA_PREFLIGHT_TIMEOUT_MS = "12345";
+
+      try {
+        await runDoctor({
+          agentIds: ["demo-fast"],
+          format: "json",
+          probeAuth: false,
+          probeTimeout: 6000,
+          strict: false,
+        });
+
+        assert.equal(process.env.AGENTARENA_PREFLIGHT_TIMEOUT_MS, "12345");
+      } finally {
+        console.log = originalLog;
+        process.exitCode = originalExitCode;
+        if (originalTimeout === undefined) {
+          delete process.env.AGENTARENA_PREFLIGHT_TIMEOUT_MS;
+        } else {
+          process.env.AGENTARENA_PREFLIGHT_TIMEOUT_MS = originalTimeout;
+        }
+      }
+    });
+
     it("handles human-readable format output", async () => {
       const originalExitCode = process.exitCode;
       const originalLog = console.log;

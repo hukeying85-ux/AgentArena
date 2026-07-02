@@ -356,7 +356,8 @@ const {
   defaultGeminiVariant,
   defaultAiderVariant,
   defaultKiloVariant,
-  defaultOpencodeVariant
+  defaultOpencodeVariant,
+  debouncedRefreshTaskPacks
 } = createLauncherModule({
   state,
   elements,
@@ -475,12 +476,9 @@ function renderStaticText() {
   setText("app-description", t("appDescription"));
   setText("skip-link", t("skipToContent"));
   setText("update-banner-text", t("updateAvailable"));
-  setText("language-label", t("languageLabel"));
-  if (elements.languageSelect.options[0]) {
-    elements.languageSelect.options[0].text = t("languageEnglishLabel");
-  }
-  if (elements.languageSelect.options[1]) {
-    elements.languageSelect.options[1].text = t("languageChineseLabel");
+  for (const opt of elements.languageSelect.options) {
+    if (opt.value === "en") opt.text = t("languageEnglishLabel");
+    if (opt.value === "zh-CN") opt.text = t("languageChineseLabel");
   }
   setText("runs-folder-title", t("runsFolderTitle"));
   setText("runs-folder-hint", t("runsFolderHint"));
@@ -649,12 +647,11 @@ function renderStaticText() {
   if (elements.sidebarToggle) {
     elements.sidebarToggle.setAttribute("aria-label", t("toggleSidebar"));
   }
-  if (elements.themeToggle) {
-    elements.themeToggle.setAttribute("aria-label", t("toggleTheme"));
-  }
-  if (elements.themeLabel) {
+  if (elements.themeSelect) {
     const currentTheme = document.documentElement.getAttribute("data-theme");
-    elements.themeLabel.textContent = currentTheme === "dark" ? t("themeLabelLight") : t("themeLabelDark");
+    elements.themeSelect.value = currentTheme;
+    elements.themeSelect.options[0].text = `🌙 ${t("themeLabelDark")}`;
+    elements.themeSelect.options[1].text = `☀️ ${t("themeLabelLight")}`;
   }
   elements.judgeSearch.placeholder = t("judgeSearchPlaceholder");
   elements.languageSelect.value = state.language;
@@ -1052,7 +1049,10 @@ elements.launcherTaskSelect.addEventListener("change", (event) => {
   saveLauncherConfig();
   renderLauncher();
 });
-elements.launcherRepoPath.addEventListener("input", () => saveLauncherConfig());
+elements.launcherRepoPath.addEventListener("input", () => {
+  saveLauncherConfig();
+  debouncedRefreshTaskPacks();
+});
 elements.launcherTaskPath.addEventListener("input", () => saveLauncherConfig());
 elements.launcherOutputPath.addEventListener("input", () => saveLauncherConfig());
 

@@ -1,43 +1,75 @@
 schemaVersion: agentarena.taskpack/v1
 id: api-documentation
 title: API Documentation
-description: Add or improve API documentation with OpenAPI/Swagger.
+description: Write documentation for an API module.
 metadata:
-  i18n:
-    zh-CN:
-      title: "API 文档"
-      description: "使用 OpenAPI/Swagger 添加或改进 API 文档"
   source: official
   owner: AgentArena
   difficulty: easy
-  objective: Document API endpoints with request/response schemas and examples
-  judgeRationale: File existence and content checks verify documentation was created
-  repoTypes: ["node-js", "python", "go", "java"]
-  tags: ["documentation", "api", "openapi", "swagger"]
+  objective: Create comprehensive API documentation.
+  judgeRationale: Behavioral tests verify documentation covers all endpoints with examples.
+  repoTypes: ["node"]
+  tags: ["documentation", "api"]
   dependencies: []
+  differentiator: Good agents create structured docs; weak agents write one sentence.
+  i18n:
+    zh-CN:
+      title: API 文档
+      description: 为 API 模块编写文档。
+      objective: 创建全面的 API 文档。
+      judgeRationale: 行为测试验证文档覆盖所有端点并包含示例。
+
+repoSource: "builtin://nodejs-app"
+
 prompt: |
-  Add or improve API documentation for this project.
+  ## Task | 任务
 
-  Requirements:
-  1. Create or update an OpenAPI/Swagger specification
-  2. Document all API endpoints with their methods, paths, and descriptions
-  3. Include request and response schemas with examples
-  4. Document error responses and status codes
-  5. Keep the documentation in sync with the actual API
+  Create API documentation for `src/api.js`. The file has 6 endpoints:
+  - listUsers, getUser, createUser, updateUser, deleteUser, healthCheck
 
-  Check if there's existing API documentation and update it, or create new documentation.
+  Create `docs/api.md` that documents ALL 6 endpoints:
+  1. `listUsers` — GET /api/users — List all users
+  2. `getUser` — GET /api/users/:id — Get user by ID
+  3. `createUser` — POST /api/users — Create a new user
+  4. `updateUser` — PUT /api/users/:id — Update user
+  5. `deleteUser` — DELETE /api/users/:id — Delete user
+  6. `healthCheck` — GET /api/health — Health check
+
+  For EACH endpoint, include:
+  - HTTP method and path
+  - Description
+  - Example JSON response
+
+  The file MUST contain the names of all 6 functions: listUsers, getUser, createUser, updateUser, deleteUser, healthCheck
+
+  ## Constraints | 约束
+
+  - Do NOT modify src/api.js
+  - Documentation must be in Markdown format
+  - Each endpoint must have an example response
+
+expectedChangedPaths:
+  - docs/api.md
+
 envAllowList: []
 setupCommands: []
+teardownCommands: []
 judges:
   - id: docs-exist
     type: file-exists
-    label: API documentation file exists
+    label: Documentation file exists
     path: docs/api.md
-  - id: docs-have-content
-    type: file-contains
-    label: Documentation has endpoint descriptions
-    path: docs/api.md
-    pattern: "endpoint|route|api"
-    regex: true
-    flags: "i"
-teardownCommands: []
+    critical: true
+  - id: covers-endpoints
+    type: command
+    label: Documentation covers all 6 endpoints
+    command: |
+      node -e "var c=require('node:fs').readFileSync('docs/api.md','utf8');var endpoints=['listUsers','getUser','createUser','updateUser','deleteUser','healthCheck'];var missing=endpoints.filter(function(e){return c.indexOf(e)===-1});if(missing.length>0){console.error('Missing: '+missing.join(', '));process.exit(1)}console.log('PASS: all endpoints documented');"
+    timeoutMs: 10000
+    critical: true
+  - id: has-examples
+    type: command
+    label: Documentation has JSON examples
+    command: |
+      node -e "var c=require('node:fs').readFileSync('docs/api.md','utf8');if(c.indexOf('{')===-1){console.error('No JSON examples');process.exit(1)}console.log('PASS: has examples');"
+    timeoutMs: 10000

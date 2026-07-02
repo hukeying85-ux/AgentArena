@@ -1,4 +1,4 @@
-import type {
+﻿import type {
   CommandJudge,
   CompilationJudge,
   DirectoryExistsJudge,
@@ -167,17 +167,25 @@ export const JUDGE_NORMALIZERS: Record<string, JudgeNormalizer> = {
     };
   },
 
-  "patch-validation": (value, index, id, label, critical): PatchValidationJudge => ({
-    id, label, type: "patch-validation", critical,
-    testSuite: assertString(value.testSuite, `judges[${index}].testSuite`),
-    failToPassTests: assertStringArray(value.failToPassTests, `judges[${index}].failToPassTests`),
-    passToPassTests: assertStringArray(value.passToPassTests, `judges[${index}].passToPassTests`),
-    command: assertOptionalString(value.command, `judges[${index}].command`) ?? "",
-    cwd: assertOptionalString(value.cwd, `judges[${index}].cwd`),
-    timeoutMs: assertOptionalPositiveInteger(value.timeoutMs, `judges[${index}].timeoutMs`),
-    envAllowList: assertStringArray(value.envAllowList, `judges[${index}].envAllowList`),
-    env: assertStringRecord(value.env, `judges[${index}].env`)
-  }),
+  "patch-validation": (value, index, id, label, critical): PatchValidationJudge => {
+    // command is optional for patch-validation — the runner uses testSuite as the command.
+    const command = assertOptionalString(value.command, `judges[${index}].command`);
+    const cwd = assertOptionalString(value.cwd, `judges[${index}].cwd`);
+    const timeoutMs = assertOptionalPositiveInteger(value.timeoutMs, `judges[${index}].timeoutMs`);
+    const envAllowList = assertStringArray(value.envAllowList, `judges[${index}].envAllowList`);
+    const env = assertStringRecord(value.env, `judges[${index}].env`);
+    return {
+      id, label, type: "patch-validation", critical,
+      ...(command ? { command } : {}),
+      ...(cwd ? { cwd } : {}),
+      ...(timeoutMs ? { timeoutMs } : {}),
+      ...(envAllowList.length > 0 ? { envAllowList } : {}),
+      ...(env ? { env } : {}),
+      testSuite: assertString(value.testSuite, `judges[${index}].testSuite`),
+      failToPassTests: assertStringArray(value.failToPassTests, `judges[${index}].failToPassTests`),
+      passToPassTests: assertStringArray(value.passToPassTests, `judges[${index}].passToPassTests`),
+    };
+  },
 
   "token-efficiency": (value, index, id, label, critical): TokenEfficiencyJudge => ({
     id, label, type: "token-efficiency", critical,
@@ -216,12 +224,14 @@ export const JUDGE_NORMALIZERS: Record<string, JudgeNormalizer> = {
         `Valid options: ${validTools.join(", ")}.`
       );
     }
+    const buildArgs = assertStringArray(value.buildArgs, `judges[${index}].buildArgs`);
+    // command is optional for compilation judges — the runner auto-detects
+    // the build tool when no explicit command is provided.
     const command = assertOptionalString(value.command, `judges[${index}].command`);
     const cwd = assertOptionalString(value.cwd, `judges[${index}].cwd`);
     const timeoutMs = assertOptionalPositiveInteger(value.timeoutMs, `judges[${index}].timeoutMs`);
     const envAllowList = assertStringArray(value.envAllowList, `judges[${index}].envAllowList`);
     const env = assertStringRecord(value.env, `judges[${index}].env`);
-    const buildArgs = assertStringArray(value.buildArgs, `judges[${index}].buildArgs`);
     return {
       id, label, type: "compilation", critical,
       ...(command ? { command } : {}),

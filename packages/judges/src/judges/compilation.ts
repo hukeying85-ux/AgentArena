@@ -102,9 +102,9 @@ export async function runCompilationJudge(
   if (judge.command) {
     const [parsedCmd, parsedArgs] = parseCommand(command);
     const allArgs = [...parsedArgs, ...args];
-    result = await executeCommand(parsedCmd, cwd, environment, timeoutMs, "Compilation", options.signal, allArgs);
+    result = await executeCommand(parsedCmd, cwd, environment, timeoutMs, "Compilation", options.signal, allArgs, { allowEval: true });
   } else {
-    result = await executeCommand(command, cwd, environment, timeoutMs, "Compilation", options.signal, args);
+    result = await executeCommand(command, cwd, environment, timeoutMs, "Compilation", options.signal, args, { allowEval: true });
   }
 
   const successHint = result.exitCode === 0 ? "Compilation succeeded." : `Compilation failed with exit code ${result.exitCode}.`;

@@ -37,7 +37,7 @@
     "lint": "biome check .",
     "test": "pnpm build && node --test --test-concurrency=1 tests/*.test.mjs",
     "test:coverage": "pnpm build && node --experimental-test-coverage --test tests/*.test.mjs",
-    "test:web-report:e2e": "pnpm build && node --test tests/web-report.e2e.mjs",
+    "test:web-report:e2e": "pnpm build && node scripts/run-web-report-e2e.mjs",
     "typecheck": "pnpm -r --if-present typecheck"
   },
   "devDependencies": {

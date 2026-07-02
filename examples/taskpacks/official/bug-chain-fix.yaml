@@ -1,0 +1,88 @@
+schemaVersion: agentarena.taskpack/v1
+id: bug-chain-fix
+title: Bug Chain Fix
+description: Fix 3 related bugs across 3 files where each fix depends on the others.
+metadata:
+  source: official
+  owner: AgentArena
+  difficulty: hard
+  objective: Test ability to fix coordinated bugs that require understanding the full codebase.
+  judgeRationale: Behavioral tests verify all 3 bugs are fixed and tests pass.
+  repoTypes: ["node"]
+  tags: ["bugfix", "multi-file", "debugging"]
+  dependencies: []
+  differentiator: Tests deep understanding — weak agents fix one bug but miss the others.
+
+repoSource: "builtin://nodejs-app"
+
+prompt: |
+  ## Task | 任务
+
+  There are 3 bugs across 3 files. Fix ALL of them:
+
+  **Bug 1** in `src/calculator.js`:
+  - `subtract(a, b)` returns `a + b` instead of `a - b`
+  - Fix: change `a + b` to `a - b`
+
+  **Bug 2** in `src/calculator.js`:
+  - `divide(a, b)` returns `0` when dividing by zero instead of throwing an error
+  - Fix: throw an `Error` with message "Division by zero" when `b === 0`
+
+  **Bug 3** in `src/cache.js`:
+  - The TTL check uses `>` instead of `>=`, so entries expiring at exactly the TTL boundary are not cleaned up
+  - Fix: change `>` to `>=` in the TTL check
+
+  After fixing all 3 bugs, run `node --test test/*.test.js` to verify ALL tests pass.
+  If any test fails, read the error message, fix the issue, and run tests again.
+
+  IMPORTANT: Only change the specific lines mentioned above. Don't refactor or rewrite entire functions.
+
+  ## Constraints | 约束
+
+  - Only modify `src/calculator.js` and `src/cache.js`
+  - Only change the specific buggy lines — don't rewrite entire functions
+  - Do NOT modify test files
+  - Do NOT add new dependencies
+  - All 3 bugs must be fixed (partial fixes will fail)
+
+expectedChangedPaths:
+  - src/calculator.js
+  - src/cache.js
+
+envAllowList: []
+setupCommands: []
+teardownCommands: []
+judges:
+  - id: subtract-fixed
+    type: command
+    label: subtract returns correct result
+    command: |
+      node -e "var c=require('./src/calculator');var a=require('node:assert/strict');a.strictEqual(c.subtract(5,3),2);a.strictEqual(c.subtract(10,10),0);a.strictEqual(c.subtract(-1,-2),1);console.log('PASS: subtract fixed');"
+    timeoutMs: 10000
+    critical: true
+  - id: divide-throws
+    type: command
+    label: divide throws on division by zero
+    command: |
+      node -e "var c=require('./src/calculator');var a=require('node:assert/strict');a.throws(function(){c.divide(5,0)},function(e){return e.message.includes('Division by zero')});a.strictEqual(c.divide(10,2),5);console.log('PASS: divide throws');"
+    timeoutMs: 10000
+    critical: true
+  - id: cache-ttl-fixed
+    type: command
+    label: Cache TTL check uses >=
+    command: |
+      node -e "var c=require('node:fs').readFileSync('src/cache.js','utf8');if(c.indexOf('>=')===-1){console.error('No >= found in cache.js');process.exit(1)}console.log('PASS: cache TTL uses >=');"
+    timeoutMs: 10000
+    critical: true
+  - id: calculator-tests-pass
+    type: command
+    label: Calculator tests pass
+    command: node --test test/calculator.test.js
+    timeoutMs: 30000
+    critical: true
+  - id: cache-tests-pass
+    type: command
+    label: Cache tests pass
+    command: node --test test/cache.test.js
+    timeoutMs: 30000
+    critical: true

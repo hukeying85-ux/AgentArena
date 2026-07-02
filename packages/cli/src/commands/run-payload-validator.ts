@@ -9,6 +9,13 @@
 import path from "node:path";
 import type { UiRunPayload } from "./shared.js";
 
+function isPathInsideSync(basePath: string, targetPath: string): boolean {
+  const resolvedBase = path.resolve(basePath);
+  const resolvedTarget = path.resolve(targetPath);
+  const relativePath = path.relative(resolvedBase, resolvedTarget);
+  return !relativePath.startsWith("..") && !path.isAbsolute(relativePath);
+}
+
 /**
  * Validate a run payload from the UI.
  * Returns null when valid, or an actionable error message string when invalid.
@@ -24,14 +31,10 @@ export function validateRunPayload(runPayload: UiRunPayload, cwd: string = proce
   if (!runPayload.taskPath || typeof runPayload.taskPath !== "string") {
     return "taskPath is required and must be a string.";
   }
-  // Path containment checks (defense against path traversal — must resolve, not
-  // string-prefix-match the raw input).
-  const resolvedRepoPath = path.resolve(runPayload.repoPath);
-  const resolvedTaskPath = path.resolve(runPayload.taskPath);
-  if (!resolvedRepoPath.startsWith(cwd + path.sep) && resolvedRepoPath !== cwd) {
+  if (!isPathInsideSync(cwd, runPayload.repoPath)) {
     return "repoPath must be within the current working directory.";
   }
-  if (!resolvedTaskPath.startsWith(cwd + path.sep) && resolvedTaskPath !== cwd) {
+  if (!isPathInsideSync(cwd, runPayload.taskPath)) {
     return "taskPath must be within the current working directory.";
   }
   if (runPayload.maxConcurrency !== undefined) {

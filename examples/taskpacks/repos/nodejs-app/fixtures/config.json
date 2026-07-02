@@ -1,0 +1,6 @@
+{
+  "mode": "production",
+  "version": "1.2.3",
+  "server": { "port": "3000", "host": "localhost" },
+  "database": { "url": "postgres://localhost/mydb", "poolSize": -5 }
+}

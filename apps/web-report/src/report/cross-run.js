@@ -115,15 +115,15 @@ export function createCrossRunRenders({
     <table class="compare-table">
       <thead>
         <tr>
-          <th>${escapeHtml(t("crossRunVariantLabel"))}</th>
-          <th>${escapeHtml(t("crossRunBaseAgentLabel"))}</th>
-          <th>${escapeHtml(t("crossRunRuns"))}</th>
-          <th>${escapeHtml(t("crossRunSuccessRate"))}</th>
-          <th>${escapeHtml(t("crossRunAvgDuration"))}</th>
-          <th>${escapeHtml(t("crossRunAvgTokens"))}</th>
-          <th>${escapeHtml(t("crossRunAvgCost"))}</th>
-          <th>${escapeHtml(t("crossRunBestModelLabel"))}</th>
-          <th>${escapeHtml(t("crossRunBestProviderLabel"))}</th>
+          <th scope="col">${escapeHtml(t("crossRunVariantLabel"))}</th>
+          <th scope="col">${escapeHtml(t("crossRunBaseAgentLabel"))}</th>
+          <th scope="col">${escapeHtml(t("crossRunRuns"))}</th>
+          <th scope="col">${escapeHtml(t("crossRunSuccessRate"))}</th>
+          <th scope="col">${escapeHtml(t("crossRunAvgDuration"))}</th>
+          <th scope="col">${escapeHtml(t("crossRunAvgTokens"))}</th>
+          <th scope="col">${escapeHtml(t("crossRunAvgCost"))}</th>
+          <th scope="col">${escapeHtml(t("crossRunBestModelLabel"))}</th>
+          <th scope="col">${escapeHtml(t("crossRunBestProviderLabel"))}</th>
         </tr>
       </thead>
       <tbody>

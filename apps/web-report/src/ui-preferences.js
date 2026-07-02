@@ -4,7 +4,7 @@ import { state } from "./app-state.js";
 import { readStorage, writeStorage } from "./result-cache.js";
 
 /**
- * Set up language-select change handler and theme-toggle click handler,
+ * Set up language-select and theme-select change handlers,
  * and apply the persisted theme on load.
  *
  * @param {object} deps
@@ -22,17 +22,15 @@ export function initUiPreferences({ render, renderStaticText, t }) {
     render();
   });
 
-  // Theme toggle — apply persisted theme then wire the button
+  // Theme select — apply persisted theme then wire the select
   const savedTheme = readStorage("theme") || "dark";
   document.documentElement.setAttribute("data-theme", savedTheme);
-  if (elements.themeLabel) {
-    elements.themeLabel.textContent =
-      savedTheme === "dark" ? t("themeLabelLight") : t("themeLabelDark");
+  if (elements.themeSelect) {
+    elements.themeSelect.value = savedTheme;
   }
 
-  elements.themeToggle?.addEventListener("click", () => {
-    const current = document.documentElement.getAttribute("data-theme");
-    const next = current === "dark" ? "light" : "dark";
+  elements.themeSelect?.addEventListener("change", (event) => {
+    const next = String(event.target.value ?? "dark");
     document.documentElement.setAttribute("data-theme", next);
     writeStorage("theme", next);
     renderStaticText();

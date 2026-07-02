@@ -1,5 +1,7 @@
 import { execFile, execFileSync, spawn } from "node:child_process";
 import { access, constants as fsConstants } from "node:fs";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { BenchmarkCancelledError, MAX_PROCESS_OUTPUT_BYTES, pathExists, resolveTimeoutMs } from "@agentarena/core";
@@ -28,6 +30,15 @@ interface ProcessSpawnSpec {
   command: string;
   args: string[];
   windowsVerbatimArguments?: boolean;
+}
+
+function isWindowsClaudeInvocation(command: string, args: string[]): boolean {
+  if (process.platform !== "win32") return false;
+  const commandName = path.basename(command).toLowerCase();
+  if (commandName !== "claude.cmd" && commandName !== "claude.exe" && commandName !== "claude") {
+    return false;
+  }
+  return args.includes("-p") || args.includes("--print");
 }
 
 /**
@@ -73,12 +84,14 @@ export function preflightTimeoutMs(): number {
 }
 
 /**
- * Default transport timeout: 120 seconds.
+ * Default transport timeout: 5 minutes.
  *
- * Third-party providers may have high latency. 120s provides generous headroom.
+ * Real coding agents can spend several minutes reading, editing, and verifying
+ * even tiny tasks on cold starts. Keep this below the per-agent timeout, but
+ * long enough that successful work is not mislabeled as a transport failure.
  * Overridable via AGENTARENA_TRANSPORT_TIMEOUT_MS env var.
  */
-const DEFAULT_TRANSPORT_TIMEOUT_MS = 120_000;
+const DEFAULT_TRANSPORT_TIMEOUT_MS = 10 * 60_000;
 
 export function transportTimeoutMs(): number {
   return resolveTimeoutMs(process.env.AGENTARENA_TRANSPORT_TIMEOUT_MS, DEFAULT_TRANSPORT_TIMEOUT_MS);
@@ -90,6 +103,81 @@ export function formatTimeoutMessage(timeoutMs: number): string {
 
 export function safeNumber(value: number | undefined): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+/**
+ * Cached Windows console code page (e.g., "936" for GBK on Chinese Windows).
+ * Retrieved lazily via `chcp` command. Undefined on non-Windows platforms.
+ */
+let cachedWindowsCodePage: string | undefined | null = null;
+
+/**
+ * Get the active Windows console code page (e.g., "936" for GBK, "437" for US).
+ * Returns undefined on non-Windows or if the `chcp` command fails.
+ */
+function getWindowsCodePage(): string | undefined {
+  if (process.platform !== "win32") return undefined;
+  if (cachedWindowsCodePage === null) {
+    try {
+      const output = execFileSync("chcp", [], { encoding: "utf8", windowsHide: true, timeout: 3000 });
+      const match = output.match(/(\d+)/);
+      cachedWindowsCodePage = match ? match[1] : undefined;
+    } catch {
+      cachedWindowsCodePage = undefined;
+    }
+  }
+  return cachedWindowsCodePage ?? undefined;
+}
+
+/**
+ * Map Windows code page numbers to Node.js TextDecoder-compatible labels.
+ * Only includes the most common East Asian code pages that cause garbled output.
+ */
+function codePageToLabel(cp: string): string | undefined {
+  const map: Record<string, string> = {
+    "936": "gbk",      // Simplified Chinese
+    "950": "big5",     // Traditional Chinese
+    "932": "shift-jis", // Japanese
+    "949": "euc-kr",   // Korean
+    "1252": "windows-1252", // Western European
+    "1250": "windows-1250", // Central European
+    "1251": "windows-1251", // Cyrillic
+  };
+  return map[cp];
+}
+
+/**
+ * Decode a process output buffer to string.
+ *
+ * On Windows, subprocess output may be in the system's ANSI code page
+ * (e.g., GBK on Chinese Windows) rather than UTF-8. We try UTF-8 first;
+ * if the result contains U+FFFD replacement characters (indicating invalid
+ * UTF-8 sequences), we retry with the system's console code page.
+ */
+function decodeProcessOutput(buffer: Buffer): string {
+  const utf8 = buffer.toString("utf8");
+  if (process.platform !== "win32") return utf8;
+
+  // Check for replacement characters that indicate UTF-8 decode failures
+  if (!utf8.includes("\uFFFD")) return utf8;
+
+  // Try the system's console code page as a fallback
+  const cp = getWindowsCodePage();
+  if (!cp) return utf8;
+
+  const label = codePageToLabel(cp);
+  if (!label) return utf8;
+
+  try {
+    const decoder = new TextDecoder(label, { fatal: false });
+    const decoded = decoder.decode(buffer);
+    // Only use the fallback if it doesn't contain replacement characters
+    if (!decoded.includes("\uFFFD")) return decoded;
+  } catch {
+    // TextDecoder doesn't support this label — fall through
+  }
+
+  return utf8;
 }
 
 const WINDOWS_BATCH_COMMAND = /\.(?:cmd|bat)$/i;
@@ -114,6 +202,112 @@ function resolveProcessSpawnSpec(command: string, args: string[]): ProcessSpawnS
   }
 
   return { command, args };
+}
+
+function quotePowerShellSingle(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+function buildPowerShellArray(values: string[]): string {
+  if (values.length === 0) return "@()";
+  return `@(${values.map(quotePowerShellSingle).join(", ")})`;
+}
+
+function uniqueLines(lines: string[]): string[] {
+  return Array.from(new Set(lines.filter(Boolean)));
+}
+
+function processExists(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== "ESRCH";
+  }
+}
+
+async function runWindowsClaudeDetached(
+  command: string,
+  args: string[],
+  cwd: string,
+  timeoutMs: number,
+  environment?: NodeJS.ProcessEnv,
+  stdinInput?: string
+): Promise<ProcessResult> {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-claude-run-"));
+  const scriptPath = path.join(tempDir, "run.ps1");
+  const stdoutPath = path.join(tempDir, "stdout.txt");
+  const stderrPath = path.join(tempDir, "stderr.txt");
+  const stdinPath = path.join(tempDir, "stdin.txt");
+  const exitPath = path.join(tempDir, "exit.txt");
+
+  try {
+    if (stdinInput !== undefined) {
+      await writeFile(stdinPath, stdinInput, "utf8");
+    } else {
+      await writeFile(stdinPath, "", "utf8");
+    }
+
+    const envAssignments = Object.entries(environment ?? {})
+      .filter((entry): entry is [string, string] => typeof entry[1] === "string")
+      .map(([key, value]) => `Set-Item -LiteralPath ${quotePowerShellSingle(`Env:${key}`)} -Value ${quotePowerShellSingle(value)}`)
+      .join("\n");
+    const redirectInput = stdinInput !== undefined ? ` -RedirectStandardInput ${quotePowerShellSingle(stdinPath)}` : "";
+    const script = [
+      "$ErrorActionPreference = 'Stop'",
+      envAssignments,
+      `$timeoutMs = ${Math.max(1, Math.floor(timeoutMs))}`,
+      "function Stop-ProcessTree([int]$ProcessId) {",
+      "  try {",
+      "    Get-CimInstance Win32_Process -Filter \"ParentProcessId = $ProcessId\" | ForEach-Object { Stop-ProcessTree ([int]$_.ProcessId) }",
+      "  } catch {}",
+      "  try { Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue } catch {}",
+      "}",
+      `$p = Start-Process -FilePath ${quotePowerShellSingle(command)} -ArgumentList ${buildPowerShellArray(args)} -WorkingDirectory ${quotePowerShellSingle(cwd)} -WindowStyle Hidden${redirectInput} -RedirectStandardOutput ${quotePowerShellSingle(stdoutPath)} -RedirectStandardError ${quotePowerShellSingle(stderrPath)} -PassThru`,
+      "if (-not $p.WaitForExit($timeoutMs)) {",
+      "  Stop-ProcessTree ([int]$p.Id)",
+      "  'TIMEOUT' | Set-Content -Encoding UTF8 " + quotePowerShellSingle(exitPath),
+      "  exit 124",
+      "}",
+      `$p.ExitCode | Set-Content -Encoding UTF8 ${quotePowerShellSingle(exitPath)}`,
+      "exit $p.ExitCode"
+    ].filter(Boolean).join("\n");
+
+    await writeFile(scriptPath, script, "utf8");
+
+    const wrapperResult = await runProcess(
+      "powershell.exe",
+      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath],
+      cwd,
+      timeoutMs + 30_000,
+      process.env
+    );
+
+    const [stdoutBuf, stderrBuf, exitText] = await Promise.all([
+      readFile(stdoutPath).catch(() => Buffer.alloc(0)),
+      readFile(stderrPath).catch(() => Buffer.alloc(0)),
+      readFile(exitPath, "utf8").catch(() => "")
+    ]);
+    const stdout = decodeProcessOutput(stdoutBuf);
+    const stderr = decodeProcessOutput(stderrBuf);
+    const timedOut = wrapperResult.timedOut || exitText.trim() === "TIMEOUT" || wrapperResult.exitCode === 124;
+    const exitCode = Number.parseInt(exitText.trim(), 10);
+
+    return {
+      exitCode: Number.isInteger(exitCode) ? exitCode : wrapperResult.exitCode,
+      stdout,
+      stderr: uniqueLines([
+        stderr.trim(),
+        wrapperResult.stderr.trim(),
+        timedOut ? formatTimeoutMessage(timeoutMs) : ""
+      ]).join("\n"),
+      timedOut,
+      signal: wrapperResult.signal,
+      error: wrapperResult.error
+    };
+  } finally {
+    await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+  }
 }
 
 export async function sleep(durationMs: number, signal?: AbortSignal): Promise<void> {
@@ -197,6 +391,10 @@ export async function runProcess(
   signal?: AbortSignal,
   stdinInput?: string
 ): Promise<ProcessResult> {
+  if (!signal && stdinInput !== undefined && isWindowsClaudeInvocation(command, args)) {
+    return await runWindowsClaudeDetached(command, args, cwd, timeoutMs, environment, stdinInput);
+  }
+
   return await new Promise((resolve) => {
     let child: ReturnType<typeof spawn> | null = null;
     // Accumulate chunks as Buffers and concat once at finish.
@@ -226,8 +424,8 @@ export async function runProcess(
     const truncateMarker = (label: "stdout" | "stderr") =>
       Buffer.from(`\n[${label} truncated at ${MAX_PROCESS_OUTPUT_BYTES} bytes]`);
 
-    const buildStdout = (): string => Buffer.concat(stdoutChunks).toString("utf8");
-    const buildStderr = (): string => Buffer.concat(stderrChunks).toString("utf8");
+    const buildStdout = (): string => decodeProcessOutput(Buffer.concat(stdoutChunks));
+    const buildStderr = (): string => decodeProcessOutput(Buffer.concat(stderrChunks));
 
     const finish = (result: ProcessResult) => {
       if (resolved) return;
@@ -268,6 +466,7 @@ export async function runProcess(
             if (pid === undefined) return;
             execFile("taskkill", ["/F", "/T", "/PID", String(pid)], { windowsHide: true }, (err) => {
               if (err) {
+                if (!processExists(pid)) return;
                 adapterWarn("taskkill failed, falling back to child.kill", { pid, error: err instanceof Error ? err.message : String(err) });
                 if (child && !child.killed) child.kill("SIGTERM");
               }

@@ -1,63 +1,78 @@
 schemaVersion: agentarena.taskpack/v1
 id: official-json-contract-repair
-title: Official JSON Contract Repair
-description: Repairs a JSON API contract using schema and value assertions.
+title: JSON Contract Repair
+description: Fix a JSON response to match its contract.
 metadata:
   source: official
   owner: AgentArena
-  difficulty: medium
-  objective: Validate an agent's ability to repair structured JSON output under explicit contract checks.
-  repoTypes:
-    - api
-    - backend
-    - node
-  tags:
-    - json
-    - api
-    - contract
+  difficulty: easy
+  objective: Fix type errors, wrong values, and extra fields in a JSON response.
+  judgeRationale: Behavioral tests verify JSON matches schema and has correct values.
+  repoTypes: ["node"]
+  tags: ["json", "api", "contract"]
   dependencies: []
-  judgeRationale: Combined schema and pointer checks capture both payload shape and business-critical values.
-  differentiator: Tests API contract understanding - weak agents may satisfy schema but miss business rules.
+  differentiator: Tests attention to detail — weak agents miss type mismatches.
   i18n:
     zh-CN:
       title: JSON 契约修复
-      description: 使用 schema 和值断言修复 JSON API 契约。
-      objective: 验证 Agent 在显式契约检查下修复结构化 JSON 输出的能力。
-      judgeRationale: 组合 schema 和指针检查同时捕获载荷结构和业务关键值。
-      differentiator: 测试 API 契约理解——弱 Agent 可能满足 schema 但遗漏业务规则。
+      description: 修复 JSON 响应以匹配其契约。
+      objective: 修复 JSON 响应中的类型错误、错误值和多余字段。
+      judgeRationale: 行为测试验证 JSON 匹配 schema 且具有正确的值。
+
 prompt: |
   ## Task | 任务
-  
-  The API response in `fixtures/response.json` violates its contract. Fix it:
-  
-  1. Read the schema at `fixtures/response.schema.json`
-  2. Read the expected values specification
-  3. Modify `fixtures/response.json` to satisfy BOTH:
-     - The JSON schema (structure)
-     - The expected values (business rules)
-  
-  ## Contract Requirements | 契约要求
-  
-  The response must:
-  - Match the JSON schema exactly
-  - Have `status` field set to "ready"
-  - Preserve all valid existing data
-  - Not contain extra undocumented fields
-  
-  ## Context | 上下文
-  
-  This is an API response that clients depend on. Breaking the contract will cause integration failures.
+
+  The API response in `fixtures/response.json` has contract violations. Fix ALL of them:
+
+  1. `status` is "pending" but must be "ready"
+  2. `data.items[1].value` is the string "wrong" but must be a number (change to 0)
+  3. `extraJunk` field is not in the schema — remove it
+
+  Read `fixtures/response.schema.json` to understand the required structure.
+
+  ## Constraints | 约束
+
+  - Only modify `fixtures/response.json`
+  - Do NOT modify the schema file
+  - Keep all valid data (id, name, items[0], version)
+
 expectedChangedPaths:
   - fixtures/response.json
+
+envAllowList: []
+setupCommands:
+  - id: create-fixtures
+    label: Create JSON contract fixtures
+    command: |
+      node -e "var f=require('node:fs');f.mkdirSync('fixtures',{recursive:true});var schema={type:'object',required:['status','data','version'],properties:{status:{type:'string',enum:['ready','pending','error']},data:{type:'object',required:['id','name','items'],properties:{id:{type:'number'},name:{type:'string'},items:{type:'array',items:{type:'object',required:['label','value'],properties:{label:{type:'string'},value:{type:'number'}}}}}},version:{type:'string'}},additionalProperties:false};var response={status:'pending',data:{id:42,name:'Test Widget',items:[{label:'alpha',value:1},{label:'beta',value:'wrong'}]},version:'1.0.0',extraJunk:true};f.writeFileSync('fixtures/response.schema.json',JSON.stringify(schema,null,2));f.writeFileSync('fixtures/response.json',JSON.stringify(response,null,2));console.log('Fixtures created');"
+    timeoutMs: 10000
+teardownCommands: []
 judges:
-  - id: payload-schema
-    type: json-schema
-    label: Payload matches schema
-    path: fixtures/response.json
-    schemaPath: fixtures/response.schema.json
-  - id: payload-status
-    type: json-value
-    label: Payload status stays ready
-    path: fixtures/response.json
-    pointer: /status
-    expected: ready
+  - id: json-valid
+    type: command
+    label: JSON is valid and loadable
+    command: |
+      node -e "var c=require('./fixtures/response.json');console.log('PASS: JSON valid');"
+    timeoutMs: 10000
+    critical: true
+  - id: status-ready
+    type: command
+    label: Status is "ready"
+    command: |
+      node -e "var c=require('./fixtures/response.json');var a=require('node:assert/strict');a.strictEqual(c.status,'ready');console.log('PASS: status ready');"
+    timeoutMs: 10000
+    critical: true
+  - id: no-extra-fields
+    type: command
+    label: No extra fields (extraJunk removed)
+    command: |
+      node -e "var c=require('./fixtures/response.json');if(c.extraJunk!==undefined){console.error('extraJunk still present');process.exit(1)}console.log('PASS: no extra fields');"
+    timeoutMs: 10000
+    critical: true
+  - id: items-fixed
+    type: command
+    label: items[1].value is a number
+    command: |
+      node -e "var c=require('./fixtures/response.json');var a=require('node:assert/strict');a.strictEqual(typeof c.data.items[1].value,'number');console.log('PASS: items[1].value is number');"
+    timeoutMs: 10000
+    critical: true

@@ -227,6 +227,34 @@ test("GET static file path traversal is blocked", { timeout: 60_000 }, async () 
   }
 });
 
+test("GET static file with encoded path traversal is blocked", { timeout: 60_000 }, async () => {
+  const port = BASE_PORT + 20;
+  const { child } = await startServer(port);
+  try {
+    // URL-encoded ..%2F..%2F should also be blocked
+    const res = await request(port, "GET", "/..%2f..%2f..%2fetc%2fpasswd");
+    assert.ok(res.statusCode === 403 || res.statusCode === 404, `expected 403 or 404, got ${res.statusCode}`);
+    if (typeof res.body === "string") {
+      assert.ok(!res.body.includes("root:"), "should not serve /etc/passwd content");
+    }
+  } finally {
+    child.kill("SIGTERM");
+  }
+});
+
+test("GET static file with double-encoded path traversal is blocked", { timeout: 60_000 }, async () => {
+  const port = BASE_PORT + 21;
+  const { child } = await startServer(port);
+  try {
+    // Double-encoded %252e%252e%252f — Node.js URL parser decodes once, leaving %2e%2e%2f
+    // which path.normalize then resolves to ../
+    const res = await request(port, "GET", "/%252e%252e%252f%252e%252e%252fetc%252fpasswd");
+    assert.ok(res.statusCode === 403 || res.statusCode === 404, `expected 403 or 404, got ${res.statusCode}`);
+  } finally {
+    child.kill("SIGTERM");
+  }
+});
+
 test("POST /api/run concurrent requests return 409", { timeout: 60_000 }, async () => {
   const port = BASE_PORT + 8;
   const { child, authToken } = await startServer(port);

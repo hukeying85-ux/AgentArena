@@ -8,7 +8,7 @@ description: |
 metadata:
   source: official
   owner: AgentArena
-  difficulty: easy
+  difficulty: medium
   objective: Test agent's ability to add error handling and write defensive code in a monorepo.
   repoTypes:
     - monorepo
@@ -55,6 +55,7 @@ prompt: |
   - Empty string `""` and whitespace-only strings should throw
   - Error messages must be descriptive (not just "error")
   - Existing tests must still pass
+  - IMPORTANT: When importing from other .ts files, always include the .ts extension: `import { X } from "./file.ts"` NOT `from "./file"`
   - No new dependencies allowed
 
   ## Files to modify | 需要修改的文件
@@ -69,52 +70,25 @@ expectedChangedPaths:
   - packages/cli/src/index.ts
 
 judges:
-  - id: error-class-exists
-    type: file-contains
-    label: "UserDataError class is defined"
-    path: packages/core/src/user-service.ts
-    pattern: "class UserDataError"
-
-  - id: error-extends-error
-    type: file-contains
-    label: "UserDataError extends Error"
-    path: packages/core/src/user-service.ts
-    pattern: "extends Error"
-
-  - id: error-has-userid
-    type: file-contains
-    label: "UserDataError has userId property"
-    path: packages/core/src/user-service.ts
-    pattern: "userId\\s*[:=]"
-    regex: true
-
-  - id: empty-validation
-    type: file-contains
-    label: "Empty userId is validated/rejected"
-    path: packages/core/src/user-service.ts
-    pattern: "(trim|length\\s*===?\\s*0|!\\s*userId|\\.length)"
-    regex: true
-
+  - id: error-class-behavioral
+    type: command
+    label: UserDataError class works correctly (behavioral test)
+    command: |
+      node --experimental-strip-types -e "import('./packages/core/src/user-service.ts').then(m=>{var Err=m.UserDataError;if(typeof Err!=='function')throw new Error('UserDataError not a function/class');var e=new Err('bad-id','test message');if(!(e instanceof Error))throw new Error('not instanceof Error');if(e.userId!=='bad-id')throw new Error('userId wrong: '+e.userId);if(!e.message.includes('test message'))throw new Error('message wrong');console.log('PASS: UserDataError works')}).catch(e=>{console.error(e);process.exit(1)})"
+    timeoutMs: 15000
+    critical: true
+  - id: empty-validation-behavioral
+    type: command
+    label: getUserData rejects empty userId (behavioral test)
+    command: |
+      node --experimental-strip-types -e "import('./packages/core/src/user-service.ts').then(async m=>{try{await m.getUserData('');throw new Error('FAIL: empty should throw')}catch(e){if(e.message.startsWith('FAIL'))throw e}try{await m.getUserData('  ');throw new Error('FAIL: whitespace should throw')}catch(e){if(e.message.startsWith('FAIL'))throw e}try{await m.getUserData('valid-id')}catch(e){throw new Error('FAIL: valid should not throw: '+e.message)}console.log('PASS: validation works')}).catch(e=>{console.error(e);process.exit(1)})"
+    timeoutMs: 15000
+    critical: true
   - id: runner-catches-error
     type: file-contains
     label: "Runner catches UserDataError"
     path: packages/runner/src/index.ts
     pattern: "UserDataError"
-
-  - id: cli-error-handling
-    type: file-contains
-    label: "CLI has error handling"
-    path: packages/cli/src/index.ts
-    pattern: "(catch|try|UserDataError|error)"
-    regex: true
-
-  - id: no-generic-only-catch
-    type: file-contains
-    label: "Not just generic catch (has specific error handling)"
-    path: packages/runner/src/index.ts
-    pattern: "UserDataError"
-    regex: true
-
   - id: error-exported
     type: file-contains
     label: "UserDataError is exported from core"

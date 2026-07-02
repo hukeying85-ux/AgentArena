@@ -5,6 +5,8 @@
  * so they can be tested without starting an HTTP server.
  */
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
@@ -21,6 +23,29 @@ import {
   handleTaskpacksList,
   handleUiInfo,
 } from "../packages/cli/dist/commands/api-routes.js";
+
+async function withTempProviderRegistry(fn) {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-api-providers-"));
+  const originalRoot = process.env.AGENTARENA_CLAUDE_PROFILE_ROOT;
+  const originalFile = process.env.AGENTARENA_CLAUDE_PROFILES_FILE;
+  const originalPrefix = process.env.AGENTARENA_CLAUDE_SECRET_PREFIX;
+
+  process.env.AGENTARENA_CLAUDE_PROFILE_ROOT = tempDir;
+  process.env.AGENTARENA_CLAUDE_PROFILES_FILE = path.join(tempDir, "profiles.json");
+  process.env.AGENTARENA_CLAUDE_SECRET_PREFIX = `AgentArena/test/${Date.now()}/`;
+
+  try {
+    await fn();
+  } finally {
+    if (originalRoot === undefined) delete process.env.AGENTARENA_CLAUDE_PROFILE_ROOT;
+    else process.env.AGENTARENA_CLAUDE_PROFILE_ROOT = originalRoot;
+    if (originalFile === undefined) delete process.env.AGENTARENA_CLAUDE_PROFILES_FILE;
+    else process.env.AGENTARENA_CLAUDE_PROFILES_FILE = originalFile;
+    if (originalPrefix === undefined) delete process.env.AGENTARENA_CLAUDE_SECRET_PREFIX;
+    else process.env.AGENTARENA_CLAUDE_SECRET_PREFIX = originalPrefix;
+    await rm(tempDir, { recursive: true, force: true });
+  }
+}
 
 // ─── handlePreflight tests ───
 
@@ -153,6 +178,52 @@ test("handleProviderProfileCreate: returns 400 for missing apiFormat", async () 
   assert.equal(res.statusCode, 400);
   const body = JSON.parse(res.body);
   assert.ok(body.error.includes("apiFormat"));
+});
+
+test("provider profile write responses mask extraEnv values", async () => {
+  await withTempProviderRegistry(async () => {
+    const createPayload = {
+      id: "masked-profile",
+      name: "Masked Provider",
+      kind: "anthropic-compatible",
+      baseUrl: "https://api.example.com",
+      apiFormat: "anthropic-messages",
+      primaryModel: "claude-test",
+      extraEnv: {
+        API_KEY: "plain-secret-value"
+      },
+      _confirmBaseUrlRisk: true
+    };
+
+    const created = await handleProviderProfileCreate(JSON.stringify(createPayload));
+    assert.equal(created.statusCode, 200);
+    assert.equal(created.body.includes("plain-secret-value"), false);
+    let body = JSON.parse(created.body);
+    assert.equal(body.profile.extraEnv.API_KEY, "***");
+    assert.equal(body.profiles.find((profile) => profile.id === "masked-profile").extraEnv.API_KEY, "***");
+
+    const updated = await handleProviderProfileUpdate("masked-profile", JSON.stringify({
+      ...createPayload,
+      name: "Masked Provider Updated",
+      extraEnv: {
+        API_KEY: "updated-secret-value"
+      }
+    }));
+    assert.equal(updated.statusCode, 200);
+    assert.equal(updated.body.includes("updated-secret-value"), false);
+    body = JSON.parse(updated.body);
+    assert.equal(body.profile.extraEnv.API_KEY, "***");
+
+    const secret = await handleProviderProfileSecret("masked-profile", JSON.stringify({ secret: "stored-secret" }));
+    assert.equal(secret.statusCode, 200);
+    assert.equal(secret.body.includes("updated-secret-value"), false);
+    body = JSON.parse(secret.body);
+    assert.equal(body.profile.extraEnv.API_KEY, "***");
+
+    const deleted = await handleProviderProfileDelete("masked-profile");
+    assert.equal(deleted.statusCode, 200);
+    assert.equal(deleted.body.includes("updated-secret-value"), false);
+  });
 });
 
 // ─── handleProviderProfileUpdate tests ───

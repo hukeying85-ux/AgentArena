@@ -26,9 +26,25 @@ export async function runDoctor(parsed: ParsedArgs): Promise<void> {
             left.baseAgentId.localeCompare(right.baseAgentId),
           );
 
-  const preflights = await preflightAdapters(selections, {
-    probeAuth: parsed.probeAuth,
-  });
+  const previousProbeTimeout = process.env.AGENTARENA_PREFLIGHT_TIMEOUT_MS;
+  if (parsed.probeTimeout !== undefined) {
+    process.env.AGENTARENA_PREFLIGHT_TIMEOUT_MS = String(parsed.probeTimeout);
+  }
+
+  let preflights: Awaited<ReturnType<typeof preflightAdapters>>;
+  try {
+    preflights = await preflightAdapters(selections, {
+      probeAuth: parsed.probeAuth,
+    });
+  } finally {
+    if (parsed.probeTimeout !== undefined) {
+      if (previousProbeTimeout === undefined) {
+        delete process.env.AGENTARENA_PREFLIGHT_TIMEOUT_MS;
+      } else {
+        process.env.AGENTARENA_PREFLIGHT_TIMEOUT_MS = previousProbeTimeout;
+      }
+    }
+  }
 
   if (parsed.format === "json") {
     console.log(JSON.stringify(preflights, null, 2));

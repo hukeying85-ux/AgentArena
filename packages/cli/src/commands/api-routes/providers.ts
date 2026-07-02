@@ -42,9 +42,10 @@ export async function handleProviderProfileCreate(rawBody: string): Promise<ApiR
     }
   }
   const profiles = await listClaudeProviderProfiles();
+  const maskedProfiles = maskProfileExtraEnv(profiles);
   return jsonResponse({
-    profile: profiles.find((entry) => entry.id === profile.id),
-    profiles
+    profile: maskedProfiles.find((entry) => entry.id === profile.id),
+    profiles: maskedProfiles
   });
 }
 
@@ -67,9 +68,10 @@ export async function handleProviderProfileUpdate(profileId: string, rawBody: st
     id: profileId
   });
   const profiles = await listClaudeProviderProfiles();
+  const maskedProfiles = maskProfileExtraEnv(profiles);
   return jsonResponse({
-    profile: profiles.find((entry) => entry.id === profile.id),
-    profiles
+    profile: maskedProfiles.find((entry) => entry.id === profile.id),
+    profiles: maskedProfiles
   });
 }
 
@@ -84,7 +86,7 @@ export async function handleProviderProfileDelete(profileId: string): Promise<Ap
     return jsonResponse({ error: message }, status);
   }
   const profiles = await listClaudeProviderProfiles();
-  return jsonResponse({ profiles });
+  return jsonResponse({ profiles: maskProfileExtraEnv(profiles) });
 }
 
 export async function handleProviderProfileSecret(profileId: string, rawBody: string): Promise<ApiResponse> {
@@ -102,8 +104,9 @@ export async function handleProviderProfileSecret(profileId: string, rawBody: st
   }
   await setClaudeProviderProfileSecret(profileId, payload.secret ?? "");
   const profiles = await listClaudeProviderProfiles();
+  const maskedProfiles = maskProfileExtraEnv(profiles);
   return jsonResponse({
-    profile: profiles.find((entry) => entry.id === profileId),
-    profiles
+    profile: maskedProfiles.find((entry) => entry.id === profileId),
+    profiles: maskedProfiles
   });
 }

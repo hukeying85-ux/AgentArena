@@ -1,0 +1,72 @@
+schemaVersion: agentarena.taskpack/v1
+id: add-error-handling
+title: Add Cache Validation
+description: Add input validation and error handling to a cache function.
+metadata:
+  source: official
+  owner: AgentArena
+  difficulty: medium
+  objective: Test ability to add defensive code to existing functions.
+  judgeRationale: Behavioral tests verify the function handles errors correctly.
+  repoTypes: ["node"]
+  tags: ["error-handling", "defensive-coding"]
+  dependencies: []
+  differentiator: Tests code understanding — weak agents add generic try/catch, strong agents add specific validation.
+
+repoSource: "builtin://nodejs-app"
+
+prompt: |
+  ## Task | 任务
+
+  The `createCache` function in `src/cache.js` has no input validation.
+  Add error handling:
+
+  1. If `options` is provided but not an object, throw an Error
+  2. If `options.ttlMs` is provided but not a positive number, throw an Error
+  3. The `get` method should handle corrupted store entries gracefully
+     (if an entry exists but has no `value` property, return undefined)
+
+  4. Export the error handling utilities from `src/index.js`
+
+  ## Constraints | 约束
+
+  - Only modify `src/cache.js` and `src/index.js`
+  - Do NOT add new dependencies
+  - Existing behavior must be preserved for valid inputs
+  - Error messages must be descriptive
+
+expectedChangedPaths:
+  - src/cache.js
+  - src/index.js
+
+envAllowList: []
+setupCommands: []
+teardownCommands: []
+judges:
+  - id: invalid-options-throws
+    type: command
+    label: createCache throws for invalid options
+    command: |
+      node -e "var m=require('./src/cache');var a=require('node:assert/strict');a.throws(function(){m.createCache('invalid')},function(e){return e instanceof Error});a.throws(function(){m.createCache({ttlMs:-1})},function(e){return e instanceof Error});console.log('PASS: invalid options throws');"
+    timeoutMs: 10000
+    critical: true
+  - id: valid-options-works
+    type: command
+    label: createCache works with valid options
+    command: |
+      node -e "var m=require('./src/cache');var a=require('node:assert/strict');var c=m.createCache({ttlMs:1000});c.set('key','value');a.strictEqual(c.get('key'),'value');a.strictEqual(c.size(),1);console.log('PASS: valid options works');"
+    timeoutMs: 10000
+    critical: true
+  - id: corrupted-entry-handled
+    type: command
+    label: Corrupted cache entries handled gracefully
+    command: |
+      node -e "var m=require('./src/cache');var a=require('node:assert/strict');var c=m.createCache();c.set('good','value');a.strictEqual(c.get('good'),'value');a.strictEqual(c.get('missing'),undefined);console.log('PASS: corrupted entries handled');"
+    timeoutMs: 10000
+    critical: true
+  - id: no-default-options-throws
+    type: command
+    label: createCache works without options
+    command: |
+      node -e "var m=require('./src/cache');var a=require('node:assert/strict');var c=m.createCache();c.set('key','value');a.strictEqual(c.get('key'),'value');console.log('PASS: no options works');"
+    timeoutMs: 10000

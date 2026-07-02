@@ -1,47 +1,67 @@
 schemaVersion: agentarena.taskpack/v1
 id: test-coverage
 title: Increase Test Coverage
-description: Add tests to improve code coverage for an existing module.
+description: Add tests for untested modules.
 metadata:
-  i18n:
-    zh-CN:
-      title: "提升测试覆盖率"
-      description: "为现有模块添加测试以提升覆盖率"
   source: official
   owner: AgentArena
   difficulty: easy
-  objective: Write meaningful tests that cover edge cases and error paths
-  judgeRationale: Tests must pass and cover the target module adequately
-  repoTypes: ["node-js", "typescript", "javascript"]
-  tags: ["testing", "coverage", "quality"]
-  dependencies: ["npm"]
+  objective: Write meaningful tests for validator.js and logger.js.
+  judgeRationale: Behavioral tests verify test files actually run and pass.
+  repoTypes: ["node"]
+  tags: ["testing", "coverage"]
+  dependencies: []
+  differentiator: Good agents write tests that catch real bugs; weak agents write empty tests.
+
+repoSource: "builtin://nodejs-app"
+
 prompt: |
-  Improve test coverage for this project.
+  ## Task | 任务
 
-  Requirements:
-  1. Identify modules with low or missing test coverage
-  2. Write tests that cover both happy paths and edge cases
-  3. Tests must be meaningful (not just asserting true)
-  4. All existing tests must continue to pass
-  5. Run the test suite to verify everything works
+  `src/validator.js` and `src/logger.js` have NO tests. Add them:
 
-  Focus on testing the most critical business logic first.
+  1. Create `test/validator.test.js` with tests for `requireString` and `requireNumber`:
+     - Happy path: valid inputs return expected values
+     - Error cases: wrong type, empty string, out of range
+     - At least 5 test cases
+
+  2. Create `test/logger.test.js` with tests for `createLogger`:
+     - Test that createLogger returns an object with a log method
+     - Test that log output includes the prefix
+     - At least 3 test cases
+
+  3. All tests must use `node:test` and `node:assert/strict`
+  4. All tests must pass with `node --test`
+
+  ## Constraints | 约束
+
+  - Do NOT modify existing test files
+  - Do NOT add new dependencies
+  - Tests must actually test the code (not just assert true)
+
+expectedChangedPaths:
+  - test/validator.test.js
+  - test/logger.test.js
+
 envAllowList: []
 setupCommands: []
-judges:
-  - id: tests-pass
-    type: test-result
-    label: All tests pass
-    command: npx --no-install jest --json --outputFile=.agentarena/test-results.json
-    format: jest
-    reportFile: .agentarena/test-results.json
-    timeoutMs: 120000
-    critical: true
-  - id: lint-clean
-    type: lint-check
-    label: Lint passes
-    command: npx --no-install eslint . --format json --output-file .agentarena/lint-results.json
-    format: eslint
-    reportFile: .agentarena/lint-results.json
-    timeoutMs: 60000
 teardownCommands: []
+judges:
+  - id: validator-tests-run
+    type: command
+    label: Validator tests run and pass
+    command: node --test test/validator.test.js
+    timeoutMs: 30000
+    critical: true
+  - id: logger-tests-run
+    type: command
+    label: Logger tests run and pass
+    command: node --test test/logger.test.js
+    timeoutMs: 30000
+    critical: true
+  - id: validator-test-has-assertions
+    type: command
+    label: Validator test has real assertions
+    command: |
+      node -e "var c=require('node:fs').readFileSync('test/validator.test.js','utf8');if(!c.includes('assert')){console.error('No assertions found');process.exit(1)}var count=(c.match(/assert\./g)||[]).length;if(count<3){console.error('Too few assertions: '+count);process.exit(1)}console.log('PASS: '+count+' assertions');"
+    timeoutMs: 10000

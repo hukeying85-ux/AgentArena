@@ -101,6 +101,32 @@ For implementation tasks:
 - summarize why those files were chosen
 - summarize impact, validation, and remaining risk
 
+## 开发记录规则
+
+当你完成以下任意一类操作后，必须在 `docs/DEVLOG.md` 顶部（`---` 分隔线下方）追加一条记录：
+
+1. **修复了一个非显而易见的 bug**（根因不是一眼能看出的，或者排查花了超过 10 分钟）
+2. **做了一次技术选型或架构调整**（为什么选 A 不选 B、为什么从旧方案改成新方案）
+3. **解决了一个性能 / 兼容性 / 部署问题**（构建失败、环境冲突、线上故障等）
+4. **发现了一个值得复用的模式或教训**（踩了坑后总结出的通用规则）
+
+记录格式严格遵循：
+
+```
+## [YYYY-MM-DD] 一句话标题
+
+- 现象/目标：（遇到了什么问题，或想达成什么）
+- 根因/思路：（真正的原因是什么，排查思路是怎样的）
+- 解法：（最终怎么解决的）
+- 教训/可复用点：（下次遇到类似问题可以怎么避免或快速定位）
+```
+
+规则约束：
+- 只记上述四类。常规增删改功能、纯语法问题、一搜就有标准答案的，**不要记**
+- 每条不超过 8 行，保持精炼
+- 如果这次改动不属于上述任何一类，在汇报结尾说一句"本次无需记录"，不要硬记
+- 跨项目的通用经验（不局限于 AgentArena 的），额外标注 `[通用]` 前缀
+
 ## Project-specific skills
 
 This repo already keeps several project skills under `.skills/`. Add the following Codex repo skills for current gaps:

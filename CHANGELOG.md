@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Adapter process cleanup: retry-based kill with verification for Unix and Windows
 - Event parser robustness: ANSI stripping, depth-limited recursion, parse error logging
 - Environment variable allowlist expanded from 15 to 46 entries
+- Web report accessibility: `scope="col"` on all table headers, `aria-live` on dynamic status/validation/toast regions, `aria-label` on interactive bar-chart rows
 
 ### Fixed
 - 37 code review issues including duplicate judge execution, regex injection protection, consistent critical field defaults, CLI validation alignment, sensitive data protection
@@ -89,6 +90,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Timing-safe auth token comparison (constant-time, no length leak)
 - Symlink-aware path validation with TOCTOU consideration
 - verbatimSymlinks in snapshot copy prevents external file leakage
+- CSV formula injection protection (prefixes `= + - @ \t \r` with single quote)
+- Static file server uses symlink-aware path validation (isPathInsideWorkspace)
+- Run payload path validation uses path.relative instead of string prefix match
+
+### Performance
+- Snapshot incremental hash cache: files whose (size, mtime) haven't changed since the last snapshot in the same process reuse the cached SHA-256 hash, skipping redundant I/O on before/after snapshot pairs
+- Rate limit store cleanup interval halved from 60s to 30s, with stale-entry eviction on access to keep the store compact on long-running servers
 
 ## 0.1.0 (2026-03-19)
 

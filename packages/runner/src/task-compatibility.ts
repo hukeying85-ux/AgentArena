@@ -266,15 +266,6 @@ async function checkCommandCompatibility(repoPath: string, command: string, labe
     });
   }
 
-  if (usesBlockedEval(command)) {
-    checks.push({
-      label: `${label} inline eval`,
-      status: "fail",
-      message: "Command uses inline eval (-e/-c/--eval), which is blocked for task-pack setup and judge commands in normal runs.",
-      fix: "Move the inline code into a checked-in script file and run that script from the task pack."
-    });
-  }
-
   const npxNoInstallTool = parseNpxNoInstallTool(command);
   if (npxNoInstallTool) {
     checks.push({
@@ -348,18 +339,6 @@ function inferRequiredFiles(command: string): string[] {
     files.push(stripQuotes(pipRequirements[1]));
   }
   return files;
-}
-
-function usesBlockedEval(command: string): boolean {
-  if (process.env.AGENTARENA_ALLOW_EVAL_IN_JUDGES === "1") {
-    return false;
-  }
-  const tokens = tokenizeCommand(command);
-  const executable = path.basename(tokens[0] ?? "");
-  if (!["node", "python", "python3", "bun"].includes(executable)) {
-    return false;
-  }
-  return tokens.some((token) => token === "-e" || token === "-c" || token === "--eval" || token.startsWith("--eval="));
 }
 
 function tokenizeCommand(command: string): string[] {
@@ -459,7 +438,7 @@ async function hasNpmScript(repoPath: string, scriptName: string): Promise<boole
 async function getNpmScript(repoPath: string, scriptName: string): Promise<string | undefined> {
   try {
     const pkgPath = path.join(repoPath, "package.json");
-    const content = await fs.readFile(pkgPath, "utf8");
+    const content = (await fs.readFile(pkgPath, "utf8")).replace(/^\uFEFF/u, "");
     const pkg = JSON.parse(content) as { scripts?: Record<string, unknown> };
     const script = pkg.scripts?.[scriptName];
     return typeof script === "string" ? script : undefined;

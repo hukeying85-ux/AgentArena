@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import {
   buildExecutionEnvironment,
+  copyRepository,
   createAgentSelection,
   diffSnapshots,
   formatDuration,
@@ -14,9 +18,19 @@ import {
   portableRelativePath,
   resolveRepoSource,
   safePathJoin,
+  snapshotDirectory,
   uniqueSorted,
   validateTaskPackId
 } from "../packages/core/dist/index.js";
+
+async function exists(filePath) {
+  try {
+    await access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 test("uniqueSorted removes duplicates and sorts values", () => {
   assert.deepEqual(uniqueSorted(["b", "a", "b"]), ["a", "b"]);
@@ -206,11 +220,68 @@ test("resolveRepoSource resolves http(s) URLs to url kind", () => {
   assert.match(result2.repoPath, /project/);
 });
 
+test("resolveRepoSource gives different cache paths to different URLs with the same repo name", () => {
+  const result1 = resolveRepoSource("https://github.com/org-a/shared.git", "/user/repo", "/repos");
+  const result2 = resolveRepoSource("https://gitlab.com/org-b/shared.git", "/user/repo", "/repos");
+
+  assert.equal(result1.kind, "url");
+  assert.equal(result2.kind, "url");
+  assert.notEqual(result1.repoPath, result2.repoPath);
+});
+
 test("resolveRepoSource rejects invalid builtin names and unsupported schemes", () => {
   assert.throws(() => resolveRepoSource("builtin://", "/user/repo", "/repos"), /Invalid builtin repo name/);
   assert.throws(() => resolveRepoSource("builtin://..", "/user/repo", "/repos"), /Invalid builtin repo name/);
   assert.throws(() => resolveRepoSource("builtin://a/b", "/user/repo", "/repos"), /Invalid builtin repo name/);
   assert.throws(() => resolveRepoSource("ftp://example.com/repo", "/user/repo", "/repos"), /Unsupported repoSource/);
+});
+
+test("copyRepository does not copy ignored secret files into agent workspaces", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-copy-test-"));
+  const source = path.join(tempDir, "source");
+  const destination = path.join(tempDir, "destination");
+
+  try {
+    await mkdir(path.join(source, "node_modules"), { recursive: true });
+    await writeFile(path.join(source, ".gitignore"), ".env\nlocal-only.txt\n", "utf8");
+    await writeFile(path.join(source, ".env"), "API_KEY=secret", "utf8");
+    await writeFile(path.join(source, ".env.local"), "API_KEY=local-secret", "utf8");
+    await writeFile(path.join(source, "local-only.txt"), "ignored", "utf8");
+    await writeFile(path.join(source, "README.md"), "# public\n", "utf8");
+    await writeFile(path.join(source, "node_modules", "module.txt"), "skip", "utf8");
+
+    await copyRepository(source, destination);
+
+    assert.equal(await exists(path.join(destination, ".env")), false);
+    assert.equal(await exists(path.join(destination, ".env.local")), false);
+    assert.equal(await exists(path.join(destination, "local-only.txt")), false);
+    assert.equal(await exists(path.join(destination, "node_modules", "module.txt")), false);
+    assert.equal(await readFile(path.join(destination, "README.md"), "utf8"), "# public\n");
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("snapshotDirectory excludes AgentArena runtime artifacts", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-snapshot-runtime-"));
+
+  try {
+    await mkdir(path.join(tempDir, ".aa-evidence"), { recursive: true });
+    await mkdir(path.join(tempDir, ".claude"), { recursive: true });
+    await mkdir(path.join(tempDir, "agentarena-demo"), { recursive: true });
+    await writeFile(path.join(tempDir, ".aa-evidence", "stdout.log"), "internal", "utf8");
+    await writeFile(path.join(tempDir, ".claude", "settings.local.json"), "{}", "utf8");
+    await writeFile(path.join(tempDir, "agentarena-demo", "codex-last-message.txt"), "internal", "utf8");
+    await writeFile(path.join(tempDir, "agent-stdout.jsonl"), "{}", "utf8");
+    await writeFile(path.join(tempDir, "prompt.txt"), "prompt", "utf8");
+    await writeFile(path.join(tempDir, "index.js"), "export const ok = true;\n", "utf8");
+
+    const snapshot = await snapshotDirectory(tempDir);
+
+    assert.deepEqual([...snapshot.keys()].sort(), ["index.js"]);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
 });
 
 test("isInternalUrl blocks localhost", () => {

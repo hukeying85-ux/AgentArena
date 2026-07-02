@@ -54,187 +54,36 @@ export interface ParsedArgs {
 }
 
 export function printHelp(): void {
-  console.log(`AgentArena CLI - AI Agent Benchmarking Framework
+  console.log(`AgentArena — Benchmark coding agents on your own repos
 
-Usage:
-  agentarena <command> [options]
+Usage: agentarena <command> [options]
 
 Commands:
-  run              Run a benchmark against a repository
-  doctor           Check adapter availability and authentication
-  list-adapters    List all available adapters and their capabilities
-  init             Quick start: detect agents, generate demo taskpack, and run
-  init-taskpack    Create a new task pack from a template
-  init-ci          Create a CI workflow file for automated benchmarks
-  publish          Publish a benchmark result to the community leaderboard
-  clean            Remove old benchmark runs (keeps most recent 50 by default)
-  validate         Validate a task pack file without running a benchmark
-  ui               Start the web UI server
+  run              Run a benchmark (the main command)
+  ui               Start the web UI (interactive launcher + results viewer)
+  doctor           Check which agent CLIs are installed and authenticated
+  list-adapters    List all supported adapters and their capabilities
+  init             Quick start: detect agents + generate a demo task pack
+  init-taskpack    Create a task pack from a template
+  init-ci          Generate a GitHub Actions CI workflow
+  validate         Validate a task pack without running it
+  publish          Publish results to the community leaderboard
+  clean            Remove old benchmark runs (keeps most recent 50)
 
-Run Command:
-  agentarena run --repo <path> --task <path> --agents <list> [options]
+Quick start:
+  agentarena ui                           # Open the web UI (easiest)
+  agentarena run --repo . --task my.yaml --agents demo-fast  # CLI quick run
 
-  Required:
-    --repo <path>              Path to the repository to benchmark
-    --task <path>              Path to the task pack file (.json, .yaml, .yml)
-    --agents <list>            Comma-separated list of agent IDs to benchmark
+Options:
+  --json              Output as JSON (for scripting)
+  --verbose, -v       Show full error traces
+  --debug             Verbose + debug logs
+  -V                  Show version
+  -w, --welcome       Show getting started tips
 
-  Optional:
-    --output <path>            Output directory for results (default: .agentarena/runs/<run-id>)
-    --probe-auth               Test adapter authentication before running
-    --update-snapshots         Update snapshot files if they differ
-    --cleanup-workspaces       Remove agent workspace directories after run
-    --dry-run                  Print the resolved run plan without executing agents
-    --resume <run-dir>         Resume a previous run directory by reusing completed agent results
-    --agent-timeout <ms>       Per-agent execution timeout in milliseconds
-    --team-size <n>            Team size used for decision-report cost estimates (default: 10)
-    --daily-runs <n>           Runs per day used for decision-report cost estimates (default: 5)
-    --repeat <n>               Run the same benchmark multiple times for variance/trend confidence
-    --max-concurrency <n>      Maximum number of agents to run in parallel (default: min(4, cpuCount))
-    --json                     Output results as JSON
-    --verbose, -v              Show verbose error messages with stack traces
-    -V                         Show version number
-    --debug                    Show detailed debug output (implies --verbose)
-    --locale <lang>            Report locale: en, zh-CN (default: en)
-    --format <fmt>             Output format: json, human (default: human)
+Use "agentarena <command> --help" for detailed options.
 
-  Scoring Options:
-    --score-mode <mode>        Scoring mode (practical, balanced, issue-resolution, efficiency-first, rotating-tasks, comprehensive)
-    --token-budget <n>         Token budget limit for efficiency scoring
-
-  Scoring Mode Descriptions:
-    practical                  Focus on practical correctness (default)
-    balanced                   Balanced scoring for general use
-    issue-resolution           SWE-Bench inspired: focus on issue resolution
-    efficiency-first           CursorBench inspired: focus on token efficiency
-    rotating-tasks             LiveBench inspired: balanced across categories
-    comprehensive              Unified mode combining all signals
-
-  Codex Options:
-    --codex-model <model>      Override the Codex model (e.g., gpt-5.4)
-    --codex-reasoning <value>  Set reasoning effort (low, medium, high)
-
-  Claude Code Options:
-    --claude-profile <id>      Use a specific Claude provider profile
-    --claude-model <model>     Override the Claude model
-
-  Other Agent Model Options:
-    --gemini-model <model>     Override the Gemini CLI model (e.g., gemini-2.5-pro)
-    --aider-model <model>      Override the Aider model (e.g., claude-sonnet-4-20250514)
-    --kilo-model <model>       Override the Kilo CLI model (e.g., gpt-5.4)
-    --opencode-model <model>   Override the OpenCode model (e.g., gpt-5.4)
-    --qwen-model <model>       Override the Qwen Code model (e.g., qwen-max)
-    --copilot-model <model>    Override the Copilot CLI model (if supported)
-
-Doctor Command:
-  agentarena doctor [options]
-
-  Options:
-    --agents <list>            Comma-separated list of agents to check (default: all)
-    --probe-auth               Test authentication for each adapter
-    --probe-timeout <ms>       Timeout for auth probes in milliseconds (default: 5000)
-    --strict                   Exit with error if any adapter is not ready
-    --force                    Skip health cache, re-probe all adapters
-    --json                     Output results as JSON
-
-List Adapters Command:
-  agentarena list-adapters [--json]
-
-Init Command:
-  agentarena init [options]
-
-  Options:
-    --repo <path>              Path to the repository (default: current directory)
-    --output <path>            Task pack output path (default: agentarena.taskpack.yaml)
-    --agents <list>            Comma-separated list of agents to benchmark (default: detected)
-    --force                    Overwrite existing task pack
-
-Init Taskpack Command:
-  agentarena init-taskpack [options]
-
-  Options:
-    --template <name>          Template to use (repo-health, json-api, snapshot)
-    --output <path>            Output file path (default: agentarena.taskpack.yaml)
-    --force                    Overwrite existing file
-
-Init CI Command:
-  agentarena init-ci [options]
-
-  Options:
-    --task <path>              Path to the task pack file
-    --agents <list>            Comma-separated list of agents
-    --output <path>            Output workflow file path
-    --ci-template <type>       Workflow template (pull-request, smoke, nightly)
-    --ci-output-dir <path>     CI output directory (default: .agentarena/ci-benchmark)
-    --force                    Overwrite existing file
-
-Publish Command:
-  agentarena publish <result-file> [options]
-
-  Required:
-    <result-file>              Path to summary.json from a benchmark run
-
-  Optional:
-    --last                     Publish the most recent benchmark run (no need to specify file)
-    --token <token>            GitHub personal access token (default: gh auth token or GITHUB_TOKEN env)
-
-UI Command:
-  agentarena ui [options]
-
-  Options:
-    --host <host>              Server host (default: 127.0.0.1)
-    --port <port>              Server port (default: 4320)
-    --auth-token <token>       Custom auth token for non-localhost access (default: auto-generated)
-    --no-open                  Don't open browser automatically
-    --trust-proxy              Trust X-Forwarded-For header for rate limiting (when behind reverse proxy)
-
-Validate Command:
-  agentarena validate <taskpack-path>
-
-  Validate a task pack file without running a benchmark.
-  Reports schema errors, unknown fields, and judge configuration issues.
-
-Global Options:
-  -w, --welcome                Show welcome message with getting started tips
-
-Examples:
-  # Run a basic benchmark with demo adapters
-  agentarena run --repo . --task examples/taskpacks/demo-repo-health.json --agents demo-fast,demo-thorough
-
-  # Run with Codex and Claude Code, testing authentication
-  agentarena run --repo . --task examples/taskpacks/demo-repo-health.json --agents codex,claude-code --probe-auth
-
-  # Run with specific Codex model and reasoning
-  agentarena run --repo . --task examples/taskpacks/demo-repo-health.yaml --agents codex --codex-model gpt-5.4 --codex-reasoning high
-
-  # Run with Claude Code using a provider profile
-  agentarena run --repo . --task examples/taskpacks/official/repo-health.yaml --agents claude-code --claude-profile claude-official --claude-model claude-3-7-sonnet-latest
-
-  # Update snapshots during benchmark
-  agentarena run --repo . --task examples/taskpacks/demo-repo-health.yaml --agents demo-fast --update-snapshots
-
-  # Output results as JSON
-  agentarena run --repo . --task examples/taskpacks/demo-repo-health.yaml --agents demo-fast --json
-
-  # Check all adapters with authentication probe
-  agentarena doctor --agents codex,claude-code,cursor --probe-auth
-
-  # Strict doctor check (fails if any adapter not ready)
-  agentarena doctor --agents codex,claude-code,cursor --probe-auth --strict
-
-  # Create a new task pack from template
-  agentarena init-taskpack --template repo-health --output my-task.yaml
-
-  # Create a CI workflow for pull requests
-  agentarena init-ci --task agentarena.taskpack.yaml --agents demo-fast,codex
-
-  # Create a nightly CI workflow
-  agentarena init-ci --ci-template nightly --task examples/taskpacks/official/repo-health.yaml --agents demo-fast
-
-  # Start the web UI
-  agentarena ui --host 127.0.0.1 --port 4320
-
-For more information, visit: https://github.com/aabbcdl/AgentArena
+Full docs: https://github.com/aabbcdl/AgentArena
 `);
 }
 

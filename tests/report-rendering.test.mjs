@@ -51,6 +51,7 @@ describe("report rendering", () => {
       assert.ok(lines[0].includes("Agent"), "Should have Agent header");
       assert.ok(lines[0].includes("Cost (USD)"), "Should have Cost header");
       assert.ok(lines[1].includes("Test Agent"), "Should include displayLabel");
+      assert.ok(lines[1].includes("85.5"), "Should include existing composite score");
       assert.ok(lines[1].includes("0.0500"), "Should include formatted cost");
     });
 

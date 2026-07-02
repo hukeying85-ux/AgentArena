@@ -147,6 +147,69 @@ You can adjust the scoring weights with `--score-mode`:
 - `rotating-tasks` — category-aware scoring for diverse task sets
 - `comprehensive` — all weight keys enabled, thorough evaluation
 
+## Publishing to the Community Leaderboard
+
+AgentArena can publish your benchmark results to a shared community leaderboard on GitHub. This lets you compare your results against other users' runs.
+
+### Prerequisites
+
+1. A GitHub account
+2. A GitHub personal access token with `repo` scope, OR the [GitHub CLI](https://cli.github.com/) installed and authenticated (`gh auth login`)
+
+### Publish a run
+
+After completing a benchmark, publish the results:
+
+```bash
+# Publish the most recent run
+agentarena publish --last
+
+# Or publish a specific result file
+agentarena publish .agentarena/runs/<run-id>/summary.json
+```
+
+### Authentication options
+
+The publish command resolves your GitHub token in this order:
+
+1. `--token <token>` flag
+2. `GITHUB_TOKEN` environment variable
+3. `gh auth token` (GitHub CLI, if installed)
+
+```bash
+# Using a token flag
+agentarena publish --last --token ghp_your_token_here
+
+# Using an environment variable
+GITHUB_TOKEN=ghp_your_token_here agentarena publish --last
+```
+
+### What gets published
+
+The publish command uploads a **sanitized** version of your run to the community leaderboard repository. Sensitive data (file paths, environment variables, full diffs) is stripped. Only the following is shared:
+
+- Task pack ID and title
+- Agent display labels, model names, and provider names
+- Composite scores, pass rates, durations, token usage, and costs
+- Score mode and run timestamp
+- Your GitHub username (as publisher)
+
+### Custom leaderboard repository
+
+By default, results are published to the `agentarena/leaderboard-data` repository. You can override this for private leaderboards:
+
+```bash
+AGENTARENA_COMMUNITY_OWNER=your-org AGENTARENA_COMMUNITY_REPO=your-leaderboard agentarena publish --last
+```
+
+### Viewing the community leaderboard
+
+Open the web UI and switch to the **Community** tab to see aggregated results from all published runs:
+
+```bash
+agentarena ui
+```
+
 ## Next Steps
 
 - [Troubleshooting](./troubleshooting.md) — common issues and fixes

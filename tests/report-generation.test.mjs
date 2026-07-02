@@ -570,6 +570,60 @@ test("CSV export handles empty results", () => {
   assert.equal(lines.length, 1); // only header row
 });
 
+// --- CSV Formula Injection Protection ---
+
+test("CSV export prefixes formula-trigger characters with single quote", () => {
+  const run = createRun("/tmp/csv-injection", {
+    results: [
+      createResult("/tmp/csv-injection", {
+        agentId: "agent-equals",
+        displayLabel: "=HYPERLINK(\"https://evil.com\",\"Click\")",
+        status: "success"
+      }),
+      createResult("/tmp/csv-injection", {
+        agentId: "agent-plus",
+        displayLabel: "+1+1",
+        status: "success"
+      }),
+      createResult("/tmp/csv-injection", {
+        agentId: "agent-minus",
+        displayLabel: "-1+1",
+        status: "success"
+      }),
+      createResult("/tmp/csv-injection", {
+        agentId: "agent-at",
+        displayLabel: "@SUM(A1:A2)",
+        status: "success"
+      })
+    ]
+  });
+  enrichRunWithScores(run);
+  const csv = generateCsv(run);
+
+  // Each formula-trigger character at the start of a field should be prefixed with '
+  assert.ok(csv.includes("'=HYPERLINK"), "CSV should prefix = with single quote");
+  assert.ok(csv.includes("'+1+1"), "CSV should prefix + with single quote");
+  assert.ok(csv.includes("'-1+1"), "CSV should prefix - with single quote");
+  assert.ok(csv.includes("'@SUM(A1:A2)"), "CSV should prefix @ with single quote");
+});
+
+test("CSV export does not prefix normal text", () => {
+  const run = createRun("/tmp/csv-normal", {
+    results: [
+      createResult("/tmp/csv-normal", {
+        agentId: "normal-agent",
+        displayLabel: "Normal Agent Name",
+        status: "success"
+      })
+    ]
+  });
+  enrichRunWithScores(run);
+  const csv = generateCsv(run);
+
+  // Normal text should not have a single-quote prefix
+  assert.ok(!csv.includes("'Normal Agent Name"), "CSV should not prefix normal text");
+});
+
 // ---------------------------------------------------------------------------
 // 5. Badge Generation Tests
 // ---------------------------------------------------------------------------

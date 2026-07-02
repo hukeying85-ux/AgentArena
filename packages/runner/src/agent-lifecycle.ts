@@ -1,4 +1,4 @@
-import { promises as fs } from "node:fs";
+﻿import { promises as fs } from "node:fs";
 import path from "node:path";
 import { getAdapter } from "@agentarena/adapters";
 import {
@@ -27,7 +27,7 @@ import {
   buildChangedFiles,
   createCancellationSummary,
 } from "./result-builder.js";
-import { buildDiffPrecision, collectChangedFiles } from "./snapshot.js";
+import { buildDiffPrecision } from "./snapshot.js";
 import { wrapWithTimeout } from "./timeout-utils.js";
 import type { AgentRunContext } from "./types.js";
 import { debugLog, formatErrorDetails, formatErrorMessage } from "./workspace.js";
@@ -378,7 +378,7 @@ export async function recordFinalEvents(
  * trace recorder itself fails to close, which is swallowed in the finally block.
  *
  * **Pipeline phases:** createAgentRunContext -> setupWorkspaceAndPrechecks ->
- * runSetupCommands -> createBeforeSnapshot -> executeAgent -> collectChangedFiles ->
+ * runSetupCommands -> createBeforeSnapshot -> executeAgent ->
  * runJudgesAndAfterSnapshot -> runTeardownCommands -> buildFinalResult.
  *
  * **Critical behaviors:**
@@ -439,10 +439,7 @@ export async function runAgent(
 
   const { adapterResult, adapterError, startedAt } = await executeAgent(preflight, repoPath, context);
 
-  const collectedResult = await collectChangedFiles(context.workspacePath);
-  const collectedFiles = collectedResult.files;
-
-  const { judgeResults, judgeError, diff, changedFiles, diffPrecision } = await runJudgesAndAfterSnapshot(
+    const { judgeResults, judgeError, diff, changedFiles, diffPrecision } = await runJudgesAndAfterSnapshot(
     preflight,
     adapterResult,
     beforeSnapshotResult,
@@ -524,12 +521,15 @@ export async function runAgent(
       assembledPrompt = promptEvent.metadata.prompt;
     }
   } catch {
-    // Trace query failed — try file fallback
+    // Trace query failed; the file fallback below may still recover it.
+  }
+
+  if (assembledPrompt === undefined) {
     try {
       const promptPath = path.join(context.workspacePath, "prompt.txt");
       assembledPrompt = await fs.readFile(promptPath, "utf8");
     } catch {
-      // Both layers failed — prompt will be undefined in result
+      // Both layers failed; prompt will be undefined in result.
     }
   }
 
@@ -544,7 +544,6 @@ export async function runAgent(
     teardownResults,
     diff,
     changedFiles,
-    collectedFiles,
     diffPrecision,
     cancelled,
     success,

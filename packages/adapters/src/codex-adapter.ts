@@ -23,30 +23,40 @@ async function resolveCodexInvocation(): Promise<InvocationSpec> {
   }
 
   if (process.platform === "win32") {
-    const scriptPath = path.join(
-      process.env.APPDATA ?? path.join(process.env.USERPROFILE ?? "", "AppData", "Roaming"),
-      "npm",
-      "node_modules",
-      "@openai",
-      "codex",
-      "bin",
-      "codex.js"
-    );
+    const scriptCandidates = [
+      path.join(
+        process.env.APPDATA ?? path.join(process.env.USERPROFILE ?? "", "AppData", "Roaming"),
+        "npm",
+        "node_modules",
+        "@openai",
+        "codex",
+        "bin",
+        "codex.js"
+      ),
+      ...((process.env.PATH ?? "")
+        .split(path.delimiter)
+        .filter(Boolean)
+        .map((entry) => path.join(entry, "node_modules", "@openai", "codex", "bin", "codex.js")))
+    ];
 
-    try {
-      await fs.access(scriptPath);
-      return {
-        command: process.execPath,
-        argsPrefix: [scriptPath],
-        displayCommand: `${process.execPath} ${scriptPath}`
-      };
-    } catch {
-      return {
-        command: "codex.cmd",
-        argsPrefix: [],
-        displayCommand: "codex.cmd"
-      };
+    for (const scriptPath of scriptCandidates) {
+      try {
+        await fs.access(scriptPath);
+        return {
+          command: process.execPath,
+          argsPrefix: [scriptPath],
+          displayCommand: `${process.execPath} ${scriptPath}`
+        };
+      } catch {
+        // Try the next likely npm global location before falling back to the shim.
+      }
     }
+
+    return {
+      command: "codex.cmd",
+      argsPrefix: [],
+      displayCommand: "codex.cmd"
+    };
   }
 
   return {

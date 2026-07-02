@@ -127,6 +127,23 @@ export function formatLogEntry(entry: StructuredLogEntry): string {
   return JSON.stringify(entry);
 }
 
+/**
+ * When set to true, all log levels (including INFO and DEBUG) are written to
+ * stderr instead of stdout. This is used by `--json` output mode to keep
+ * stdout clean for machine-readable JSON output.
+ *
+ * Set via `setJsonOutputMode(true)` from the CLI entry point.
+ */
+let jsonOutputMode = false;
+
+export function setJsonOutputMode(enabled: boolean): void {
+  jsonOutputMode = enabled;
+}
+
+export function isJsonOutputMode(): boolean {
+  return jsonOutputMode;
+}
+
 export function log(
   level: LogLevel,
   component: LogComponent,
@@ -146,11 +163,21 @@ export function log(
       break;
     case "DEBUG":
       if (process.env.AGENTARENA_DEBUG === "1" || process.env.AGENTARENA_DEBUG === "true") {
-        console.log(formatted);
+        // In JSON mode, redirect to stderr to keep stdout clean
+        if (jsonOutputMode) {
+          process.stderr.write(formatted + "\n");
+        } else {
+          console.log(formatted);
+        }
       }
       break;
     default:
-      console.log(formatted);
+      // INFO level
+      if (jsonOutputMode) {
+        process.stderr.write(formatted + "\n");
+      } else {
+        console.log(formatted);
+      }
   }
 }
 

@@ -1,13 +1,37 @@
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createReadStream, promises as fs } from "node:fs";
 import { cpus } from "node:os";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
+import { promisify } from "node:util";
 import { logger } from "./logging.js";
 import { normalizePath } from "./paths.js";
 import type { DiffSummary, FileSnapshotEntry } from "./types/index.js";
 
-export const INTERNAL_IGNORED_NAMES = new Set([".agentarena", ".git", "node_modules"]);
+export const INTERNAL_IGNORED_NAMES = new Set([
+  ".aa-evidence",
+  ".agentarena",
+  ".claude",
+  ".git",
+  "agentarena-demo",
+  "node_modules"
+]);
+const INTERNAL_IGNORED_FILES = new Set(["agent-stderr.log", "agent-stdout.jsonl", "prompt.txt"]);
+
+const execFileAsync = promisify(execFile);
+
+const DEFAULT_SECRET_FILE_PATTERNS = [
+  /^\.env(?:\.|$)/,
+  /^\.npmrc$/,
+  /^\.pypirc$/,
+  /^\.netrc$/,
+  /^id_(?:rsa|dsa|ecdsa|ed25519)(?:\.pub)?$/,
+  /^credentials(?:\..*)?$/i,
+  /^credentials\.json$/i,
+  /^service-account(?:\..*)?\.json$/i,
+  /^.*\.(?:pem|key|p12|pfx)$/
+];
 
 // Allow overriding via environment variable (in bytes).
 // Falls back to 100 MB if not set or invalid.
@@ -35,14 +59,124 @@ export async function ensureDirectory(dirPath: string): Promise<void> {
   await fs.mkdir(dirPath, { recursive: true });
 }
 
+function isInternalPath(relativePath: string): boolean {
+  const parts = relativePath.split("/");
+  return (
+    parts.some((part) => INTERNAL_IGNORED_NAMES.has(part)) ||
+    (parts.length === 1 && INTERNAL_IGNORED_FILES.has(parts[0]))
+  );
+}
+
+function isDefaultSecretPath(relativePath: string): boolean {
+  return relativePath
+    .split("/")
+    .some((part) => DEFAULT_SECRET_FILE_PATTERNS.some((pattern) => pattern.test(part)));
+}
+
+function globToRegExp(glob: string): RegExp {
+  const escaped = glob
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*/g, "[^/]*")
+    .replace(/\?/g, "[^/]");
+  return new RegExp(`^${escaped}$`);
+}
+
+function gitignorePatternMatches(relativePath: string, pattern: string): boolean {
+  const normalizedPattern = normalizePath(pattern.trim()).replace(/^\/+/, "");
+  if (!normalizedPattern) return false;
+
+  const directoryOnly = normalizedPattern.endsWith("/");
+  const patternBody = directoryOnly ? normalizedPattern.slice(0, -1) : normalizedPattern;
+  if (!patternBody) return false;
+
+  if (patternBody.includes("/")) {
+    const matcher = globToRegExp(patternBody);
+    return (
+      matcher.test(relativePath) ||
+      (directoryOnly && (relativePath === patternBody || relativePath.startsWith(`${patternBody}/`)))
+    );
+  }
+
+  const segments = relativePath.split("/");
+  const matcher = globToRegExp(patternBody);
+  return segments.some((segment, index) => {
+    if (!matcher.test(segment)) return false;
+    return !directoryOnly || index < segments.length - 1;
+  });
+}
+
+async function loadRootGitignoreRules(sourcePath: string): Promise<Array<{ pattern: string; negated: boolean }>> {
+  try {
+    const content = await fs.readFile(path.join(sourcePath, ".gitignore"), "utf8");
+    return content
+      .split(/\r?\n/u)
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith("#"))
+      .map((line) => ({
+        pattern: line.startsWith("!") ? line.slice(1) : line,
+        negated: line.startsWith("!")
+      }));
+  } catch {
+    return [];
+  }
+}
+
+function isIgnoredByRules(relativePath: string, rules: Array<{ pattern: string; negated: boolean }>): boolean {
+  let ignored = false;
+  for (const rule of rules) {
+    if (gitignorePatternMatches(relativePath, rule.pattern)) {
+      ignored = !rule.negated;
+    }
+  }
+  return ignored;
+}
+
+async function gitListCopyableFiles(sourcePath: string): Promise<string[] | null> {
+  try {
+    const { stdout } = await execFileAsync("git", ["-C", sourcePath, "ls-files", "-z", "--cached", "--others", "--exclude-standard"], {
+      encoding: "utf8",
+      maxBuffer: 100 * 1024 * 1024,
+      timeout: 30_000
+    });
+    return stdout.split("\0").filter(Boolean).map(normalizePath);
+  } catch {
+    return null;
+  }
+}
+
+async function copyListedFiles(sourcePath: string, destinationPath: string, files: string[]): Promise<void> {
+  await ensureDirectory(destinationPath);
+  for (const relativePath of files) {
+    const normalized = normalizePath(relativePath);
+    if (isInternalPath(normalized) || isDefaultSecretPath(normalized)) continue;
+    const sourceFile = path.join(sourcePath, normalized);
+    const destinationFile = path.join(destinationPath, normalized);
+    await ensureDirectory(path.dirname(destinationFile));
+    await fs.cp(sourceFile, destinationFile, {
+      force: true,
+      recursive: false,
+      verbatimSymlinks: true
+    });
+  }
+}
+
 export async function copyRepository(sourcePath: string, destinationPath: string): Promise<void> {
+  const gitFiles = await gitListCopyableFiles(sourcePath);
+  if (gitFiles) {
+    await copyListedFiles(sourcePath, destinationPath, gitFiles);
+    return;
+  }
+
+  const rootGitignoreRules = await loadRootGitignoreRules(sourcePath);
   await fs.cp(sourcePath, destinationPath, {
       force: true,
       recursive: true,
       verbatimSymlinks: true,
       filter: (itemPath) => {
-        const name = path.basename(itemPath);
-        return !INTERNAL_IGNORED_NAMES.has(name);
+        const relativePath = normalizePath(path.relative(sourcePath, itemPath));
+        if (!relativePath) return true;
+        if (isInternalPath(relativePath) || isDefaultSecretPath(relativePath)) return false;
+        return !isIgnoredByRules(relativePath, rootGitignoreRules);
       }
     });
 }
@@ -59,6 +193,40 @@ interface FileToHash {
   relativePath: string;
   size: number;
   mtimeMs: number;
+}
+
+/**
+ * Incremental hash cache: avoids re-hashing files whose (size, mtime) haven't
+ * changed since the last snapshot within the same process. This is especially
+ * useful for the before/after snapshot pair in a benchmark run, where the vast
+ * majority of files are unchanged. The cache is bounded to prevent unbounded
+ * memory growth across many runs.
+ */
+interface CachedHash {
+  size: number;
+  mtimeMs: number;
+  hash: string;
+}
+const hashCache = new Map<string, CachedHash>();
+const HASH_CACHE_MAX_SIZE = 50_000;
+
+function getCachedHash(absolutePath: string, size: number, mtimeMs: number): string | undefined {
+  const cached = hashCache.get(absolutePath);
+  if (cached && cached.size === size && cached.mtimeMs === mtimeMs) {
+    return cached.hash;
+  }
+  return undefined;
+}
+
+function setCachedHash(absolutePath: string, size: number, mtimeMs: number, hash: string): void {
+  if (hashCache.size >= HASH_CACHE_MAX_SIZE) {
+    // Evict oldest entry (first inserted) — Map preserves insertion order
+    const firstKey = hashCache.keys().next().value;
+    if (firstKey !== undefined) {
+      hashCache.delete(firstKey);
+    }
+  }
+  hashCache.set(absolutePath, { size, mtimeMs, hash });
 }
 
 /**
@@ -141,6 +309,7 @@ export async function snapshotDirectory(rootPath: string): Promise<Map<string, F
       }
 
       if (!entry.isFile()) continue;
+      if (isInternalPath(relativePath)) continue;
 
       try {
         const stat = await fs.stat(absolutePath);
@@ -180,16 +349,29 @@ export async function snapshotDirectory(rootPath: string): Promise<Map<string, F
     }
   }
 
-  // Phase 2: Hash files in parallel with concurrency limit
+  // Phase 2: Hash files in parallel with concurrency limit.
+  // Uses an incremental hash cache: files whose (size, mtime) haven't changed
+  // since the last snapshot in this process reuse the cached hash.
+  let cacheHits = 0;
   const hashes = await mapWithConcurrency(filesToHash, concurrency, async (file) => {
     try {
+      const cached = getCachedHash(file.absolutePath, file.size, file.mtimeMs);
+      if (cached) {
+        cacheHits += 1;
+        return { relativePath: file.relativePath, hash: cached };
+      }
       const hash = await hashFileStream(file.absolutePath);
+      setCachedHash(file.absolutePath, file.size, file.mtimeMs, hash);
       return { relativePath: file.relativePath, hash };
     } catch (_error) {
       logger.warn("core", "snapshot.skip_file", `Snapshot: skipped file due to error: ${file.relativePath}`, { error: _error });
       return null;
     }
   });
+
+  if (cacheHits > 0) {
+    logger.debug("core", "snapshot.cache_hits", `Snapshot: ${cacheHits}/${filesToHash.length} files reused cached hash`);
+  }
 
   for (const entry of hashes) {
     if (entry) {

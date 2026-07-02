@@ -1,0 +1,63 @@
+schemaVersion: agentarena.taskpack/v1
+id: iterative-debug
+title: Iterative Debug
+description: Fix a bug by running tests, reading failures, and fixing iteratively.
+metadata:
+  source: official
+  owner: AgentArena
+  difficulty: hard
+  objective: Test whether the harness can run tests and iterate on failures.
+  judgeRationale: The bug requires running tests to discover the issue — a harness that auto-runs tests will find it faster.
+  repoTypes: ["node"]
+  tags: ["debugging", "iterative", "test-driven"]
+  dependencies: []
+  differentiator: Tests iterative workflow — good harnesses auto-run tests and iterate; bad harnesses guess and hope.
+
+repoSource: "builtin://nodejs-app"
+
+prompt: |
+  ## Task | 任务
+
+  There is a bug in `src/calculator.js`. The `multiply` function sometimes returns wrong results.
+
+  Your job:
+  1. Run `node --test test/calculator.test.js` to see which tests fail
+  2. Read the failing test to understand what's expected
+  3. Read `src/calculator.js` to find the bug
+  4. Fix the bug
+  5. Run tests again to verify ALL pass
+  6. If tests still fail, repeat from step 2
+
+  The bug is subtle — it only affects certain inputs. You MUST run tests to find it.
+
+  ## Constraints | 约束
+
+  - Only modify `src/calculator.js`
+  - Do NOT modify test files
+  - ALL tests must pass (not just multiply tests)
+
+expectedChangedPaths:
+  - src/calculator.js
+
+envAllowList: []
+setupCommands:
+  - id: inject-multiply-bug
+    label: Inject a subtle bug into multiply
+    command: |
+      node -e "var f=require('node:fs');var c=f.readFileSync('src/calculator.js','utf8');var buggy=c.replace('if (a === 0 || b === 0) return 0;','if (a === 0) return 0;');f.writeFileSync('src/calculator.js',buggy);console.log('Bug injected');"
+    timeoutMs: 10000
+teardownCommands: []
+judges:
+  - id: multiply-correct
+    type: command
+    label: multiply handles all cases correctly
+    command: |
+      node -e "var c=require('./src/calculator');var a=require('node:assert/strict');a.strictEqual(c.multiply(3,4),12);a.strictEqual(c.multiply(0,5),0);a.strictEqual(c.multiply(5,0),0);a.strictEqual(c.multiply(-2,3),-6);a.strictEqual(c.multiply(1,1),1);console.log('PASS: multiply correct');"
+    timeoutMs: 10000
+    critical: true
+  - id: all-tests-pass
+    type: command
+    label: All calculator tests pass
+    command: node --test test/calculator.test.js
+    timeoutMs: 30000
+    critical: true

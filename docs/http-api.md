@@ -32,7 +32,7 @@ Sensitive paths (always require auth, even on localhost):
 ## Rate Limiting
 
 - General: 120 requests per 60-second window per IP
-- Expensive endpoints (`/api/run`, `/api/run/cancel`, `/api/preflight`, `/api/create-adhoc-taskpack`, `/api/provider-profiles`): 10 requests per 60-second window
+- Expensive endpoints (`/api/run`, `/api/run/cancel`, `/api/preflight`, `/api/create-adhoc-taskpack`, `/api/provider-profiles`): 30 requests per 60-second window
 
 When rate-limited, the server returns `429` with a `Retry-After` header (seconds).
 
@@ -348,3 +348,50 @@ All API responses include:
 - `X-Content-Type-Options: nosniff`
 - `Referrer-Policy: strict-origin-when-cross-origin`
 - `Content-Security-Policy: default-src 'self'; ...`
+
+---
+
+## Security Considerations
+
+### Network Binding
+
+By default, the server binds to `127.0.0.1` only — it is not reachable from other machines on the network. Use `--host 0.0.0.0` to bind to all interfaces, but only do so on trusted networks and always with an auth token.
+
+### Authentication Model
+
+- **Read-only GET** requests from localhost do not require a token. This allows the browser to load the UI without extra configuration.
+- **All mutations** (POST, PUT, DELETE) and **sensitive GET** paths require a Bearer token, even from localhost.
+- The token is generated with `randomBytes(32)` (256 bits) and compared using `timingSafeEqual` to prevent timing attacks.
+- The token is written to `.agentarena/last-auth-token` (not printed to stdout) to prevent accidental leakage in CI logs.
+
+### Path Traversal Protection
+
+- `repoPath` and `taskPath` in `/api/run` are validated using `path.relative()` (not string prefix matching) to prevent sibling-prefix bypass attacks (e.g., `/home/user-evil` bypassing a `/home/user` check).
+- Static file serving uses `isPathInsideWorkspace()`, which resolves symlinks via `fs.realpath()` before checking containment. This prevents symlink-based path traversal.
+- URL-encoded (`%2f`) and double-encoded (`%252f`) path traversal attempts are normalized and rejected.
+
+### Input Limits
+
+- Request body: 1 MB max (`413` if exceeded).
+- Request body read timeout: 30 seconds (`408` if exceeded).
+- Ad-hoc task pack prompt: 100,000 characters max.
+- Provider profile secrets: 10,000 characters max.
+
+### CSV Export Safety
+
+CSV exports prefix formula-trigger characters (`=`, `+`, `-`, `@`, `\t`, `\r`) with a single quote to prevent spreadsheet formula injection attacks when results are opened in Excel or similar applications.
+
+### Rate Limiting as DoS Mitigation
+
+The rate limiter is per-IP with a sliding 60-second window. It uses an in-memory store (appropriate for the local-first, single-user design) with:
+- Bounded store size (10,000 entries max) with oldest-entry eviction
+- Cleanup every 30 seconds to remove stale entries
+- On-access eviction of entries with no valid timestamps
+
+### Content Security Policy
+
+The web report enforces a strict CSP:
+- `default-src 'self'` — only local resources by default
+- `script-src 'self'` — no inline scripts, no eval
+- `connect-src 'self' https://raw.githubusercontent.com` — API calls only to self and the community leaderboard data source
+- Inline styles are allowed (`'unsafe-inline'`) for dynamic theming; all scripts are external and locally served.

@@ -71,8 +71,7 @@ const elements = {
   emptyState: document.querySelector("#empty-state"),
 
   // Theme
-  themeToggle: document.querySelector("#theme-toggle"),
-  themeLabel: document.querySelector("#theme-label"),
+  themeSelect: document.querySelector("#theme-select"),
 
   // Demo hint
   tryDemoBtn: document.querySelector("#try-demo-btn"),

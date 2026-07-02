@@ -1,8 +1,12 @@
 import type { BenchmarkRun } from "@agentarena/core";
 import { formatCompositeScoreValue, type ScoredRun } from "./report-helpers.js";
+import { enrichRunWithScores } from "./scoring.js";
 
 function escapeCsvField(value: unknown): string {
-  const str = String(value ?? "");
+  let str = String(value ?? "");
+  if (/^[=+\-@\t\r]/.test(str)) {
+    str = `'${str}`;
+  }
   if (str.includes(",") || str.includes('"') || str.includes("\n") || str.includes("\r")) {
     return `"${str.replaceAll('"', '""')}"`;
   }
@@ -10,7 +14,7 @@ function escapeCsvField(value: unknown): string {
 }
 
 export function generateCsv(run: BenchmarkRun): string {
-  const scoredRun = run as ScoredRun;
+  const scoredRun = run.task ? (enrichRunWithScores(run) as ScoredRun) : (run as ScoredRun);
   const headers = [
     "Agent",
     "Base Agent",

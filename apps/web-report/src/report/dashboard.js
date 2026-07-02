@@ -187,9 +187,19 @@ function renderRunListItem(run) {
   const allSuccess = successCount === run.results.length && run.results.length > 0;
   const allFailed = successCount === 0 && run.results.length > 0;
   const statusClass = allSuccess ? "run-card--success" : allFailed ? "run-card--failed" : "run-card--partial";
+  const statusLabel = allSuccess
+    ? localText("通过", "Pass")
+    : allFailed
+      ? localText("失败", "Fail")
+      : localText("部分", "Partial");
 
   return `
     <div class="run-button ${active} ${statusClass}" role="button" tabindex="0" data-run-id="${escapeHtml(run.runId)}" aria-label="${escapeHtml(run.task.title)}">
+      <div class="run-card-header">
+        <strong>${escapeHtml(run.task.title)}</strong>
+        <span class="run-card-status">${escapeHtml(statusLabel)}</span>
+      </div>
+      <div class="run-card-meta">${escapeHtml(formatRelativeTime(run.createdAt, localText))} · ${successCount}/${run.results.length} · ${hasMarkdown ? "MD" : "JSON"}</div>
       <div class="run-actions">
         <button type="button" class="run-select-btn" data-role="select-run" data-run-id="${escapeHtml(run.runId)}" title="${escapeHtml(localText("打开这个 run", "Open this run"))}" aria-label="${escapeHtml(localText("打开这个 run", "Open this run"))}">
           <svg class="icon"><use href="#icon-open"/></svg>
@@ -197,17 +207,11 @@ function renderRunListItem(run) {
         </button>
         <button type="button" class="run-action-btn" data-role="export-run" data-run-id="${escapeHtml(run.runId)}" title="${escapeHtml(localText("导出 JSON", "Export JSON"))}" aria-label="${escapeHtml(localText("导出 JSON", "Export JSON"))}">
           <svg class="icon"><use href="#icon-export"/></svg>
-          ${escapeHtml(localText("导出", "Export"))}
         </button>
         <button type="button" class="run-action-btn" data-role="delete-run" data-run-id="${escapeHtml(run.runId)}" title="${escapeHtml(localText("从列表移除", "Remove from list"))}" aria-label="${escapeHtml(localText("从列表移除", "Remove from list"))}">
           <svg class="icon"><use href="#icon-delete"/></svg>
-          ${escapeHtml(localText("移除", "Remove"))}
         </button>
       </div>
-      <strong>${escapeHtml(run.task.title)}</strong>
-      <div class="meta">${escapeHtml(formatRelativeTime(run.createdAt, localText))}</div>
-      <div class="meta">${successCount}/${run.results.length} ${localText("成功", "success")}</div>
-      <div class="meta">${hasMarkdown ? escapeHtml(t("linkedMarkdown")) : escapeHtml(t("jsonOnly"))}</div>
     </div>
   `;
 }
@@ -251,6 +255,11 @@ function renderRunListItemNode(run) {
   const allSuccess = successCount === run.results.length && run.results.length > 0;
   const allFailed = successCount === 0 && run.results.length > 0;
   const runStatusClass = allSuccess ? "run-card--success" : allFailed ? "run-card--failed" : "run-card--partial";
+  const statusLabel = allSuccess
+    ? localText("通过", "Pass")
+    : allFailed
+      ? localText("失败", "Fail")
+      : localText("部分", "Partial");
   const node = document.createElement("div");
 
   node.className = ["run-button", active, runStatusClass].filter(Boolean).join(" ");
@@ -259,17 +268,26 @@ function renderRunListItemNode(run) {
   node.dataset.runId = run.runId;
   node.setAttribute("aria-label", run.task.title);
 
+  const header = document.createElement("div");
+  header.className = "run-card-header";
+  appendTextElement(header, "strong", "", run.task.title);
+  const statusSpan = document.createElement("span");
+  statusSpan.className = "run-card-status";
+  statusSpan.textContent = statusLabel;
+  header.appendChild(statusSpan);
+  node.appendChild(header);
+
+  const metaLine = document.createElement("div");
+  metaLine.className = "run-card-meta";
+  metaLine.textContent = `${formatRelativeTime(run.createdAt, localText)} · ${successCount}/${run.results.length} · ${hasMarkdown ? "MD" : "JSON"}`;
+  node.appendChild(metaLine);
+
   const actions = document.createElement("div");
   actions.className = "run-actions";
   actions.appendChild(createRunActionButton("select-run", run.runId, "#icon-open", localText("打开这个 run", "Open this run")));
   actions.appendChild(createRunActionButton("export-run", run.runId, "#icon-export", localText("导出 JSON", "Export JSON")));
   actions.appendChild(createRunActionButton("delete-run", run.runId, "#icon-delete", localText("从列表移除", "Remove from list")));
   node.appendChild(actions);
-
-  appendTextElement(node, "strong", "", run.task.title);
-  appendTextElement(node, "div", "meta", formatRelativeTime(run.createdAt, localText));
-  appendTextElement(node, "div", "meta", `${successCount}/${run.results.length} ${localText("成功", "success")}`);
-  appendTextElement(node, "div", "meta", hasMarkdown ? t("linkedMarkdown") : t("jsonOnly"));
 
   return node;
 }
@@ -331,7 +349,7 @@ function renderRunList() {
   if (filteredRuns.length > VIRTUAL_LIST_THRESHOLD) {
     if (!runListVirtual) {
       runListVirtual = createVirtualList(elements.runList, {
-        itemHeight: 80,
+        itemHeight: 84,
         overscan: 5,
         className: 'run-list-virtual',
         role: 'listbox'
@@ -422,14 +440,14 @@ function renderRunCompareTable() {
     <table class="compare-table">
       <thead>
         <tr>
-          <th>${escapeHtml(localText("运行", "Run"))}</th>
-          <th>${escapeHtml(localText("任务", "Task"))}</th>
-          <th>${escapeHtml(localText("创建时间", "Created"))}</th>
-          <th>${escapeHtml(t("metrics.success"))}</th>
-          <th>${escapeHtml(t("metrics.agents"))}</th>
-          <th>${escapeHtml(t("metrics.tokens"))}</th>
-          <th>${escapeHtml(t("metrics.knownCost"))}</th>
-          <th>${escapeHtml(localText("Markdown", "Markdown"))}</th>
+          <th scope="col">${escapeHtml(localText("运行", "Run"))}</th>
+          <th scope="col">${escapeHtml(localText("任务", "Task"))}</th>
+          <th scope="col">${escapeHtml(localText("创建时间", "Created"))}</th>
+          <th scope="col">${escapeHtml(t("metrics.success"))}</th>
+          <th scope="col">${escapeHtml(t("metrics.agents"))}</th>
+          <th scope="col">${escapeHtml(t("metrics.tokens"))}</th>
+          <th scope="col">${escapeHtml(t("metrics.knownCost"))}</th>
+          <th scope="col">${escapeHtml(localText("Markdown", "Markdown"))}</th>
         </tr>
       </thead>
       <tbody>
@@ -478,13 +496,13 @@ function renderRunDiffTableV2() {
     <table class="compare-table">
       <thead>
         <tr>
-          <th>${escapeHtml(localText("Variant", "Variant"))}</th>
-          <th>${escapeHtml(localText("版本变化", "Version Change"))}</th>
-          <th>${escapeHtml(localText("状态变化", "Status Change"))}</th>
-          <th>${escapeHtml(localText("耗时变化", "Duration Δ"))}</th>
-          <th>${escapeHtml(localText("Token 变化", "Token Δ"))}</th>
-          <th>${escapeHtml(localText("成本变化", "Cost Δ"))}</th>
-          <th>${escapeHtml(localText("Judge 变化", "Judge Δ"))}</th>
+          <th scope="col">${escapeHtml(localText("Variant", "Variant"))}</th>
+          <th scope="col">${escapeHtml(localText("版本变化", "Version Change"))}</th>
+          <th scope="col">${escapeHtml(localText("状态变化", "Status Change"))}</th>
+          <th scope="col">${escapeHtml(localText("耗时变化", "Duration Δ"))}</th>
+          <th scope="col">${escapeHtml(localText("Token 变化", "Token Δ"))}</th>
+          <th scope="col">${escapeHtml(localText("成本变化", "Cost Δ"))}</th>
+          <th scope="col">${escapeHtml(localText("Judge 变化", "Judge Δ"))}</th>
         </tr>
       </thead>
       <tbody>
@@ -525,13 +543,13 @@ function renderAgentTrendTableV2(run) {
     <table class="compare-table">
       <thead>
         <tr>
-          <th>${escapeHtml(localText("Run", "Run"))}</th>
-          <th>${escapeHtml(localText("版本", "Version"))}</th>
-          <th>${escapeHtml(localText("状态", "Status"))}</th>
-          <th>${escapeHtml(localText("耗时", "Duration"))}</th>
-          <th>${escapeHtml(localText("Tokens", "Tokens"))}</th>
-          <th>${escapeHtml(localText("成本", "Cost"))}</th>
-          <th>${escapeHtml(localText("Judge 变化", "Judge Δ"))}</th>
+          <th scope="col">${escapeHtml(localText("Run", "Run"))}</th>
+          <th scope="col">${escapeHtml(localText("版本", "Version"))}</th>
+          <th scope="col">${escapeHtml(localText("状态", "Status"))}</th>
+          <th scope="col">${escapeHtml(localText("耗时", "Duration"))}</th>
+          <th scope="col">${escapeHtml(localText("Tokens", "Tokens"))}</th>
+          <th scope="col">${escapeHtml(localText("成本", "Cost"))}</th>
+          <th scope="col">${escapeHtml(localText("Judge 变化", "Judge Δ"))}</th>
         </tr>
       </thead>
       <tbody>
@@ -822,7 +840,7 @@ function renderComparisonBars(run) {
     const key = recordKey(r);
     const activeClass = key === state.selectedAgentId ? " bar-row-active" : "";
     return `
-      <div class="bar-row${activeClass}" tabindex="0" role="button" data-bar-agent-id="${escapeHtml(key)}" data-tooltip="${escapeHtml(resultLabel(r))}: ${passed}/${total} (${pct}%)">
+      <div class="bar-row${activeClass}" tabindex="0" role="button" data-bar-agent-id="${escapeHtml(key)}" data-tooltip="${escapeHtml(resultLabel(r))}: ${passed}/${total} (${pct}%)" aria-label="${escapeHtml(resultLabel(r))}: ${passed}/${total} (${pct}%)">
         <span class="bar-label" title="${escapeHtml(resultLabel(r))}">${escapeHtml(resultLabel(r))}</span>
         <div class="bar-track"><div class="bar-fill ${color}" style="width:${pct}%"></div></div>
         <span class="bar-value">${total > 0 ? `${passed}/${total}` : "N/A"}</span>
@@ -1239,12 +1257,12 @@ function renderCompareTableV2(run) {
     <table class="compare-table compare-table-compact">
       <thead>
         <tr>
-          <th style="width:40px">#</th>
-          <th>${escapeHtml(localText("配置", "Variant"))}</th>
-          <th style="width:50px">${escapeHtml(localText("状态", "Status"))}</th>
-          <th style="width:120px">${escapeHtml(localText("综合分", "Score"))}</th>
-          <th style="width:120px">${escapeHtml(localText("通过率", "Pass Rate"))}</th>
-          <th style="width:90px">${escapeHtml(localText("耗时", "Duration"))}</th>
+          <th scope="col" style="width:40px">#</th>
+          <th scope="col">${escapeHtml(localText("配置", "Variant"))}</th>
+          <th scope="col" style="width:50px">${escapeHtml(localText("状态", "Status"))}</th>
+          <th scope="col" style="width:120px">${escapeHtml(localText("综合分", "Score"))}</th>
+          <th scope="col" style="width:120px">${escapeHtml(localText("通过率", "Pass Rate"))}</th>
+          <th scope="col" style="width:90px">${escapeHtml(localText("耗时", "Duration"))}</th>
         </tr>
       </thead>
       <tbody>
@@ -1267,12 +1285,12 @@ function renderCompareTableV2(run) {
       <table class="compare-table compare-table-compact compare-table-failed">
         <thead>
           <tr>
-            <th style="width:40px">#</th>
-            <th>${escapeHtml(localText("配置", "Variant"))}</th>
-            <th style="width:50px">${escapeHtml(localText("状态", "Status"))}</th>
-            <th style="width:120px">${escapeHtml(localText("综合分", "Score"))}</th>
-            <th style="width:120px">${escapeHtml(localText("通过率", "Pass Rate"))}</th>
-            <th style="width:90px">${escapeHtml(localText("耗时", "Duration"))}</th>
+            <th scope="col" style="width:40px">#</th>
+            <th scope="col">${escapeHtml(localText("配置", "Variant"))}</th>
+            <th scope="col" style="width:50px">${escapeHtml(localText("状态", "Status"))}</th>
+            <th scope="col" style="width:120px">${escapeHtml(localText("综合分", "Score"))}</th>
+            <th scope="col" style="width:120px">${escapeHtml(localText("通过率", "Pass Rate"))}</th>
+            <th scope="col" style="width:90px">${escapeHtml(localText("耗时", "Duration"))}</th>
           </tr>
         </thead>
         <tbody>
@@ -1484,18 +1502,18 @@ function renderLeaderboard(run) {
     <table class="leaderboard-table">
       <thead>
         <tr>
-          <th>${escapeHtml(t("leaderboardVariant"))}</th>
-          <th>${escapeHtml(t("leaderboardBaseAgent"))}</th>
-          <th>${escapeHtml(t("leaderboardProvider"))}</th>
-          <th>${escapeHtml(t("leaderboardModel"))}</th>
-          <th>${escapeHtml(t("leaderboardVersion"))}</th>
-          <th>${escapeHtml(t("leaderboardRuns"))}</th>
-          <th>${escapeHtml(t("leaderboardAvgScore"))}</th>
-          <th>${escapeHtml(t("leaderboardWinRate"))}</th>
-          <th>${escapeHtml(t("leaderboardSuccessRate"))}</th>
-          <th>${escapeHtml(t("leaderboardMedianDuration"))}</th>
-          <th>${escapeHtml(t("leaderboardMedianCost"))}</th>
-          <th>${escapeHtml(t("leaderboardLastSeen"))}</th>
+          <th scope="col">${escapeHtml(t("leaderboardVariant"))}</th>
+          <th scope="col">${escapeHtml(t("leaderboardBaseAgent"))}</th>
+          <th scope="col">${escapeHtml(t("leaderboardProvider"))}</th>
+          <th scope="col">${escapeHtml(t("leaderboardModel"))}</th>
+          <th scope="col">${escapeHtml(t("leaderboardVersion"))}</th>
+          <th scope="col">${escapeHtml(t("leaderboardRuns"))}</th>
+          <th scope="col">${escapeHtml(t("leaderboardAvgScore"))}</th>
+          <th scope="col">${escapeHtml(t("leaderboardWinRate"))}</th>
+          <th scope="col">${escapeHtml(t("leaderboardSuccessRate"))}</th>
+          <th scope="col">${escapeHtml(t("leaderboardMedianDuration"))}</th>
+          <th scope="col">${escapeHtml(t("leaderboardMedianCost"))}</th>
+          <th scope="col">${escapeHtml(t("leaderboardLastSeen"))}</th>
         </tr>
       </thead>
       <tbody>
@@ -1619,9 +1637,9 @@ function renderTaskTrace(run) {
         <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:8px;">${escapeHtml(localText(`${toolCalls.length} 次工具调用`, `${toolCalls.length} tool calls`))}</div>
         <table class="tool-calls-table" style="width:100%;font-size:0.82rem;border-collapse:collapse;">
           <thead><tr style="text-align:left;border-bottom:1px solid var(--border-color);">
-            <th style="padding:4px 8px;">${escapeHtml(localText("时间", "Time"))}</th>
-            <th style="padding:4px 8px;">${escapeHtml(localText("工具", "Tool"))}</th>
-            <th style="padding:4px 8px;">${escapeHtml(localText("参数", "Input"))}</th>
+            <th scope="col" style="padding:4px 8px;">${escapeHtml(localText("时间", "Time"))}</th>
+            <th scope="col" style="padding:4px 8px;">${escapeHtml(localText("工具", "Tool"))}</th>
+            <th scope="col" style="padding:4px 8px;">${escapeHtml(localText("参数", "Input"))}</th>
           </tr></thead>
           <tbody>${rows}</tbody>
         </table>`;

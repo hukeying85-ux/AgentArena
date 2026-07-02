@@ -762,6 +762,36 @@ export function createLauncherModule(deps) {
         </div>`
       : "";
 
+    // Compatibility indicator
+    const compat = taskPack.compatibility;
+    let compatHtml = "";
+    if (compat) {
+      const compatColors = {
+        compatible: { bg: "rgba(16, 185, 129, 0.12)", border: "#10b981", color: "#34d399", icon: "✅" },
+        warning: { bg: "rgba(245, 158, 11, 0.12)", border: "#f59e0b", color: "#fbbf24", icon: "⚠️" },
+        incompatible: { bg: "rgba(239, 68, 68, 0.12)", border: "#ef4444", color: "#f87171", icon: "❌" },
+        unknown: { bg: "rgba(107, 114, 128, 0.12)", border: "#6b7280", color: "#9ca3af", icon: "🔍" }
+      };
+      const style = compatColors[compat.status] ?? compatColors.unknown;
+      const statusLabel = {
+        compatible: localText("兼容当前仓库", "Compatible with current repo"),
+        warning: localText("可能不适用 — 部分前提条件缺失", "May not work — missing prerequisites"),
+        incompatible: localText("不兼容 — 语言/框架不匹配", "Incompatible — wrong language/framework"),
+        unknown: localText("未检测兼容性", "Compatibility not checked")
+      };
+      const failedDetails = (compat.failedChecks ?? [])
+        .filter((c) => c.status === "fail")
+        .slice(0, 3)
+        .map((c) => `<li>${escapeHtml(c.label)}: ${escapeHtml(c.message)}</li>`)
+        .join("");
+      compatHtml = `
+        <div style="margin-top:8px;padding:8px 12px;border-radius:4px;background:${style.bg};border:1px solid ${style.border};color:${style.color};font-size:0.9em;">
+          ${style.icon} ${escapeHtml(statusLabel[compat.status] ?? statusLabel.unknown)}
+          ${compat.summary ? `<div style="margin-top:4px;font-size:0.85em;opacity:0.85;">${escapeHtml(compat.summary)}</div>` : ""}
+          ${failedDetails ? `<ul style="margin:4px 0 0 16px;padding:0;font-size:0.85em;opacity:0.85;">${failedDetails}</ul>` : ""}
+        </div>`;
+    }
+
     elements.taskPackDetail.innerHTML = `
       <div class="task-pack-header">
         <strong>${escapeHtml(title)}</strong>
@@ -773,6 +803,7 @@ export function createLauncherModule(deps) {
         <span>${escapeHtml(localText("适用", "Repo"))}: ${escapeHtml(repoTypes)}</span>
         <span>${escapeHtml(localText("检查项", "Judges"))}: ${judgeCount}</span>
       </div>
+      ${compatHtml}
       ${communityWarning}
     `;
     setHidden(elements.taskPackDetail, false);
@@ -871,29 +902,69 @@ export function createLauncherModule(deps) {
 
     // Task pack dropdown
     const difficultyOrder = { easy: 0, medium: 1, hard: 2 };
-    const grouped = { easy: [], medium: [], hard: [], other: [] };
+    const grouped = { compatible: [], warning: [], incompatible: [], unknown: [] };
     for (const tp of state.availableTaskPacks) {
-      const key = tp.difficulty && grouped[tp.difficulty] ? tp.difficulty : "other";
+      const compatStatus = tp.compatibility?.status ?? "unknown";
+      const key = grouped[compatStatus] ? compatStatus : "unknown";
       grouped[key].push(tp);
     }
+    // Within each group, sub-sort by difficulty then title
     for (const arr of Object.values(grouped)) {
-      arr.sort((a, b) => (taskPackI18n(a, "title") || a.title).localeCompare(taskPackI18n(b, "title") || b.title));
+      arr.sort((a, b) => {
+        const da = difficultyOrder[a.difficulty] ?? 9;
+        const db = difficultyOrder[b.difficulty] ?? 9;
+        if (da !== db) return da - db;
+        return (taskPackI18n(a, "title") || a.title).localeCompare(taskPackI18n(b, "title") || b.title);
+      });
     }
 
     const customOption = `<option value="">${escapeHtml(t("taskPackCustom"))}</option>`;
-    const groupLabels = { easy: t("difficultyEasy") || "简单", medium: t("difficultyMedium") || "中等", hard: t("difficultyHard") || "困难", other: t("difficultyOther") || "其他" };
+    const compatLabels = {
+      compatible: localText("✅ 兼容", "✅ Compatible"),
+      warning: localText("⚠️ 可能不适用", "⚠️ May Not Work"),
+      incompatible: localText("❌ 不兼容", "❌ Incompatible"),
+      unknown: localText("🔍 未检测", "🔍 Unchecked")
+    };
+    const hasAnyCompatibilityInfo = state.availableTaskPacks.some((tp) => tp.compatibility);
     const builtinBadge = t("builtinRepoBadge") || "Built-in";
     const optionHtml = [customOption];
-    for (const diffKey of ["easy", "medium", "hard", "other"]) {
-      const packs = grouped[diffKey];
-      if (packs.length === 0) continue;
-      optionHtml.push(`<optgroup label="${escapeHtml(groupLabels[diffKey])} (${packs.length})">`);
-      for (const tp of packs) {
-        const tpTitle = taskPackI18n(tp, "title") || tp.title;
-        const badge = tp.repoSource?.startsWith("builtin://") ? ` [${escapeHtml(builtinBadge)}]` : "";
-        optionHtml.push(`<option value="${escapeHtml(tp.path)}">${escapeHtml(tpTitle)}${badge}</option>`);
+
+    // If we have compatibility info, group by compatibility first
+    if (hasAnyCompatibilityInfo) {
+      for (const compatKey of ["compatible", "warning", "unknown", "incompatible"]) {
+        const packs = grouped[compatKey];
+        if (packs.length === 0) continue;
+        optionHtml.push(`<optgroup label="${escapeHtml(compatLabels[compatKey])} (${packs.length})">`);
+        for (const tp of packs) {
+          const tpTitle = taskPackI18n(tp, "title") || tp.title;
+          const badge = tp.repoSource?.startsWith("builtin://") ? ` [${escapeHtml(builtinBadge)}]` : "";
+          const diffBadge = tp.difficulty ? ` (${escapeHtml(translateDifficulty(tp.difficulty))})` : "";
+          optionHtml.push(`<option value="${escapeHtml(tp.path)}">${escapeHtml(tpTitle)}${diffBadge}${badge}</option>`);
+        }
+        optionHtml.push(`</optgroup>`);
       }
-      optionHtml.push(`</optgroup>`);
+    } else {
+      // Fallback: group by difficulty
+      const groupLabels = { easy: t("difficultyEasy") || "简单", medium: t("difficultyMedium") || "中等", hard: t("difficultyHard") || "困难", other: t("difficultyOther") || "其他" };
+      const groupedByDiff = { easy: [], medium: [], hard: [], other: [] };
+      for (const tp of state.availableTaskPacks) {
+        const key = tp.difficulty && groupedByDiff[tp.difficulty] ? tp.difficulty : "other";
+        groupedByDiff[key].push(tp);
+      }
+      for (const arr of Object.values(groupedByDiff)) {
+        arr.sort((a, b) => (taskPackI18n(a, "title") || a.title).localeCompare(taskPackI18n(b, "title") || b.title));
+      }
+      for (const diffKey of ["easy", "medium", "hard", "other"]) {
+        const packs = groupedByDiff[diffKey];
+        if (packs.length === 0) continue;
+        optionHtml.push(`<optgroup label="${escapeHtml(groupLabels[diffKey])} (${packs.length})">`);
+        for (const tp of packs) {
+          const tpTitle = taskPackI18n(tp, "title") || tp.title;
+          const badge = tp.repoSource?.startsWith("builtin://") ? ` [${escapeHtml(builtinBadge)}]` : "";
+          optionHtml.push(`<option value="${escapeHtml(tp.path)}">${escapeHtml(tpTitle)}${badge}</option>`);
+        }
+        optionHtml.push(`</optgroup>`);
+      }
     }
 
     if (elements.launcherTaskSelect) {
@@ -1259,13 +1330,12 @@ export function createLauncherModule(deps) {
   async function detectService() {
     try {
       // Load core endpoints (must all succeed)
-      const [infoResponse, adaptersResponse, taskPacksResponse, runStatusResponse] = await Promise.all([
+      const [infoResponse, adaptersResponse, runStatusResponse] = await Promise.all([
         apiFetch("/api/ui-info"),
         apiFetch("/api/adapters"),
-        apiFetch("/api/taskpacks"),
         apiFetch("/api/run-status", { cache: "no-store" })
       ]);
-      if (!infoResponse.ok || !adaptersResponse.ok || !taskPacksResponse.ok || !runStatusResponse.ok) {
+      if (!infoResponse.ok || !adaptersResponse.ok || !runStatusResponse.ok) {
         return;
       }
 
@@ -1278,7 +1348,24 @@ export function createLauncherModule(deps) {
       const hiddenAdapterIds = new Set(['cursor', 'copilot', 'windsurf', 'trae']);
       state.availableAdapters = allAdapters.filter(adapter => !hiddenAdapterIds.has(adapter.id));
 
-      state.availableTaskPacks = await taskPacksResponse.json();
+      // Fetch task packs with repo path for compatibility filtering
+      const repoPath = state.serviceInfo?.repoPath ?? "";
+      const taskPacksUrl = repoPath ? `/api/taskpacks?repoPath=${encodeURIComponent(repoPath)}` : "/api/taskpacks";
+      try {
+        const taskPacksResponse = await apiFetch(taskPacksUrl);
+        if (taskPacksResponse.ok) {
+          state.availableTaskPacks = await taskPacksResponse.json();
+        } else {
+          // Fallback: fetch without compatibility info
+          const fallbackResponse = await apiFetch("/api/taskpacks");
+          if (fallbackResponse.ok) {
+            state.availableTaskPacks = await fallbackResponse.json();
+          }
+        }
+      } catch {
+        state.availableTaskPacks = [];
+      }
+
       state.runStatus = await runStatusResponse.json();
 
       // Load provider profiles separately (may fail with 401 if no token)
@@ -2039,6 +2126,33 @@ export function createLauncherModule(deps) {
   }
 
   // -----------------------------------------------------------------------
+  // Task pack compatibility refresh — re-fetch when repo path changes
+  // -----------------------------------------------------------------------
+
+  let _refreshTaskPacksTimer = null;
+
+  async function refreshTaskPackCompatibility() {
+    const repoPath = elements.launcherRepoPath?.value?.trim() ?? "";
+    const url = repoPath ? `/api/taskpacks?repoPath=${encodeURIComponent(repoPath)}` : "/api/taskpacks";
+    try {
+      const response = await apiFetch(url);
+      if (response.ok) {
+        state.availableTaskPacks = await response.json();
+        renderLauncher();
+      }
+    } catch {
+      // Silently ignore — keep existing task pack list
+    }
+  }
+
+  function debouncedRefreshTaskPacks() {
+    if (_refreshTaskPacksTimer) clearTimeout(_refreshTaskPacksTimer);
+    _refreshTaskPacksTimer = setTimeout(() => {
+      refreshTaskPackCompatibility();
+    }, 800);
+  }
+
+  // -----------------------------------------------------------------------
   // Public API
   // -----------------------------------------------------------------------
 
@@ -2069,6 +2183,8 @@ export function createLauncherModule(deps) {
     saveProviderProfileFromEditor,
     deleteProviderProfileById,
     runQuickPreflight,
-    updateAgentCardPreflightStatus
+    updateAgentCardPreflightStatus,
+    debouncedRefreshTaskPacks,
+    refreshTaskPackCompatibility
   };
 }

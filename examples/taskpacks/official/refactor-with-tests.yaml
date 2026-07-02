@@ -1,0 +1,72 @@
+schemaVersion: agentarena.taskpack/v1
+id: refactor-with-tests
+title: Refactor with Tests
+description: Refactor a function while keeping all tests passing.
+metadata:
+  source: official
+  owner: AgentArena
+  difficulty: hard
+  objective: Test ability to refactor code without breaking functionality.
+  judgeRationale: Behavioral tests verify the refactored code produces identical output.
+  repoTypes: ["node"]
+  tags: ["refactor", "testing", "code-quality"]
+  dependencies: []
+  differentiator: Tests discipline — weak agents refactor and break things, strong agents verify after each change.
+
+repoSource: "builtin://nodejs-app"
+
+prompt: |
+  ## Task | 任务
+
+  Refactor the `capitalize` function in `src/utils.js` to use a more efficient approach:
+
+  Current implementation:
+  ```javascript
+  function capitalize(str) {
+    if (!str) return str;
+    return str.charAt(0).toUpperCase() + str.slice(1);
+  }
+  ```
+
+  This only capitalizes the first character. Refactor it to:
+  1. Capitalize the first letter of EVERY word (not just the first)
+  2. Use `split(" ")` and `map()` instead of manual character manipulation
+  3. Handle multiple spaces between words (preserve them)
+
+  After refactoring:
+  1. Run `node --test test/utils.test.js` to verify all tests pass
+  2. If tests fail, fix the implementation and run again
+
+  ## Constraints | 约束
+
+  - Only modify `src/utils.js`
+  - Do NOT modify test files
+  - All existing tests must pass
+  - The function must handle: empty string, single word, multiple words, multiple spaces
+
+expectedChangedPaths:
+  - src/utils.js
+
+envAllowList: []
+setupCommands: []
+teardownCommands: []
+judges:
+  - id: capitalize-correct
+    type: command
+    label: capitalize works for all cases
+    command: |
+      node -e "var u=require('./src/utils');var a=require('node:assert/strict');a.strictEqual(u.capitalize('hello world'),'Hello World');a.strictEqual(u.capitalize('single'),'Single');a.strictEqual(u.capitalize(''),'');a.strictEqual(u.capitalize('a b c'),'A B C');a.strictEqual(u.capitalize('hello  world'),'Hello  World');console.log('PASS: capitalize correct');"
+    timeoutMs: 10000
+    critical: true
+  - id: tests-pass
+    type: command
+    label: All utils tests pass
+    command: node --test test/utils.test.js
+    timeoutMs: 30000
+    critical: true
+  - id: uses-modern-syntax
+    type: command
+    label: Uses map/split instead of manual char manipulation
+    command: |
+      node -e "var c=require('node:fs').readFileSync('src/utils.js','utf8');if(c.indexOf('.map(')===-1&&c.indexOf('.split(')===-1){console.error('Does not use map or split');process.exit(1)}console.log('PASS: uses modern syntax');"
+    timeoutMs: 10000

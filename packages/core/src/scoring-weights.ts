@@ -14,15 +14,15 @@
  * The weights were established through iterative tuning against real benchmark
  * runs, informed by these principles:
  *
- * - "practical" mode (default): Prioritizes correctness (tests 26%, status 24%,
- *   criticalJudges 20%) over efficiency. Lint is low (3%) because lint warnings
+ * - "practical" mode (default): Prioritizes correctness (tests 22%, status 20%,
+ *   criticalJudges 18%) over efficiency. Lint is low (2%) because lint warnings
  *   are common in agent output and rarely indicate real failures. Duration/cost
- *   are secondary (8%/6%) because speed matters less than correctness for most
- *   users. Precision (5%) is low because not all tasks have expectedChangedPaths.
+ *   are secondary (15%/13%) because speed matters less than correctness for most
+ *   users. Precision (4%) is low because not all tasks have expectedChangedPaths.
  *
  * - "balanced": Equal emphasis on correctness and efficiency. Status gets 30%
  *   because it's the ultimate pass/fail signal. Tests drop to 25% to make room
- *   for duration (10%) and cost (10%).
+ *   for duration (6%) and cost (4%).
  *
  * - "issue-resolution": Modeled after SWE-Bench. resolutionRate gets 45% because
  *   the primary metric is whether the agent fixed the issue. Status drops to 15%
@@ -82,14 +82,14 @@ export function isScoreMode(value: unknown): value is ScoreMode {
 }
 
 const PRACTICAL_WEIGHTS = {
-  status: 0.24,
-  tests: 0.26,
-  criticalJudges: 0.20,
-  nonCriticalJudges: 0.08,
-  precision: 0.05,
-  lint: 0.03,
-  duration: 0.08,
-  cost: 0.06
+  status: 0.20,
+  tests: 0.22,
+  criticalJudges: 0.18,
+  nonCriticalJudges: 0.06,
+  precision: 0.04,
+  lint: 0.02,
+  duration: 0.15,
+  cost: 0.13
 } as const;
 
 const BALANCED_WEIGHTS = {

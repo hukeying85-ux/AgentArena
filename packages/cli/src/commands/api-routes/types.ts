@@ -50,9 +50,9 @@ export function validateProfileId(profileId: string): string | null {
 /**
  * Mask sensitive extraEnv values in profile list responses.
  */
-export function maskProfileExtraEnv(profiles: ClaudeProviderProfile[]): unknown[] {
+export function maskProfileExtraEnv(profiles: ClaudeProviderProfile[]): ClaudeProviderProfile[] {
   return profiles.map(({ extraEnv, ...rest }: ClaudeProviderProfile) => ({
     ...rest,
     extraEnv: extraEnv ? Object.fromEntries(Object.keys(extraEnv as Record<string, unknown>).map(k => [k, "***"])) : undefined
-  }));
+  } as ClaudeProviderProfile));
 }

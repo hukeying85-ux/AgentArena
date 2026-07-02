@@ -8,8 +8,9 @@ import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promise
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { runBenchmark } from "../packages/runner/dist/index.js";
+import { checkTaskCompatibility, runAgent, runBenchmark } from "../packages/runner/dist/index.js";
 import { assertWindowsGitAskpassSafeUrl, createAskpassScript } from "../packages/runner/dist/repo-resolution.js";
+import { loadTaskPack } from "../packages/taskpacks/dist/index.js";
 
 async function writeJson(filePath, value) {
   await writeFile(filePath, JSON.stringify(value, null, 2), "utf8");
@@ -459,7 +460,7 @@ test("runBenchmark supports snapshot and json-schema judges", async () => {
   await rm(tempDir, { recursive: true, force: true });
 });
 
-test("runBenchmark parses structured test/lint judges and computes diff precision", async () => {
+test("runBenchmark parses structured test/lint judges and excludes tool artifacts from diff precision", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-runner-"));
   const repoPath = path.join(tempDir, "repo");
   const outputPath = path.join(tempDir, "output");
@@ -510,7 +511,8 @@ test("runBenchmark parses structured test/lint judges and computes diff precisio
   assert.equal(benchmark.results[0].judgeResults[1].type, "lint-check");
   assert.equal(benchmark.results[0].judgeResults[1].errorCount, 0);
   assert.equal(benchmark.results[0].judgeResults[1].warningCount, 1);
-  assert.equal(benchmark.results[0].diffPrecision?.score, 1);
+  assert.equal(benchmark.results[0].diffPrecision?.score, 0);
+  assert.equal(benchmark.results[0].diffPrecision?.totalChangedFiles, 0);
 
   await rm(tempDir, { recursive: true, force: true });
 });
@@ -1462,4 +1464,151 @@ test("runBenchmark reports a passing compatibility check for a compatible task",
   assert.equal(compatEvent.metadata.compatibility.failedChecks.length, 0);
 
   await rm(tempDir, { recursive: true, force: true });
+});
+
+test("checkTaskCompatibility accepts official task-pack inline node checks that normal runs allow", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-compat-official-"));
+  const repoPath = path.join(tempDir, "repo");
+  const originalAllowEval = process.env.AGENTARENA_ALLOW_EVAL_IN_JUDGES;
+
+  try {
+    delete process.env.AGENTARENA_ALLOW_EVAL_IN_JUDGES;
+    await mkdir(repoPath, { recursive: true });
+    await writeFile(path.join(repoPath, "README.md"), "# Node Repo\n", "utf8");
+    await writeJson(path.join(repoPath, "package.json"), { name: "node-repo", version: "0.0.0" });
+
+    const task = await loadTaskPack(path.resolve("examples/taskpacks/official/small-refactor.yaml"));
+    const compatibility = await checkTaskCompatibility(task, repoPath);
+
+    assert.notEqual(compatibility.status, "incompatible");
+    assert.equal(
+      compatibility.checks.some((check) => check.label.includes("inline eval") && check.status === "fail"),
+      false
+    );
+  } finally {
+    if (originalAllowEval === undefined) delete process.env.AGENTARENA_ALLOW_EVAL_IN_JUDGES;
+    else process.env.AGENTARENA_ALLOW_EVAL_IN_JUDGES = originalAllowEval;
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("checkTaskCompatibility reads package.json files with a UTF-8 BOM", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-compat-bom-"));
+  const repoPath = path.join(tempDir, "repo");
+
+  try {
+    await mkdir(repoPath, { recursive: true });
+    await writeFile(path.join(repoPath, "README.md"), "# Node Repo\n", "utf8");
+    await writeFile(
+      path.join(repoPath, "package.json"),
+      `\uFEFF${JSON.stringify({ name: "node-repo", version: "0.0.0", scripts: { test: "node test.js" } })}`,
+      "utf8"
+    );
+
+    const task = {
+      schemaVersion: "agentarena.taskpack/v1",
+      id: "bom-package-json",
+      title: "BOM Package JSON",
+      prompt: "Run tests.",
+      envAllowList: [],
+      setupCommands: [],
+      judges: [
+        {
+          id: "tests-pass",
+          type: "command",
+          label: "npm test",
+          command: "npm test"
+        }
+      ],
+      teardownCommands: []
+    };
+
+    const compatibility = await checkTaskCompatibility(task, repoPath);
+
+    assert.notEqual(compatibility.status, "incompatible");
+    assert.equal(
+      compatibility.checks.some((check) => check.label.includes("npm script: test") && check.status === "fail"),
+      false
+    );
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("runAgent falls back to prompt.txt when adapter.prompt trace omits the full prompt", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-prompt-fallback-"));
+  const repoPath = path.join(tempDir, "repo");
+  const outputPath = path.join(tempDir, "output");
+  const workspaceRootPath = path.join(tempDir, "workspaces");
+  const fullPrompt = "FULL PROMPT FROM FILE";
+
+  try {
+    await mkdir(repoPath, { recursive: true });
+    await writeFile(path.join(repoPath, "README.md"), "# Prompt Fallback\n", "utf8");
+
+    const task = {
+      schemaVersion: "agentarena.taskpack/v1",
+      id: "prompt-fallback",
+      title: "Prompt Fallback",
+      prompt: "Verify prompt fallback.",
+      envAllowList: [],
+      setupCommands: [],
+      judges: [],
+      teardownCommands: []
+    };
+    const capability = {
+      supportTier: "supported",
+      invocationMethod: "test",
+      authPrerequisites: [],
+      tokenAvailability: "available",
+      costAvailability: "available",
+      traceRichness: "partial",
+      knownLimitations: []
+    };
+    const adapter = {
+      id: "prompt-test",
+      title: "Prompt Test",
+      kind: "external",
+      capability,
+      async preflight() {
+        throw new Error("not used");
+      },
+      async execute(context) {
+        await writeFile(path.join(context.workspacePath, "prompt.txt"), fullPrompt, "utf8");
+        await context.trace({
+          type: "adapter.prompt",
+          message: "Prompt metadata without full prompt",
+          metadata: { promptLength: fullPrompt.length, promptPreview: fullPrompt.slice(0, 8) }
+        });
+        return {
+          status: "success",
+          summary: "done",
+          tokenUsage: 1,
+          estimatedCostUsd: 0,
+          costKnown: true,
+          changedFilesHint: []
+        };
+      }
+    };
+    const preflight = {
+      agentId: "prompt-test",
+      baseAgentId: "prompt-test",
+      variantId: "prompt-test",
+      displayLabel: "Prompt Test",
+      requestedConfig: {},
+      agentTitle: "Prompt Test",
+      adapterKind: "external",
+      status: "ready",
+      summary: "ready",
+      capability,
+      adapter
+    };
+
+    const result = await runAgent(repoPath, outputPath, workspaceRootPath, task, preflight, {});
+
+    assert.equal(result.status, "success");
+    assert.equal(result.assembledPrompt, fullPrompt);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
 });

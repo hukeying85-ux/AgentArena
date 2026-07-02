@@ -19,7 +19,8 @@ const MAX_BUFFER_SIZE = 10000;
 // Global cache for exportAllMetrics
 let cachedAllMetrics: string | null = null;
 let lastAllMetricsUpdate = 0;
-const allMetricsCacheValidMs = 100; // 100ms cache
+// Use the same cache validity window as individual metrics for consistency
+const allMetricsCacheValidMs = 100;// 100ms cache — same as cacheValidMs
 
 export function setMetricHandler(handler: MetricHandler | null): void {
   metricHandler = handler;
@@ -462,6 +463,7 @@ export const metrics = {
 
 export function exportAllMetrics(): string {
   const now = Date.now();
+  // Use the same cache validity window as individual metrics to ensure consistency
   if (cachedAllMetrics && now - lastAllMetricsUpdate < allMetricsCacheValidMs) {
     return cachedAllMetrics;
   }

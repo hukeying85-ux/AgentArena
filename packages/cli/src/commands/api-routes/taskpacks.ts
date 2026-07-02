@@ -6,6 +6,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { logger, validateTaskPackId } from "@agentarena/core";
 import { checkTaskCompatibility } from "@agentarena/runner";
+import { loadTaskPack } from "@agentarena/taskpacks";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { jsonResponse } from "../../server/index.js";
 import {
@@ -190,9 +191,69 @@ export async function handleAdhocTaskpackDelete(adhocId: string): Promise<ApiRes
   }
 }
 
-export async function handleTaskpacksList(): Promise<ApiResponse> {
+export async function handleTaskpacksList(queryParams?: URLSearchParams): Promise<ApiResponse> {
   const taskPacks = await listOfficialTaskPacks();
-  return jsonResponse(taskPacks);
+  const repoPath = queryParams?.get("repoPath")?.trim();
+
+  if (!repoPath) {
+    return jsonResponse(taskPacks);
+  }
+
+  // Resolve and validate repo path
+  const resolvedRepoPath = path.resolve(repoPath);
+  try {
+    const stat = await fs.stat(resolvedRepoPath);
+    if (!stat.isDirectory()) {
+      return jsonResponse(taskPacks);
+    }
+  } catch {
+    return jsonResponse(taskPacks);
+  }
+
+  // Enrich each task pack with compatibility info
+  const enriched = await Promise.all(
+    taskPacks.map(async (tp) => {
+      try {
+        const taskPack = await loadTaskPack(tp.path);
+        const result = await checkTaskCompatibility(taskPack, resolvedRepoPath);
+        const failedChecks = result.checks
+          .filter((c) => c.status !== "pass")
+          .map((c) => ({
+            label: c.label,
+            status: c.status,
+            message: c.message,
+            fix: c.fix,
+          }));
+        return {
+          ...tp,
+          compatibility: {
+            status: result.status,
+            summary: result.summary,
+            failedChecks,
+          },
+        };
+      } catch {
+        return {
+          ...tp,
+          compatibility: {
+            status: "unknown" as const,
+            summary: "Compatibility check could not be performed.",
+            failedChecks: [],
+          },
+        };
+      }
+    })
+  );
+
+  // Sort: compatible first, then warning, then incompatible, then unknown
+  const statusOrder: Record<string, number> = { compatible: 0, warning: 1, incompatible: 2, unknown: 3 };
+  enriched.sort((a, b) => {
+    const sa = statusOrder[a.compatibility?.status ?? "unknown"] ?? 3;
+    const sb = statusOrder[b.compatibility?.status ?? "unknown"] ?? 3;
+    return sa - sb;
+  });
+
+  return jsonResponse(enriched);
 }
 
 /**

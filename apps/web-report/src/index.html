@@ -153,6 +153,17 @@
           <p id="app-description" class="muted brand-description">Benchmark the coding agents you already run locally, then inspect which setup actually performs better on your real repository tasks.</p>
         </div>
 
+        <div class="sidebar-prefs">
+          <select id="language-select" class="prefs-select" aria-label="Language">
+            <option value="zh-CN">中文</option>
+            <option value="en">English</option>
+          </select>
+          <select id="theme-select" class="prefs-select" aria-label="Appearance">
+            <option value="dark">🌙 深色</option>
+            <option value="light">☀️ 浅色</option>
+          </select>
+        </div>
+
         <section class="panel">
           <div class="panel-header">
             <h2 id="runs-heading">Runs</h2>
@@ -172,20 +183,6 @@
           <div id="agent-list" class="agent-list empty-state" data-i18n="agentListEmpty">运行完成后自动显示参与的 Agents</div>
           <p id="agent-list-hint" class="muted picker-help" style="padding: 0 var(--space-3) var(--space-2); font-size: var(--text-xs);">Click to filter comparison table</p>
         </section>
-
-        <div class="sidebar-footer">
-          <div class="language-control">
-            <label id="language-label" for="language-select" class="sr-only">Language</label>
-            <select id="language-select">
-              <option value="en">English</option>
-              <option value="zh-CN">中文</option>
-            </select>
-          </div>
-          <button id="theme-toggle" type="button" class="theme-toggle-btn" aria-label="Toggle theme" title="切换主题">
-            <svg class="icon"><use href="#icon-zap"/></svg>
-            <span id="theme-label">Light</span>
-          </button>
-        </div>
       </aside>
 
       <main class="content">
@@ -280,7 +277,7 @@
                   </button>
                 </div>
               </div>
-              <p id="launcher-compact-summary" class="muted launcher-summary"></p>
+              <p id="launcher-compact-summary" class="muted launcher-summary" aria-live="polite"></p>
               <div class="launcher-grid launcher-grid-primary">
                 <label class="field">
                   <span id="launcher-repo-label">Repository Path</span>
@@ -353,21 +350,21 @@
                     <input id="launcher-output-path" type="text" />
                   </label>
                 </div>
-                <div id="launcher-validation" class="launcher-validation"></div>
+                <div id="launcher-validation" class="launcher-validation" role="alert" aria-live="polite"></div>
               </div>
-              <section id="launcher-progress" class="launcher-progress hidden">
+              <section id="launcher-progress" class="launcher-progress hidden" aria-live="polite" aria-label="Benchmark progress">
                 <div class="panel-header">
                   <h3 id="launcher-progress-title">Live Progress</h3>
                 </div>
                 <p id="launcher-current-agent" class="launcher-current-agent"></p>
-                <div id="launcher-log-list" class="launcher-log-list"></div>
+                <div id="launcher-log-list" class="launcher-log-list" role="log" aria-label="Benchmark log entries"></div>
               </section>
             </section>
             <details id="result-loader-panel" class="detail-card workspace-card workspace-card-secondary workspace-loader" open>
               <summary id="result-loader-summary" data-i18n="loadHistoryTitle">加载历史报告</summary>
               <p id="result-loader-message" class="muted result-loader-message" hidden></p>
-              <div id="loading-indicator" class="loading-indicator hidden">
-                <div class="loading-spinner"></div>
+              <div id="loading-indicator" class="loading-indicator hidden" role="status" aria-live="polite" aria-label="Loading">
+                <div class="loading-spinner" aria-hidden="true"></div>
                 <span id="loading-message" class="muted">Loading results...</span>
               </div>
               <label class="file-picker recommended-picker btn-primary">

@@ -534,8 +534,8 @@ export function renderRadarChart(canvas, data, options = {}) {
   });
 
   // 响应 resize (disconnect previous observer to avoid leaks)
-  if (canvas._resizeObserver) {
-    canvas._resizeObserver.disconnect();
+  if (canvas._chartResizeObserver) {
+    canvas._chartResizeObserver.disconnect();
   }
   const parent = canvas.parentElement;
   if (parent) {
@@ -546,7 +546,7 @@ export function renderRadarChart(canvas, data, options = {}) {
       }
     });
     ro.observe(parent);
-    canvas._resizeObserver = ro;
+    canvas._chartResizeObserver = ro;
   }
 }
 
@@ -677,8 +677,8 @@ export function renderMultiRadarChart(canvas, datasets, options = {}) {
   });
 
   // 响应 resize (disconnect previous observer to avoid leaks)
-  if (canvas._resizeObserver) {
-    canvas._resizeObserver.disconnect();
+  if (canvas._chartResizeObserver) {
+    canvas._chartResizeObserver.disconnect();
   }
   const parent = canvas.parentElement;
   if (parent) {
@@ -689,7 +689,7 @@ export function renderMultiRadarChart(canvas, datasets, options = {}) {
       }
     });
     ro.observe(parent);
-    canvas._resizeObserver = ro;
+    canvas._chartResizeObserver = ro;
   }
 }
 
@@ -698,7 +698,7 @@ export function renderMultiRadarChart(canvas, datasets, options = {}) {
  * 6 个 input[type=range] 对应评分维度，实时回调触发分数重算
  *
  * @param {HTMLElement} container - 容器元素
- * @param {Record<string, number>} currentWeights - 当前权重 { status: 0.24, tests: 0.26, ... }
+ * @param {Record<string, number>} currentWeights - 当前权重 { status: 0.20, tests: 0.22, ... }
  * @param {function} onChange - 权重变化回调 (newWeights) => void
  * @param {Object} options - 配置
  */

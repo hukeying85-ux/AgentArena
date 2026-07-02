@@ -135,7 +135,7 @@ test("writeReport sanitizes shareable output paths", async () => {
   assert.equal(summary.repoPath, ".");
   assert.equal(summary.outputPath, ".");
   assert.equal(summary.scoreMode, "practical");
-  assert.equal(summary.scoreWeights.status, 0.24);
+  assert.equal(summary.scoreWeights.status, 0.20);
   assert.equal(summary.preflights[0].command, "codex");
   assert.equal(summary.results[0].tracePath, "run/agents/demo-fast/trace.jsonl");
   assert.equal(summary.results[0].workspacePath, "workspace/demo-fast");
@@ -145,7 +145,7 @@ test("writeReport sanitizes shareable output paths", async () => {
   assert.equal(summary.results[0].judgeResults[0].target, "README.md");
   assert.match(markdown, /# AgentArena Summary/);
   assert.match(markdown, /- Score Mode: `practical`/);
-  assert.match(markdown, /- Score Weights: `\{"status":0\.24,"tests":0\.26/);
+  assert.match(markdown, /- Score Weights: `\{"status":0\.2,"tests":0\.22/);
   assert.match(markdown, /- Success Rate: `1\/1`/);
   assert.match(markdown, /- Badge Endpoint: `badge\.json`/);
   assert.match(markdown, /## Capability Matrix/);
@@ -159,7 +159,7 @@ test("writeReport sanitizes shareable output paths", async () => {
   assert.equal(badge.message, "1/1 passing");
   assert.match(prComment, /## AgentArena Benchmark/);
   assert.match(prComment, /Score mode: `practical`/);
-  assert.match(prComment, /Score weights: `\{"status":0\.24,"tests":0\.26/);
+  assert.match(prComment, /Score weights: `\{"status":0\.2,"tests":0\.22/);
   assert.match(prComment, /Overview: `1\/1` passing \| Failed: `0` \| Total Tokens: `100` \| Known Cost: `\$0\.10`/);
   assert.match(prComment, /### Review Table/);
   assert.match(prComment, /\| Attention \| Variant \| Base Agent \| Provider \| Provider Kind \| Model \| Reasoning \| Version \| Verification \| Tier \| Preflight \| Run \| Score \| Duration \| Tokens \| Cost \| Judges \| Tests \| Lint \| Diff Precision \| Files \| Notes \|/);
@@ -170,7 +170,7 @@ test("writeReport sanitizes shareable output paths", async () => {
   assert.match(prComment, /`report\.html`/);
 
   const html = await readFile(path.join(outputPath, "report.html"), "utf8");
-  assert.match(html, /Score mode: practical \| Score weights: \{&quot;status&quot;:0\.24,&quot;tests&quot;:0\.26/);
+  assert.match(html, /Score mode: practical \| Score weights: \{&quot;status&quot;:0\.2,&quot;tests&quot;:0\.22/);
 
   await rm(tempDir, { recursive: true, force: true });
 });

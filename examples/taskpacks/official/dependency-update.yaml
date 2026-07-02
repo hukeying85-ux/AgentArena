@@ -1,45 +1,87 @@
 schemaVersion: agentarena.taskpack/v1
 id: dependency-update
-title: Update Dependencies
-description: Update outdated dependencies to their latest compatible versions.
+title: Enhance Logger
+description: Add log levels and context support to the logger.
 metadata:
-  i18n:
-    zh-CN:
-      title: "依赖更新"
-      description: "将过时的依赖更新到最新兼容版本"
   source: official
   owner: AgentArena
-  difficulty: easy
-  objective: Update dependencies while maintaining compatibility and fixing any breaking changes
-  judgeRationale: Build and tests verify updates don't break the application
-  repoTypes: ["node-js", "python", "go", "java"]
-  tags: ["dependencies", "maintenance", "updates"]
-  dependencies: ["npm"]
+  difficulty: medium
+  objective: Enhance the logger with levels, filtering, and context.
+  judgeRationale: Behavioral tests verify logger has levels and withContext.
+  repoTypes: ["node"]
+  tags: ["logging", "enhancement"]
+  dependencies: []
+  differentiator: Good agents implement features correctly; weak agents break existing code.
+  i18n:
+    zh-CN:
+      title: 增强日志器
+      description: 为日志器添加级别和上下文支持。
+      objective: 增强日志器，添加级别、过滤和上下文功能。
+      judgeRationale: 行为测试验证日志器具有级别和 withContext。
+
+repoSource: "builtin://nodejs-app"
+
 prompt: |
-  Update the dependencies in this project.
+  ## Task | 任务
 
-  Requirements:
-  1. Check for outdated dependencies
-  2. Update to latest compatible versions (respect semver constraints)
-  3. Fix any breaking changes introduced by updates
-  4. Run tests to verify everything still works
-  5. Do not update to major versions unless absolutely necessary
+  Enhance the logger in `src/logger.js`:
 
-  Start by checking what's outdated, then update carefully.
+  1. The `createLogger(prefix)` function must return an object with:
+     - `debug(message)`, `info(message)`, `warn(message)`, `error(message)` methods
+     - Each prints `[LEVEL] [prefix] message` (e.g., `[INFO] [app] hello`)
+
+  2. Add configurable minimum level:
+     - `createLogger(prefix, options)` where `options.level` is "debug"/"info"/"warn"/"error"
+     - Default level is "info"
+     - Messages below minimum level must NOT be printed
+
+  3. Add `withContext(context)` method:
+     - Returns a new logger with context fields included in messages
+     - Child logger has all the same methods
+
+  4. Export from `src/index.js`
+
+  5. Verify: `node -e "var m=require('./src/logger');var l=m.createLogger('app');l.info('test')"`
+
+  ## Constraints | 约束
+
+  - Only modify `src/logger.js` and `src/index.js`
+  - Do NOT modify other files
+  - Do NOT add new dependencies
+  - Keep backward compatibility: `createLogger("app")` must still work
+
+expectedChangedPaths:
+  - src/logger.js
+  - src/index.js
+
 envAllowList: []
 setupCommands: []
-judges:
-  - id: build-passes
-    type: compilation
-    label: Build succeeds after update
-    timeoutMs: 120000
-    critical: true
-  - id: tests-pass
-    type: test-result
-    label: All tests pass
-    command: npx --no-install jest --json --outputFile=.agentarena/test-results.json
-    format: jest
-    reportFile: .agentarena/test-results.json
-    timeoutMs: 120000
-    critical: true
 teardownCommands: []
+judges:
+  - id: logger-has-levels
+    type: command
+    label: Logger has all level methods
+    command: |
+      node -e "var m=require('./src/logger');var l=m.createLogger('test');var a=require('node:assert/strict');a.strictEqual(typeof l.debug,'function');a.strictEqual(typeof l.info,'function');a.strictEqual(typeof l.warn,'function');a.strictEqual(typeof l.error,'function');console.log('PASS: logger has levels');"
+    timeoutMs: 10000
+    critical: true
+  - id: logger-has-context
+    type: command
+    label: Logger supports withContext
+    command: |
+      node -e "var m=require('./src/logger');var l=m.createLogger('test');var a=require('node:assert/strict');a.strictEqual(typeof l.withContext,'function');var child=l.withContext({req:'123'});a.strictEqual(typeof child.info,'function');console.log('PASS: logger has withContext');"
+    timeoutMs: 10000
+    critical: true
+  - id: level-filtering
+    type: command
+    label: Logger filters by level
+    command: |
+      node -e "var m=require('./src/logger');var output=[];var orig=console.log;console.log=function(){output.push(Array.from(arguments).join(' '));orig.apply(console,arguments)};var l=m.createLogger('test',{level:'warn'});l.debug('no');l.info('no');l.warn('yes');l.error('yes');console.log=orig;var a=require('node:assert/strict');a.strictEqual(output.some(function(s){return s.includes('[DEBUG]')}),false);a.strictEqual(output.some(function(s){return s.includes('[INFO]')}),false);a.strictEqual(output.some(function(s){return s.includes('[WARN]')}),true);a.strictEqual(output.some(function(s){return s.includes('[ERROR]')}),true);console.log('PASS: level filtering works');"
+    timeoutMs: 10000
+    critical: true
+  - id: exported
+    type: command
+    label: Logger exported from index
+    command: |
+      node -e "var m=require('./src/index');var a=require('node:assert/strict');a.strictEqual(typeof m.createLogger,'function');console.log('PASS: exported');"
+    timeoutMs: 10000

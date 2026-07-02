@@ -1,0 +1,106 @@
+# AgentArena 开发日志
+
+> 按时间倒序。只记"当时花了时间想明白、且未来大概率会再遇到"的东西。
+> 格式：现象/目标 → 根因/思路 → 解法 → 教训/可复用点。
+
+---
+
+## [通用] 2026-07-02 --json 模式下结构化日志污染 stdout 导致输出不可解析
+
+- 现象：`agentarena run --json` 的 stdout 里混入了 INFO 级别的 JSON 日志行，导致 `jq` 等工具解析失败。
+- 根因：`logging.ts` 的 `log()` 函数对 INFO 级别用 `console.log()`（写 stdout），与最终 JSON 结果输出共用同一流。
+- 解法：在 `logging.ts` 中增加全局 `jsonOutputMode` 开关，`run.ts` 检测到 `--json` 时调用 `setJsonOutputMode(true)`，INFO/DEBUG 日志改走 `process.stderr.write()`。ERROR/WARN 已经走 stderr 不受影响。
+- 教训：CLI 工具的 stdout 是机器可读接口，任何非结果输出（日志、进度、提示）都必须走 stderr。这是 Unix 管道设计的基本约定，但很容易在"加个 console.log"时被忽略。
+
+## [通用] 2026-07-02 Windows 子进程输出编码不匹配导致 doctor 乱码
+
+- 现象：中文 Windows 上 `agentarena doctor` 显示的子进程错误信息是乱码（如"'xxx' 不是内部或外部命令"的中文翻译）。
+- 根因：Windows 控制台默认使用 ANSI 代码页（如 CP936/GBK），但 `runProcess` 用 `Buffer.toString("utf8")` 解码，非 UTF-8 字节序列被替换为 U+FFFD。
+- 解法：新增 `decodeProcessOutput()` 函数——先尝试 UTF-8，如果检测到 U+FFFD 替换字符且在 Windows 上，通过 `chcp` 获取系统代码页并用 `TextDecoder` 重新解码。覆盖 GBK/Big5/Shift-JIS/EUC-KR/Windows-125x 等常见编码。
+- 教训：Node.js 的 `Buffer.toString("utf8")` 不会抛异常，只会静默插入替换字符。在 Windows 上处理子进程输出时，必须考虑系统 ANSI 代码页的回退。`TextDecoder` 原生支持 GBK 等编码（前提是 Node.js 带完整 ICU）。
+
+## [通用] 2026-07-02 CSS 文件中嵌入的 Emoji 字符因编辑器损坏产生不可见控制字符
+
+- 现象：web-report 的"评分权重"折叠面板标题前显示乱码或不显示图标。
+- 根因：`styles.css` 中 `content: '⚙️'` 的 Emoji 在某次编辑中被损坏——UTF-8 多字节序列的前导字节丢失，残留 `\x16`（SYN）和 `\x15`（NAK）控制字符。这些字符不可见但会破坏 CSS 解析。
+- 解法：用 Node.js 脚本扫描 CSS 文件中所有 U+0000–U+001F（除 Tab）的控制字符，替换为正确的 Emoji 字符。
+- 教训：编辑器对非 ASCII 字符的损坏是静默的——文件能保存、能构建，但运行时表现异常。对 CSS `content` 属性中的 Unicode 字符，优先使用 CSS 转义序列（如 `\2699`）而非直接嵌入 Emoji 字符，可避免此问题。
+
+## [通用] 2026-07-01 Judge 安全策略不一致导致 node -e 命令被拦截
+
+- 现象：用户用默认 repo-health 模板跑分，test-result 和 lint-check judge 总是失败，报 "Eval-style invocation (-e/-c/--eval) is not allowed"。大量官方任务包也用了 `node -e`，全部受影响。
+- 根因：`command-runner.ts` 的 `executeCommand` 支持通过 `options.allowEval` 控制 eval 拦截。只有 `command` 类型 judge 传了 `{ allowEval: true }`，而 `test-result`、`lint-check`、`patch-validation`、`compilation` 四种 judge 都没传，导致它们走默认值（仅检查 `AGENTARENA_ALLOW_EVAL_IN_JUDGES=1` 环境变量），默认拒绝。
+- 解法：给四种 judge 的 `executeCommand` 调用统一加上 `{ allowEval: true }`，与 `command` judge 保持一致。
+- 教训：安全策略要在所有执行路径上保持一致。如果一种 judge 类型允许 eval，其他类型也应该允许——它们的命令来源相同（任务包文件），安全边界没有区别。新增 judge 类型时，检查是否需要传 `allowEval`。
+
+---
+
+## 2026-06-29 [通用] Codex adapter 在 Windows 上卡住（sandbox 提示）
+
+- 现象：Windows 上运行 Codex adapter 时，命令行一直等待用户输入，卡住不动
+- 根因：Codex CLI 在 Windows 上默认开启 sandbox 交互提示，非交互环境下 stdin 无法响应
+- 解法：给 Codex adapter 的 spawn 参数加上 `--no-sandbox` 或设置环境变量跳过交互确认
+- 教训：跨平台 adapter 开发时，Windows 的交互行为差异是最常见的卡住原因。所有外部 CLI 调用都应该设置 `stdio: ['ignore', 'pipe', 'pipe']` 或提供非交互标志
+
+## 2026-06-29 Claude Code adapter 在 Windows 上找不到可执行文件
+
+- 现象：Windows 上 `claude` 命令能跑但 adapter 报 `ENOENT`
+- 根因：Windows 上 `claude` 实际是 `claude.cmd`，Node.js 的 `child_process.spawn` 不会自动解析 `.cmd` 扩展名
+- 解法：spawn 时加 `shell: true`，或显式查找 `claude.cmd` 路径
+- 教训：Windows 上所有 CLI adapter 都要处理 `.cmd`/`.bat`/`.exe` 扩展名问题。`shell: true` 是最简单的通用解法
+
+## 2026-06-29 Web Report 社区排行榜 XSS 漏洞
+
+- 现象：社区排行榜的 label 字段未转义直接插入 DOM，可被注入恶意标签
+- 根因：web-report 是原生 JS SPA，没有框架自动转义，手动拼接 HTML 时遗漏了转义
+- 解法：对所有外部数据（trace、community labels、leaderboard）统一做 HTML 转义后再插入 DOM
+- 教训：不用框架的 SPA 要自己管 XSS。所有 `innerHTML` 操作前必须转义。最好封装一个 `escapeHtml()` 函数统一使用
+
+## 2026-06-29 Report 分数计算在自定义权重变化后不更新
+
+- 现象：用户修改自定义权重后，报告页面的分数没有重新计算
+- 根因：权重变化后只更新了 UI 显示，没有触发分数重算逻辑
+- 解法：权重变化时发出事件，监听器重新计算所有分数并更新 DOM
+- 教训：自定义权重/配置变更后，要检查所有依赖它的派生计算是否都重新执行了。UI 状态和数据状态要保持单向数据流
+
+## 2026-06-29 代码审查发现 17 个文件需要修复
+
+- 现象：一次性 code review 发现 17 个文件有问题，涉及安全、逻辑、风格
+- 根因：快速迭代期间没有持续 lint + typecheck，问题累积
+- 解法：逐个修复后，在 CI 里加入 `pnpm lint` + `pnpm typecheck` 门禁，防止再累积
+- 教训：monorepo 项目要定期跑全量 lint + typecheck。最好在 pre-commit 或 CI 里强制执行，不要等问题累积到 17 个文件再修
+
+## 2026-06-10 [通用] Agent 执行完成后结果可恢复（crash recovery）
+
+- 现象：Agent 执行中途如果 runner 进程崩溃，之前已完成的结果全部丢失，需要重新跑
+- 根因：结果只在最终完成时一次性写出，没有中间态持久化
+- 解法：runner 每完成一个 agent 的执行就持久化结果；重启后扫描已完成的结果，跳过重跑直接汇总
+- 教训：长时间运行的任务（benchmark、批处理）必须有 checkpoint 机制。每完成一个子任务就持久化，crash 后从断点恢复而非全量重跑
+
+## 2026-06-08 [通用] Windows shell 参数注入漏洞（adapters 模块）
+
+- 现象：安全审计发现 agent adapter 在拼接 CLI 参数时存在注入风险，用户可控的 task prompt 可以注入额外 shell 命令
+- 根因：`child_process.spawn` 在 Windows 上如果传了 `shell: true`，参数会经过 shell 解析，特殊字符（`&`、`|`、`;`）会被解释为命令分隔符
+- 解法：对所有用户可控参数做 shell 转义；优先用 `execFile`（不走 shell）代替 `spawn(shell: true)`；加了 71+88 条注入测试
+- 教训：Windows 上 `shell: true` + 用户输入 = 命令注入。任何拼接 CLI 参数的地方都要做转义，最好用不走 shell 的 API。安全审计要专门检查参数拼接路径
+
+## 2026-06-08 [通用] 生成的 CI workflow 文件命令注入
+
+- 现象：CLI 生成 GitHub Actions workflow 文件时，用户输入的命令直接拼接进 YAML，可注入任意 CI 命令
+- 根因：模板字符串拼接时没有对 shell 特殊字符做转义
+- 解法：所有写入 workflow YAML 的命令都加引号包裹，加了 49 条模板注入测试
+- 教训：生成代码/配置文件时，用户输入必须经过转义。YAML 里的命令字符串要用引号包裹。代码生成器是注入攻击的高危区域
+
+## 2026-06-08 [通用] Windows 上 authenticated git clone 失败
+
+- 现象：Windows 上带认证的 git clone（含 token 的 URL）失败，Linux/macOS 正常
+- 根因：Windows 的 git credential manager 和 URL 内嵌 token 的交互方式不同，URL 中的特殊字符（如 `/`、`@`）在 Windows 上需要不同处理
+- 解法：在 repo-resolution 模块加 Windows 专属的 URL 编码逻辑，加了 87 条 Windows clone 测试
+- 教训：涉及 git 操作的跨平台代码，Windows 的 credential 和 URL 处理是独立的 case。不能假设 Linux 上能跑的 clone 逻辑在 Windows 上也行
+
+## 2026-05-17 [通用] 大量数据渲染卡顿：引入虚拟滚动
+
+- 现象：排行榜和 trace replay 页面数据量大时（100+ 行），滚动卡顿明显
+- 根因：所有行一次性渲染到 DOM，浏览器要维护大量 DOM 节点
+- 解法：引入虚拟滚动，只渲染可视区域 + 少量缓冲行的 DOM 节点
+- 教训：超过 50 行的列表就要考虑虚拟滚动。DOM 节点数是前端性能的第一杀手，虚拟滚动是最有效的优化手段

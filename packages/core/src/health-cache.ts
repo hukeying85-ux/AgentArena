@@ -66,8 +66,18 @@ export class HealthCache {
 
     try {
       const data = await fs.readFile(this.cachePath, "utf8");
-      const entries = JSON.parse(data) as HealthCacheEntry[];
+      const parsed = JSON.parse(data);
+      if (!Array.isArray(parsed)) {
+        logger.warn("core", "health_cache.invalid_format", "Health cache file is not an array, starting fresh");
+        this.loaded = true;
+        return;
+      }
+      const entries = parsed as HealthCacheEntry[];
       for (const entry of entries) {
+        if (!entry || typeof entry !== "object" || !entry.adapterId || !entry.providerId || !entry.status) {
+          logger.warn("core", "health_cache.invalid_entry", "Skipping invalid health cache entry");
+          continue;
+        }
         const key = this.getKey(entry.adapterId, entry.providerId, entry.endpoint);
         this.entries.set(key, entry);
       }

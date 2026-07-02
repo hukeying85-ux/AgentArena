@@ -451,7 +451,7 @@ test("getRunVerdict changes winner when custom weights favor speed", () => {
   const run = createRun("run-weight-shift", "Task WS", {
     results: [
       createResult("quality", {
-        durationMs: 2000,  // Slower
+        durationMs: 1000,  // Slightly slower
         costKnown: true,
         estimatedCostUsd: 0.10,  // More expensive
         judgeResults: [
@@ -466,7 +466,7 @@ test("getRunVerdict changes winner when custom weights favor speed", () => {
         estimatedCostUsd: 0.02,  // Much cheaper
         judgeResults: [
           { success: true },
-          { success: true, type: "test-result", totalCount: 10, passedCount: 5, failedCount: 5 }  // Half tests fail
+          { success: true, type: "test-result", totalCount: 10, passedCount: 1, failedCount: 9 }  // Most tests fail
         ]
       })
     ]

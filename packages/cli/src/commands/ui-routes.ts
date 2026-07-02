@@ -3,7 +3,7 @@ import { promises as fs } from "node:fs";
 import type http from "node:http";
 import path from "node:path";
 import type { getCodexDefaultResolvedRuntime } from "@agentarena/adapters";
-import { createCancellation, createRunId, isAbortError, metrics } from "@agentarena/core";
+import { createCancellation, createRunId, isAbortError, isPathInsideWorkspace, metrics } from "@agentarena/core";
 import { writeReport } from "@agentarena/report";
 import { type BenchmarkProgressEvent, runBenchmark } from "@agentarena/runner";
 import {
@@ -257,7 +257,7 @@ export function createRequestHandler(ctx: RequestContext) {
 
       // GET /api/taskpacks
       if (request.method === "GET" && requestUrl.pathname === "/api/taskpacks") {
-        sendApiResponse(response, await handleTaskpacksList());
+        sendApiResponse(response, await handleTaskpacksList(requestUrl.searchParams));
         return;
       }
 
@@ -526,8 +526,8 @@ export function createRequestHandler(ctx: RequestContext) {
       if (request.method === "GET") {
         let filePath = requestUrl.pathname === "/" ? path.join(WEB_REPORT_DIST_ROOT, "index.html") : path.join(WEB_REPORT_DIST_ROOT, requestUrl.pathname.replace(/^\/+/, ""));
         filePath = path.normalize(filePath);
-        const relativeToDistRoot = path.relative(WEB_REPORT_DIST_ROOT, filePath);
-        if (relativeToDistRoot.startsWith("..") || path.isAbsolute(relativeToDistRoot)) {
+        const insideWorkspace = await isPathInsideWorkspace(WEB_REPORT_DIST_ROOT, filePath);
+        if (!insideWorkspace) {
           sendApiResponse(response, textResponse("Forbidden", 403));
           return;
         }

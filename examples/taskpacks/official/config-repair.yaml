@@ -1,64 +1,71 @@
 schemaVersion: agentarena.taskpack/v1
 id: official-config-repair
-title: Official Config Repair
-description: Repairs a broken configuration file while preserving the intended schema.
+title: Config Repair
+description: Fix a broken configuration file to match its schema.
 metadata:
   source: official
   owner: AgentArena
   difficulty: easy
-  objective: Verify that an agent can recover a broken configuration without introducing unrelated changes.
-  repoTypes:
-    - backend
-    - infra
-    - node
-  tags:
-    - config
-    - repair
-    - json
+  objective: Fix type mismatches and invalid values in a JSON config.
+  judgeRationale: Behavioral tests verify config is valid JSON with correct types and values.
+  repoTypes: ["node"]
+  tags: ["config", "json", "repair"]
   dependencies: []
-  judgeRationale: JSON schema and targeted value assertions provide a stronger signal than text matching.
-  differentiator: Tests config handling skill - weak agents may add unnecessary fields or miss required ones.
+  differentiator: Tests attention to detail — weak agents miss type mismatches.
   i18n:
     zh-CN:
-      title: 配置文件修复
-      description: 修复损坏的配置文件，同时保持预期的 schema 结构。
-      objective: 验证 Agent 能否在不引入无关更改的情况下恢复损坏的配置。
-      judgeRationale: JSON schema 和目标值断言比文本匹配提供更强的信号。
-      differentiator: 测试配置处理能力——弱 Agent 可能添加不必要的字段或遗漏必填字段。
+      title: 配置修复
+      description: 修复损坏的配置文件以匹配其 schema。
+      objective: 修复 JSON 配置中的类型不匹配和无效值。
+      judgeRationale: 行为测试验证配置是有效的 JSON，具有正确的类型和值。
+
+repoSource: "builtin://nodejs-app"
+
 prompt: |
   ## Task | 任务
-  
-  The configuration file `fixtures/config.json` is broken and needs repair. Your job is to:
-  
-  1. Examine the schema file `fixtures/config.schema.json` to understand the required structure
-  2. Identify what's wrong with the current config
-  3. Fix the configuration to match the schema
-  4. Preserve the existing valid values (don't change them unnecessarily)
-  
-  ## Schema Requirements | Schema 要求
-  
-  The config must:
-  - Be valid JSON
-  - Match the provided JSON schema
-  - Keep `mode` set to "production"
-  - Keep all existing valid fields
-  
-  ## Do NOT | 禁止
-  
-  - Do NOT add fields not in the schema
-  - Do NOT change valid values
-  - Do NOT remove required fields
+
+  The config file `fixtures/config.json` has several issues. Fix ALL of them:
+
+  1. `server.port` is the string `"3000"` but must be a number (3000)
+  2. `database.poolSize` is -5 but must be a positive number (at least 1)
+  3. The config must be valid JSON (it already is, but don't break it)
+
+  After fixing, verify:
+  - `typeof config.server.port === "number"`
+  - `config.database.poolSize >= 1`
+  - `config.mode === "production"` (don't change this)
+
+  ## Constraints | 约束
+
+  - Only modify `fixtures/config.json`
+  - Do NOT add or remove fields
+  - Do NOT change `mode`, `version`, `server.host`, or `database.url`
+
 expectedChangedPaths:
   - fixtures/config.json
+
+envAllowList: []
+setupCommands: []
+teardownCommands: []
 judges:
-  - id: config-schema
-    type: json-schema
-    label: Config matches schema
-    path: fixtures/config.json
-    schemaPath: fixtures/config.schema.json
-  - id: config-mode
-    type: json-value
-    label: Config mode stays production
-    path: fixtures/config.json
-    pointer: /mode
-    expected: production
+  - id: config-valid
+    type: command
+    label: Config is valid and loadable
+    command: |
+      node -e "var c=require('./fixtures/config.json');var a=require('node:assert/strict');a.strictEqual(c.mode,'production');a.strictEqual(typeof c.server.port,'number');a.ok(c.server.port>=1,'port positive');a.ok(c.database.poolSize>=1,'poolSize positive');a.strictEqual(c.version,'1.2.3');console.log('PASS: config valid');"
+    timeoutMs: 10000
+    critical: true
+  - id: port-is-number
+    type: command
+    label: Port is a number, not a string
+    command: |
+      node -e "var c=require('./fixtures/config.json');var a=require('node:assert/strict');a.strictEqual(typeof c.server.port,'number');a.ok(!isNaN(c.server.port));console.log('PASS: port is number');"
+    timeoutMs: 10000
+    critical: true
+  - id: poolsize-positive
+    type: command
+    label: Pool size is positive
+    command: |
+      node -e "var c=require('./fixtures/config.json');var a=require('node:assert/strict');a.ok(c.database.poolSize>=1,'poolSize must be >=1');console.log('PASS: poolSize positive');"
+    timeoutMs: 10000
+    critical: true

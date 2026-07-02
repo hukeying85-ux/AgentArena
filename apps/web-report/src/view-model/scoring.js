@@ -42,27 +42,27 @@
 
 /** @type {ScoreWeights} */
 export const DEFAULT_SCORE_WEIGHTS = Object.freeze({
-  status: 0.24,
-  tests: 0.26,
-  criticalJudges: 0.20,
-  nonCriticalJudges: 0.08,
-  precision: 0.05,
-  lint: 0.03,
-  duration: 0.08,
-  cost: 0.06
+  status: 0.20,
+  tests: 0.22,
+  criticalJudges: 0.18,
+  nonCriticalJudges: 0.06,
+  precision: 0.04,
+  lint: 0.02,
+  duration: 0.15,
+  cost: 0.13
 });
 
 /** @type {Record<string, ScoreWeights>} */
 export const SCORE_WEIGHT_PRESETS = Object.freeze({
   practical: Object.freeze({
-    status: 0.24,
-    tests: 0.26,
-    criticalJudges: 0.20,
-    nonCriticalJudges: 0.08,
-    precision: 0.05,
-    lint: 0.03,
-    duration: 0.08,
-    cost: 0.06
+    status: 0.20,
+    tests: 0.22,
+    criticalJudges: 0.18,
+    nonCriticalJudges: 0.06,
+    precision: 0.04,
+    lint: 0.02,
+    duration: 0.15,
+    cost: 0.13
   }),
   balanced: Object.freeze({
     status: 0.30,

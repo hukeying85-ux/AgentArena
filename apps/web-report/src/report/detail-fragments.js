@@ -51,11 +51,11 @@ function renderScoreBreakdown(result, run, localText, escapeHtml) {
       <table class="score-breakdown-table">
         <thead>
           <tr>
-            <th>${escapeHtml(localText("维度", "Dimension"))}</th>
-            <th>${escapeHtml(localText("权重", "Weight"))}</th>
-            <th>${escapeHtml(localText("得分", "Score"))}</th>
-            <th>${escapeHtml(localText("加权", "Weighted"))}</th>
-            <th>${escapeHtml(localText("说明", "Note"))}</th>
+            <th scope="col">${escapeHtml(localText("维度", "Dimension"))}</th>
+            <th scope="col">${escapeHtml(localText("权重", "Weight"))}</th>
+            <th scope="col">${escapeHtml(localText("得分", "Score"))}</th>
+            <th scope="col">${escapeHtml(localText("加权", "Weighted"))}</th>
+            <th scope="col">${escapeHtml(localText("说明", "Note"))}</th>
           </tr>
         </thead>
         <tbody>${tableRows}</tbody>
@@ -540,7 +540,7 @@ export function createDetailFragments({
 
       const cheapest = successfulResults[0]?.estimatedCostUsd ?? 0;
       let html = "<table>";
-      html += `<thead><tr><th>Agent</th><th>${escapeHtml(localText("单次成本", "Cost/Run"))}</th><th>${escapeHtml(localText("月成本", "Monthly Cost"))}</th><th>${escapeHtml(localText("与最便宜差距", "vs Cheapest"))}</th></tr></thead>`;
+      html += `<thead><tr><th scope="col">Agent</th><th scope="col">${escapeHtml(localText("单次成本", "Cost/Run"))}</th><th scope="col">${escapeHtml(localText("月成本", "Monthly Cost"))}</th><th scope="col">${escapeHtml(localText("与最便宜差距", "vs Cheapest"))}</th></tr></thead>`;
       html += "<tbody>";
 
       for (const result of run.results) {
@@ -720,6 +720,8 @@ export function createDetailFragments({
   function showToast(message) {
     const toast = document.createElement("div");
     toast.className = "toast-notification";
+    toast.setAttribute("role", "status");
+    toast.setAttribute("aria-live", "polite");
     toast.textContent = message;
     document.body.appendChild(toast);
     setTimeout(() => {

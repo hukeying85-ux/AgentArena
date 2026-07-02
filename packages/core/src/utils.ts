@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { logger } from "./logging.js";
@@ -89,7 +89,8 @@ export function resolveRepoSource(
     const repoUrl = new URL(repoSource);
     const repoName = path.basename(repoUrl.pathname, path.extname(repoUrl.pathname)) || "repo";
     const safeName = repoName.replace(/[^a-zA-Z0-9._-]+/g, "_");
-    return { kind: "url", repoPath: path.join(builtinReposRoot, safeName) };
+    const sourceHash = createHash("sha256").update(repoUrl.href).digest("hex").slice(0, 12);
+    return { kind: "url", repoPath: path.join(builtinReposRoot, `${safeName}-${sourceHash}`) };
   }
 
   throw new Error(

@@ -107,13 +107,13 @@ export function renderCommunityLeaderboard(container, indexData, t, locale) {
 
   let html = `<div class="community-meta">${escapeHtml(t("communityBasedOn", totalRuns))}</div>`;
   html += `<table class="community-table"><thead><tr>`;
-  html += `<th>#</th>`;
-  html += `<th>${escapeHtml(t("communityAgent"))}</th>`;
-  html += `<th>${escapeHtml(t("communityModel"))}</th>`;
-  html += `<th>${escapeHtml(t("communityAvgScore"))}</th>`;
-  html += `<th>${escapeHtml(t("communitySuccessRate"))}</th>`;
-  html += `<th>${escapeHtml(t("communityRuns"))}</th>`;
-  html += `<th>${escapeHtml(t("communityLastSeen"))}</th>`;
+  html += `<th scope="col">#</th>`;
+  html += `<th scope="col">${escapeHtml(t("communityAgent"))}</th>`;
+  html += `<th scope="col">${escapeHtml(t("communityModel"))}</th>`;
+  html += `<th scope="col">${escapeHtml(t("communityAvgScore"))}</th>`;
+  html += `<th scope="col">${escapeHtml(t("communitySuccessRate"))}</th>`;
+  html += `<th scope="col">${escapeHtml(t("communityRuns"))}</th>`;
+  html += `<th scope="col">${escapeHtml(t("communityLastSeen"))}</th>`;
   html += `</tr></thead><tbody>`;
 
   for (let i = 0; i < entries.length; i++) {

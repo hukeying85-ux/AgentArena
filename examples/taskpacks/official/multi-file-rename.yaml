@@ -1,91 +1,57 @@
 schemaVersion: agentarena.taskpack/v1
-id: official-multi-file-rename
-title: Official Multi-File Rename
-description: Rename a symbol consistently across all files in the repository.
+id: multi-file-rename
+title: Multi-File Rename
+description: Rename a function across multiple source files.
 metadata:
   source: official
   owner: AgentArena
-  difficulty: hard
-  objective: Test agent's ability to coordinate changes across multiple files.
-  repoTypes:
-    - node
-    - typescript
-    - generic
-  tags:
-    - refactor
-    - multi-file
-    - coordination
+  difficulty: medium
+  objective: Test ability to coordinate changes across multiple files.
+  judgeRationale: Behavioral tests verify the function is renamed everywhere and still works.
+  repoTypes: ["node"]
+  tags: ["refactor", "rename", "multi-file"]
   dependencies: []
-  judgeRationale: Comprehensive checks verify all occurrences were updated correctly.
-  differentiator: This is where agents differ most - weak agents miss imports, comments, or break references.
-  i18n:
-    zh-CN:
-      title: 多文件重命名
-      description: 跨多个文件执行一致的重命名操作。
-      objective: 测试 Agent 跨多个文件执行一致重命名的能力。
-      judgeRationale: 文件存在性和内容检查验证重命名的完整性。
-      differentiator: 测试跨文件一致性——弱 Agent 可能遗漏部分引用或产生不一致的命名。
-# Use standard test repository for fair comparison | 使用标准测试仓库进行公平对比
-repoSource: "builtin://nodejs-monorepo"
+  differentiator: Tests thoroughness — weak agents miss references.
+
+repoSource: "builtin://nodejs-app"
+
 prompt: |
   ## Task | 任务
-  
-  Rename the symbol `getUserData` to `fetchUserProfile` throughout the entire codebase.
-  
-  Your rename must:
-  1. Update ALL occurrences of the function name
-  2. Update all import statements that reference it
-  3. Update all exports
-  4. Update JSDoc/comments that mention the old name
-  5. Update any string references (error messages, log statements)
-  
-  ## Files to Check | 需要检查的文件类型
-  
-  - `*.ts` - TypeScript source files
-  - `*.js` - JavaScript files
-  - `*.mjs` - ES Module files
-  - `*.test.ts` - Test files
-  - `*.md` - Documentation (comments/references)
-  
-  ## Verification | 验证步骤
-  
-  After your changes:
-  1. Run `grep -r "getUserData" .` to verify no old name remains
-  2. Ensure all files compile without errors
-  3. Run tests to verify nothing is broken
-  
-  ## Common Mistakes to Avoid | 常见错误
-  
-  - Forgetting to update imports in other files
-  - Missing test file references
-  - Breaking relative import paths
-  - Not updating export statements
-  - Leaving old name in comments
+
+  Rename the function `requireString` to `validateString` in the source files.
+
+  Steps:
+  1. Read `src/validator.js` — find the `requireString` function definition
+  2. Rename it to `validateString`
+  3. Read `src/index.js` — find the `requireString` export
+  4. Update it to `validateString`
+  5. Verify: `node -e "var v=require('./src/validator');console.log(v.validateString('hello','test'))"`
+
+  ## Constraints | 约束
+
+  - Only modify `src/validator.js` and `src/index.js`
+  - Do NOT modify test files
+  - The function behavior must remain identical
+
 expectedChangedPaths:
-  - "**/*.ts"
-  - "**/*.js"
-  - "**/*.mjs"
-  - "**/*.md"
+  - src/validator.js
+  - src/index.js
+
+envAllowList: []
+setupCommands: []
+teardownCommands: []
 judges:
-  - id: no-old-name-remains
+  - id: old-name-gone
     type: command
-    label: No old symbol name remains
-    command: node -e "const fs=require('node:fs');const path=require('node:path');const exts=new Set(['.ts','.js','.mjs','.md']);const hits=[];function walk(dir){for(const entry of fs.readdirSync(dir,{withFileTypes:true})){if(['.git','node_modules','.agentarena'].includes(entry.name)) continue;const full=path.join(dir,entry.name);if(entry.isDirectory()) walk(full); else if(exts.has(path.extname(entry.name))&&fs.readFileSync(full,'utf8').includes('getUserData')) hits.push(full)}}walk('.');if(hits.length>0){console.error(hits.join('\n'));process.exit(1)}"
+    label: No references to requireString in source files
+    command: |
+      node -e "var fs=require('node:fs');var files=['src/validator.js','src/index.js'];var found=[];files.forEach(function(f){var c=fs.readFileSync(f,'utf8');if(c.includes('requireString'))found.push(f)});if(found.length>0){console.error('Still has requireString:',found.join(', '));process.exit(1)}console.log('PASS: no old references');"
     timeoutMs: 10000
-  - id: new-name-present
+    critical: true
+  - id: new-name-works
     type: command
-    label: New symbol name exists
-    command: node -e "const fs=require('node:fs');const path=require('node:path');const exts=new Set(['.ts','.js','.mjs','.md']);let found=false;function walk(dir){for(const entry of fs.readdirSync(dir,{withFileTypes:true})){if(found||['.git','node_modules','.agentarena'].includes(entry.name)) continue;const full=path.join(dir,entry.name);if(entry.isDirectory()) walk(full); else if(exts.has(path.extname(entry.name))&&fs.readFileSync(full,'utf8').includes('fetchUserProfile')){console.log(full);found=true;return}}}walk('.');process.exit(found?0:1)"
+    label: validateString works correctly
+    command: |
+      node -e "var v=require('./src/validator');var a=require('node:assert/strict');a.strictEqual(typeof v.validateString,'function');a.strictEqual(v.validateString('hello','test'),'hello');a.throws(function(){v.validateString('','test')});console.log('PASS: validateString works');"
     timeoutMs: 10000
-  - id: typescript-compiles
-    type: command
-    label: TypeScript compiles without errors
-    command: npx --no-install tsc --noEmit
-    timeoutMs: 60000
-  - id: tests-pass
-    type: test-result
-    label: All tests still pass
-    command: node -e "const fs=require('node:fs');const {spawnSync}=require('node:child_process');const report='.agentarena/multi-file-rename-test-results.json';fs.mkdirSync('.agentarena',{recursive:true});for(const [cmd,args] of [['pnpm',['test','--','--runInBand','--json','--outputFile',report]],['pnpm',['test','--','--runInBand','--reporter=json','--outputFile',report]],['npm',['run','test','--','--runInBand','--json','--outputFile',report]],['npm',['run','test','--','--runInBand','--reporter=json','--outputFile',report]]]){fs.rmSync(report,{force:true});const r=spawnSync(cmd,args,{stdio:'inherit',shell:process.platform==='win32'});if(!r.error&&fs.existsSync(report)&&fs.statSync(report).size>0){process.exit(r.status??1)}}process.exit(1)"
-    format: auto
-    reportFile: .agentarena/multi-file-rename-test-results.json
-    timeoutMs: 120000
+    critical: true

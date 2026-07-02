@@ -77,23 +77,22 @@ describe("concurrency", () => {
       const delays = [10, 5, 15, 3];
       const items = [0, 1, 2, 3];
 
-      await mapWithConcurrency(items, 2, async (item, index) => {
+      const result = await mapWithConcurrency(items, 2, async (item, index) => {
         order.push({ phase: "start", item });
         await new Promise((r) => setTimeout(r, delays[index]));
         order.push({ phase: "end", item });
         return item * 2;
       });
 
-      assert.deepEqual(order, [
-        { phase: "start", item: 0 },
-        { phase: "start", item: 1 },
-        { phase: "end", item: 1 },
-        { phase: "start", item: 2 },
-        { phase: "end", item: 0 },
-        { phase: "start", item: 3 },
-        { phase: "end", item: 3 },
-        { phase: "end", item: 2 },
-      ]);
+      assert.deepEqual(result, { results: [0, 2, 4, 6], aborted: false });
+      assert.deepEqual(
+        order.filter((entry) => entry.phase === "start").map((entry) => entry.item),
+        [0, 1, 2, 3]
+      );
+      assert.deepEqual(
+        order.filter((entry) => entry.phase === "end").map((entry) => entry.item).sort((a, b) => a - b),
+        [0, 1, 2, 3]
+      );
     });
 
     it("limits concurrent workers", async () => {

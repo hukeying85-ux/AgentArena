@@ -100,14 +100,23 @@ export function checkRateLimit(ip: string, pathname: string): { allowed: boolean
   }
 
   let entry = rateLimitStore.get(ip);
+  if (entry) {
+    const windowStart = now - RATE_LIMIT_WINDOW_MS;
+    entry.timestamps = entry.timestamps.filter((t) => t > windowStart);
+    entry.expensiveTimestamps = entry.expensiveTimestamps.filter((t) => t > windowStart);
+    // If the entry is fully stale (no valid timestamps in either bucket), delete
+    // it so we start fresh. This prevents stale entries from accumulating between
+    // cleanup intervals, keeping the store compact for long-running servers.
+    if (entry.timestamps.length === 0 && entry.expensiveTimestamps.length === 0) {
+      rateLimitStore.delete(ip);
+      entry = undefined;
+    }
+  }
+
   if (!entry) {
     entry = { timestamps: [], expensiveTimestamps: [] };
     rateLimitStore.set(ip, entry);
   }
-
-  const windowStart = now - RATE_LIMIT_WINDOW_MS;
-  entry.timestamps = entry.timestamps.filter((t) => t > windowStart);
-  entry.expensiveTimestamps = entry.expensiveTimestamps.filter((t) => t > windowStart);
 
   const isExpensive = RATE_LIMIT_EXPENSIVE_PATHS.has(pathname);
 
@@ -144,6 +153,10 @@ export function checkRateLimit(ip: string, pathname: string): { allowed: boolean
 }
 
 export function startRateLimitCleanup(): NodeJS.Timeout {
+  // Run cleanup at half the window interval for more aggressive stale-entry
+  // eviction. This keeps the store compact between requests on long-running
+  // servers without adding meaningful overhead.
+  const cleanupIntervalMs = Math.floor(RATE_LIMIT_WINDOW_MS / 2);
   const handle = setInterval(() => {
     const cutoff = Date.now() - RATE_LIMIT_WINDOW_MS;
     for (const [ip, entry] of rateLimitStore) {
@@ -167,7 +180,7 @@ export function startRateLimitCleanup(): NodeJS.Timeout {
         rateLimitStore.delete(candidates[i].ip);
       }
     }
-  }, RATE_LIMIT_WINDOW_MS);
+  }, cleanupIntervalMs);
   handle.unref(); // Don't prevent process exit if server is shut down
   return handle;
 }

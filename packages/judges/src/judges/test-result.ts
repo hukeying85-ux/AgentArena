@@ -18,7 +18,7 @@ export async function runTestResultJudge(
   const timeoutMs = judge.timeoutMs ?? defaultJudgeTimeoutMs();
   const cwd = await resolveJudgeWorkingDirectory(workspacePath, judge);
   const environment = buildStepEnvironment(baseAllowedNames, judge);
-  const result = await executeCommand(judge.command, cwd, environment, timeoutMs, "Judge", options.signal);
+  const result = await executeCommand(judge.command, cwd, environment, timeoutMs, "Judge", options.signal, undefined, { allowEval: true });
 
   try {
     const payload = await readJsonJudgePayload(workspacePath, judge.reportFile, result.stdout, `Judge "${judge.id}" reportFile`);

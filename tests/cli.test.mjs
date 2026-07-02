@@ -720,7 +720,7 @@ test("agentarena run supports JSON output", { timeout: 60_000 }, async () => {
 
   const summary = JSON.parse(await readFile(payload.report.jsonPath, "utf8"));
   assert.equal(summary.scoreMode, "practical");
-  assert.equal(summary.scoreWeights.status, 0.24);
+  assert.equal(summary.scoreWeights.status, 0.20);
   assert.equal(typeof summary.results[0].compositeScore, "number");
   assert.equal(Array.isArray(summary.results[0].scoreReasons), true);
   } finally {

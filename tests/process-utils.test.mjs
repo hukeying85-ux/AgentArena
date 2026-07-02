@@ -211,6 +211,35 @@ test(
   }
 );
 
+test(
+  "runProcess times out detached Windows Claude invocations",
+  { skip: process.platform !== "win32" ? "Windows-specific Claude wrapper behavior" : false },
+  async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-claude-timeout-"));
+    try {
+      const scriptPath = path.join(tempDir, "hang.js");
+      const shimPath = path.join(tempDir, "claude.cmd");
+      await writeFile(scriptPath, "setTimeout(() => {}, 60000);\n", "utf8");
+      await writeFile(shimPath, `@echo off\n"${process.execPath}" "${scriptPath}" %*\n`, "utf8");
+
+      const result = await runProcess(
+        shimPath,
+        ["-p", "--output-format", "stream-json"],
+        tempDir,
+        500,
+        process.env,
+        undefined,
+        "READY"
+      );
+
+      assert.equal(result.timedOut, true);
+      assert.match(result.stderr, /timed out/i);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  }
+);
+
 // --- Output truncation (previously had NO coverage) ---
 //
 // MAX_PROCESS_OUTPUT_BYTES is 50 MB. To verify the truncation cap actually

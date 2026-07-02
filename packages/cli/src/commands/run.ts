@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { listAvailableAdapters } from "@agentarena/adapters";
-import { type BenchmarkRun, createCancellation, formatDuration } from "@agentarena/core";
+import { type BenchmarkRun, createCancellation, formatDuration, setJsonOutputMode } from "@agentarena/core";
 import {
   aggregateMultiRuns,
   computeVarianceAnalysis,
@@ -15,7 +15,8 @@ import {
   type ScoredRun,
   writeReport,
 } from "@agentarena/report";
-import { type BenchmarkProgressEvent, runBenchmark } from "@agentarena/runner";
+import { type BenchmarkProgressEvent, checkTaskCompatibility, runBenchmark } from "@agentarena/runner";
+import { loadTaskPack } from "@agentarena/taskpacks";
 import type { ParsedArgs } from "../args.js";
 import { buildBenchmarkOutputSummary } from "../output.js";
 import {
@@ -249,6 +250,14 @@ export async function runBenchmarkCommand(
 
   const selections = normalizeCliSelections(parsed);
   const repeatCount = parsed.repeat ?? 1;
+
+  // In JSON output mode, redirect all structured logs to stderr so stdout
+  // contains only the final JSON result. This allows piping to jq or other
+  // JSON parsers without log lines breaking the parse.
+  if (parsed.format === "json") {
+    setJsonOutputMode(true);
+  }
+
   let outputRootPath = parsed.outputPath ? path.resolve(parsed.outputPath) : undefined;
   let resumeFromPath: string | undefined;
   let resumeRunId: string | undefined;
@@ -273,15 +282,6 @@ export async function runBenchmarkCommand(
     }
     outputRootPath = resumeOutputRoot;
     resumeRunId = path.basename(resumeFromPath);
-  }
-
-  // --probe-timeout is a doctor-only option (it tunes the auth-probe timeout in
-  // `agentarena doctor`). The run preflight does not consume it, so warn rather
-  // than silently ignore it.
-  if (parsed.probeTimeout !== undefined) {
-    console.warn(
-      "[agentarena] --probe-timeout is only used by 'agentarena doctor'; it has no effect on 'run' and will be ignored.",
-    );
   }
 
   // The adapter- and runner-level execution timeouts are read from the
@@ -315,12 +315,25 @@ export async function runBenchmarkCommand(
     }
     if (parsed.probeAuth) {
       console.log(`Authentication probe: enabled`);
+      if (parsed.probeTimeout !== undefined) {
+        console.log(`Authentication probe timeout: ${parsed.probeTimeout}ms`);
+      }
     }
     console.log("");
   }
 
   if (parsed.dryRun) {
     const resolvedOutput = outputRootPath ?? "(default: <repo>/.agentarena/runs)";
+
+    // Run compatibility check for dry-run
+    let compatibilityResult: { status: string; summary: string; checks: Array<{ label: string; status: string; message: string; fix?: string }> } | null = null;
+    try {
+      const taskPack = await loadTaskPack(parsed.taskPath);
+      compatibilityResult = await checkTaskCompatibility(taskPack, parsed.repoPath);
+    } catch {
+      // Best-effort: don't fail dry-run if compatibility check fails
+    }
+
     if (parsed.format === "json") {
       console.log(
         JSON.stringify(
@@ -341,6 +354,7 @@ export async function runBenchmarkCommand(
               displayLabel: selection.displayLabel,
               model: selection.config?.model ?? null,
             })),
+            compatibility: compatibilityResult,
           },
           null,
           2,
@@ -364,6 +378,28 @@ export async function runBenchmarkCommand(
           : "";
         console.log(`    - ${selection.displayLabel}${model}`);
       }
+
+      // Show compatibility status
+      if (compatibilityResult) {
+        const statusIcon = { compatible: "✅", warning: "⚠️", incompatible: "❌" }[compatibilityResult.status] ?? "🔍";
+        console.log(`\n${statusIcon} Task compatibility: ${compatibilityResult.status}`);
+        console.log(`   ${compatibilityResult.summary}`);
+        const failedChecks = compatibilityResult.checks.filter((c) => c.status !== "pass");
+        if (failedChecks.length > 0) {
+          console.log("   Issues:");
+          for (const check of failedChecks.slice(0, 5)) {
+            const icon = check.status === "fail" ? "  ✗" : "  ⚠";
+            console.log(`${icon} ${check.label}: ${check.message}`);
+            if (check.fix) {
+              console.log(`     Fix: ${check.fix}`);
+            }
+          }
+          if (failedChecks.length > 5) {
+            console.log(`   ... and ${failedChecks.length - 5} more issues`);
+          }
+        }
+      }
+
       console.log("\nRe-run without --dry-run to execute.");
     }
     return;
@@ -393,32 +429,46 @@ export async function runBenchmarkCommand(
 
   let benchmark: BenchmarkRun;
   try {
-    benchmark = await runBenchmark({
-      repoPath: parsed.repoPath,
-      taskPath: parsed.taskPath,
-      agentIds: selections.map((selection) => selection.baseAgentId),
-      agents: selections,
-      runId: resumeRunId,
-      outputPath: outputRootPath,
-      resumeFrom: resumeFromPath,
-      probeAuth: parsed.probeAuth,
-      updateSnapshots: parsed.updateSnapshots,
-      cleanupWorkspaces: parsed.cleanupWorkspaces,
-      maxConcurrency: parsed.maxConcurrency,
-      scoreMode: parsed.scoreMode,
-      tokenBudget: parsed.tokenBudget,
-      debug: parsed.debug,
-      cancellation,
-      onProgress:
-        parsed.format === "json"
-          ? undefined
-          : (event: BenchmarkProgressEvent) => {
-              const prefix = event.displayLabel
-                ? `[${event.displayLabel}] `
-                : "";
-              process.stderr.write(`  [${elapsed()}] ${prefix}${event.message}\n`);
-            },
-    });
+    const previousProbeTimeout = process.env.AGENTARENA_PREFLIGHT_TIMEOUT_MS;
+    if (parsed.probeAuth && parsed.probeTimeout !== undefined) {
+      process.env.AGENTARENA_PREFLIGHT_TIMEOUT_MS = String(parsed.probeTimeout);
+    }
+    try {
+      benchmark = await runBenchmark({
+        repoPath: parsed.repoPath,
+        taskPath: parsed.taskPath,
+        agentIds: selections.map((selection) => selection.baseAgentId),
+        agents: selections,
+        runId: resumeRunId,
+        outputPath: outputRootPath,
+        resumeFrom: resumeFromPath,
+        probeAuth: parsed.probeAuth,
+        updateSnapshots: parsed.updateSnapshots,
+        cleanupWorkspaces: parsed.cleanupWorkspaces,
+        maxConcurrency: parsed.maxConcurrency,
+        scoreMode: parsed.scoreMode,
+        tokenBudget: parsed.tokenBudget,
+        debug: parsed.debug,
+        cancellation,
+        onProgress:
+          parsed.format === "json"
+            ? undefined
+            : (event: BenchmarkProgressEvent) => {
+                const prefix = event.displayLabel
+                  ? `[${event.displayLabel}] `
+                  : "";
+                process.stderr.write(`  [${elapsed()}] ${prefix}${event.message}\n`);
+              },
+      });
+    } finally {
+      if (parsed.probeAuth && parsed.probeTimeout !== undefined) {
+        if (previousProbeTimeout === undefined) {
+          delete process.env.AGENTARENA_PREFLIGHT_TIMEOUT_MS;
+        } else {
+          process.env.AGENTARENA_PREFLIGHT_TIMEOUT_MS = previousProbeTimeout;
+        }
+      }
+    }
   } finally {
     process.removeListener("SIGINT", sigintHandler);
   }

@@ -1,99 +1,68 @@
 schemaVersion: agentarena.taskpack/v1
 id: official-performance-optimize
-title: Official Performance Optimize
-description: Identify and fix performance bottlenecks in the codebase.
+title: Performance Optimize
+description: Optimize utility functions for better performance.
 metadata:
   source: official
   owner: AgentArena
   difficulty: hard
-  objective: Test agent's ability to identify and fix performance issues without breaking functionality.
-  repoTypes:
-    - node
-    - backend
-    - typescript
-  tags:
-    - performance
-    - optimization
-    - algorithms
-  dependencies:
-    - node
-  judgeRationale: Performance metrics combined with correctness checks verify true optimization.
-  differentiator: Requires performance analysis skills - weak agents may optimize wrong areas or break edge cases.
+  objective: Optimize code while preserving correctness.
+  judgeRationale: Behavioral tests verify optimized code still produces correct results.
+  repoTypes: ["node"]
+  tags: ["performance", "optimization"]
+  dependencies: []
+  differentiator: Good agents optimize with measurable improvements; weak agents break the code.
   i18n:
     zh-CN:
       title: 性能优化
-      description: 对代码进行性能优化，同时保持正确性。
-      objective: 测试 Agent 在保持正确性的前提下优化性能的能力。
-      judgeRationale: 性能基准和正确性测试共同验证优化质量。
-      differentiator: 测试优化能力——弱 Agent 可能为了性能牺牲正确性，或优化效果不明显。
+      description: 优化工具函数以提升性能。
+      objective: 在保持正确性的同时优化代码。
+      judgeRationale: 行为测试验证优化后的代码仍产生正确结果。
+
+repoSource: "builtin://nodejs-app"
+
 prompt: |
   ## Task | 任务
-  
-  The codebase has performance issues. Identify and fix the bottleneck(s):
-  
-  1. Profile or analyze the code to find slow operations
-  2. Identify the root cause(s) of performance problems
-  3. Apply targeted optimizations
-  4. Verify functionality is preserved (all tests pass)
-  
-  ## Common Performance Issues to Look For | 常见性能问题
-  
-  - O(n²) or worse algorithms in loops
-  - Repeated expensive operations (cache misses)
-  - Unnecessary synchronous operations
-  - Inefficient data structure usage
-  - Memory leaks or excessive allocations
-  - Repeated regex compilation
-  - Blocking I/O in hot paths
-  
-  ## Constraints | 约束
-  
-  - All existing tests must still pass
-  - The API/behavior must remain the same
-  - Do not use unsafe optimizations (shared state, mutation)
-  - Document your changes with comments
-  
-  ## Verification | 验证
-  
-  Before and after your changes, measure:
-  ```bash
-  # If there's a benchmark
-  pnpm benchmark
-  
-  # Or time the operation
-  time node scripts/perf-test.mjs
-  ```
-  
-  ## Success Criteria | 成功标准
 
-  - At least 20% improvement in execution time
-  - All tests pass
-  - No new bugs introduced
+  Optimize the utility functions in `src/utils.js` for better performance:
+
+  1. `capitalize(str)`: If it uses string concatenation in a loop, use array.join()
+  2. `slugify(str)`: If it calls replace() multiple times, combine into one regex
+  3. `reverse(str)`: If it creates intermediate arrays, use a more efficient approach
+
+  For each optimization, add a comment explaining WHY it's faster.
+
+  ## Constraints | 约束
+
+  - Only modify `src/utils.js`
+  - All functions must produce EXACTLY the same output as before
+  - All existing tests must still pass
+  - Do NOT add new dependencies
+  - Each optimization must have a comment explaining the rationale
+
 expectedChangedPaths:
-  - src/**/*.{js,mjs,ts,tsx}
-  - packages/**/src/**/*.{js,mjs,ts,tsx}
-  - lib/**/*.{js,mjs,ts,tsx}
-  - scripts/**/*.{js,mjs,ts,tsx}
+  - src/utils.js
+
+envAllowList: []
+setupCommands: []
+teardownCommands: []
 judges:
   - id: tests-still-pass
-    type: test-result
-    label: All tests pass after optimization
-    command: node -e "const fs=require('node:fs');const {spawnSync}=require('node:child_process');const report='.agentarena/performance-optimize-test-results.json';fs.mkdirSync('.agentarena',{recursive:true});for(const [cmd,args] of [['pnpm',['test','--','--runInBand','--json','--outputFile',report]],['pnpm',['test','--','--runInBand','--reporter=json','--outputFile',report]],['npm',['run','test','--','--runInBand','--json','--outputFile',report]],['npm',['run','test','--','--runInBand','--reporter=json','--outputFile',report]]]){fs.rmSync(report,{force:true});const r=spawnSync(cmd,args,{stdio:'inherit',shell:process.platform==='win32'});if(!r.error&&fs.existsSync(report)&&fs.statSync(report).size>0){process.exit(r.status??1)}}process.exit(1)"
-    format: auto
-    reportFile: .agentarena/performance-optimize-test-results.json
-    timeoutMs: 120000
-  - id: no-unsafe-patterns
     type: command
-    label: No unsafe optimization patterns
-    command: node -e "const fs=require('node:fs');const path=require('node:path');const banned=[/\bany\b/,/@ts-ignore/,/\beval\s*\(/,/\bFunction\s*\(/];const hits=[];function walk(dir){if(!fs.existsSync(dir)) return;for(const entry of fs.readdirSync(dir,{withFileTypes:true})){if(['.git','node_modules','.agentarena'].includes(entry.name)) continue;const full=path.join(dir,entry.name);if(entry.isDirectory()) walk(full); else if(/\.[cm]?[jt]sx?$/.test(entry.name)&&!entry.name.endsWith('.d.ts')){const content=fs.readFileSync(full,'utf8');if(banned.some((rule)=>rule.test(content))) hits.push(full)}}}['packages','src','lib'].forEach(walk);if(hits.length>0){console.error(hits.join('\n'));process.exit(1)}"
+    label: All tests still pass after optimization
+    command: node --test test/utils.test.js
+    timeoutMs: 30000
+    critical: true
+  - id: has-optimization-comments
+    type: command
+    label: Optimizations have explanatory comments
+    command: |
+      node -e "var c=require('node:fs').readFileSync('src/utils.js','utf8');var hasPerf=c.toLowerCase().includes('performance')||c.toLowerCase().includes('optimi')||c.toLowerCase().includes('faster')||c.toLowerCase().includes('efficient');if(!hasPerf){console.error('No optimization comments found');process.exit(1)}console.log('PASS: has optimization comments');"
     timeoutMs: 10000
-  - id: performance-improved
+  - id: output-unchanged
     type: command
-    label: Performance benchmark shows improvement
-    command: pnpm benchmark
-    timeoutMs: 60000
-  - id: source-files-preserved
-    type: glob
-    label: Source files still exist
-    pattern: packages/**/src/*.ts
-    minMatches: 1
+    label: Functions produce same output
+    command: |
+      node -e "var u=require('./src/utils');var a=require('node:assert/strict');a.strictEqual(u.capitalize('hello world'),'Hello World');a.strictEqual(u.reverse('hello'),'olleh');a.strictEqual(u.slugify('Hello World!'),'hello-world');a.strictEqual(u.truncate('Hello',3),'Hel...');console.log('PASS: output unchanged');"
+    timeoutMs: 10000
+    critical: true

@@ -13,6 +13,24 @@ import {
 
 const execFileAsync = promisify(execFile);
 
+const INTERNAL_CHANGED_FILE_PATTERNS = [
+  ".aa-evidence/",
+  "agentarena-demo/",
+  ".claude/settings.local.json",
+  "agent-stderr.log",
+  "agent-stdout.jsonl",
+  "prompt.txt"
+];
+
+function isInternalChangedFile(filePath: string): boolean {
+  const normalized = filePath.replace(/\\/g, "/");
+  return INTERNAL_CHANGED_FILE_PATTERNS.some((pattern) =>
+    pattern.endsWith("/")
+      ? normalized.startsWith(pattern)
+      : normalized === pattern
+  );
+}
+
 /**
  * Tagged result mirroring runner/snapshot.ts ChangedFilesResult, but adapter-local
  * to avoid a cross-package import. When `reliable === false`, callers (adapters
@@ -103,7 +121,7 @@ export async function getChangedFilesFromGit(workspacePath: string): Promise<Cha
       cwd: workspacePath,
       encoding: "utf8"
     });
-    return { files: stdout.trim().split("\n").filter(Boolean), reliable: true };
+    return { files: stdout.trim().split("\n").filter(Boolean).filter((file) => !isInternalChangedFile(file)), reliable: true };
   } catch (error: unknown) {
     const stderr = (error instanceof Error && "stderr" in error) ? String((error as NodeJS.ErrnoException & { stderr?: string }).stderr ?? "") : "";
     const rawCode = (error instanceof Error && "code" in error) ? (error as Record<string, unknown>).code : undefined;

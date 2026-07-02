@@ -8,7 +8,7 @@ import type {
   AgentResolvedRuntime,
   TraceEventType
 } from "@agentarena/core";
-import { type ToolCallRecord, writeExecutionEvidence } from "@agentarena/core";
+import { logger, type ToolCallRecord, writeExecutionEvidence } from "@agentarena/core";
 import { CLAUDE_CODE_CAPABILITY, type InvocationSpec } from "./adapter-capabilities.js";
 import { formatAdapterError } from "./adapter-diagnostics.js";
 import { buildAgentPrompt, createPreflightResult, getChangedFilesFromGit, savePromptArtifact } from "./adapter-helpers.js";
@@ -87,7 +87,7 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
     }
 
     if (options?.probeAuth) {
-      const authProbe = await probeClaudeLikeAuth(invocation, process.cwd());
+      const authProbe = await probeClaudeLikeAuth(invocation, process.cwd(), undefined, preflightTimeoutMs());
       return createPreflightResult(
         options?.selection,
         this.id,
@@ -270,8 +270,8 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
         const stderrPath = context.workspacePath + "/agent-stderr.log";
         await fs.default.writeFile(stderrPath, execution.stderr, "utf8");
       }
-    } catch {
-      // Best effort — don't fail the run if we can't write the file
+    } catch (writeError) {
+      logger.debug("adapter", "artifact.write_failed", `Failed to write agent artifacts: ${writeError instanceof Error ? writeError.message : String(writeError)}`);
     }
 
     // Write evidence for structured collection
@@ -307,8 +307,8 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
           },
         }
       );
-    } catch {
-      // Best effort — don't fail the run if evidence writing fails
+    } catch (evidenceError) {
+      logger.debug("adapter", "evidence.write_failed", `Failed to write execution evidence: ${evidenceError instanceof Error ? evidenceError.message : String(evidenceError)}`);
     }
 
     // Token usage is only trustworthy when: no transport fallback was used
@@ -447,7 +447,7 @@ export class ClaudeCodeAdapter extends ClaudeLikeAdapter {
       }
 
       // Official provider: use standard probe
-      const authProbe = await probeClaudeLikeAuth(invocation, process.cwd());
+      const authProbe = await probeClaudeLikeAuth(invocation, process.cwd(), undefined, preflightTimeoutMs());
       return createPreflightResult(
         options?.selection,
         this.id,

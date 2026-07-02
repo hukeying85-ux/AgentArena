@@ -1,53 +1,71 @@
 schemaVersion: agentarena.taskpack/v1
 id: security-hardening
 title: Security Hardening
-description: Apply security best practices to harden the application.
+description: Add HTML sanitization and path traversal protection.
 metadata:
-  i18n:
-    zh-CN:
-      title: "安全加固"
-      description: "应用安全最佳实践加固应用"
   source: official
   owner: AgentArena
-  difficulty: hard
-  objective: Fix security vulnerabilities and apply security best practices
-  judgeRationale: Build and tests ensure security changes don't break functionality
-  repoTypes: ["node-js", "python", "go", "java"]
-  tags: ["security", "hardening", "owasp"]
-  dependencies: ["npm"]
+  difficulty: medium
+  objective: Add security-critical sanitization functions.
+  judgeRationale: Behavioral tests verify XSS payloads are escaped and path traversal is blocked.
+  repoTypes: ["node"]
+  tags: ["security", "sanitization"]
+  dependencies: []
+  differentiator: Good agents implement real sanitization; weak agents add comments.
+
+repoSource: "builtin://nodejs-app"
+
 prompt: |
-  Harden the security of this application.
+  ## Task | 任务
 
-  Requirements:
-  1. Check for common security issues (SQL injection, XSS, CSRF, path traversal)
-  2. Add input sanitization where needed
-  3. Use parameterized queries instead of string concatenation for database queries
-  4. Add proper authentication and authorization checks
-  5. Remove any hardcoded secrets or credentials
-  6. All existing tests must pass
+  Add security functions to `src/validator.js`:
 
-  Focus on the OWASP Top 10 vulnerabilities first.
+  1. Add `sanitizeHtml(input)`:
+     - Escapes `<` to `&lt;`, `>` to `&gt;`, `"` to `&quot;`, `'` to `&#x27;`, `&` to `&amp;`
+     - Throws if input is not a string
+     - Safe text (no special chars) must pass through unchanged
+
+  2. Add `safePath(input)`:
+     - Rejects paths containing `..`
+     - Rejects absolute paths (starting with `/` or `C:\`)
+     - Throws if input is not a string
+     - Returns the cleaned path on success
+
+  3. Export both functions from `src/index.js`
+
+  4. Verify: `node -e "var v=require('./src/validator');console.log(v.sanitizeHtml('<b>test</b>'));console.log(v.safePath('src/utils.js'))"`
+
+  ## Constraints | 约束
+
+  - Only modify `src/validator.js` and `src/index.js`
+  - Do NOT add new dependencies
+  - Functions must actually work (not stubs)
+
+expectedChangedPaths:
+  - src/validator.js
+  - src/index.js
+
 envAllowList: []
 setupCommands: []
-judges:
-  - id: build-passes
-    type: compilation
-    label: Build succeeds
-    timeoutMs: 120000
-    critical: true
-  - id: tests-pass
-    type: test-result
-    label: All tests pass
-    command: npx --no-install jest --json --outputFile=.agentarena/test-results.json
-    format: jest
-    reportFile: .agentarena/test-results.json
-    timeoutMs: 120000
-    critical: true
-  - id: no-secrets
-    type: regex-match
-    label: No hardcoded secrets in env file
-    path: .env
-    pattern: "password|secret|api_key|token"
-    flags: "i"
-    shouldNotMatch: true
 teardownCommands: []
+judges:
+  - id: sanitize-html-works
+    type: command
+    label: sanitizeHtml escapes dangerous characters
+    command: |
+      node -e "var v=require('./src/validator');var a=require('node:assert/strict');a.strictEqual(typeof v.sanitizeHtml,'function');a.ok(v.sanitizeHtml('<script>').includes('&lt;'),'escapes <');a.ok(v.sanitizeHtml('&amp;').includes('&amp;'),'escapes &');a.strictEqual(v.sanitizeHtml('hello'),'hello','safe unchanged');console.log('PASS: sanitizeHtml works');"
+    timeoutMs: 10000
+    critical: true
+  - id: safe-path-works
+    type: command
+    label: safePath blocks path traversal
+    command: |
+      node -e "var v=require('./src/validator');var a=require('node:assert/strict');a.strictEqual(typeof v.safePath,'function');a.throws(function(){v.safePath('../etc/passwd')});a.throws(function(){v.safePath('/etc/passwd')});a.strictEqual(v.safePath('src/utils.js'),'src/utils.js');console.log('PASS: safePath works');"
+    timeoutMs: 10000
+    critical: true
+  - id: exported
+    type: command
+    label: Functions exported from index
+    command: |
+      node -e "var m=require('./src/index');var a=require('node:assert/strict');a.strictEqual(typeof m.sanitizeHtml,'function');a.strictEqual(typeof m.safePath,'function');console.log('PASS: exported');"
+    timeoutMs: 10000

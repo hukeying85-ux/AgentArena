@@ -127,3 +127,32 @@ test("explicit cwd parameter is honored for path containment", () => {
     taskPath: path.join(altCwd, "task.yaml"),
   }, altCwd), null);
 });
+
+// --- Prefix-match bypass tests ---
+
+test("rejects repoPath that is a sibling prefix of cwd (not a child)", () => {
+  // If CWD is /home/user/project, /home/user/project-evil should NOT be accepted
+  // because it shares the prefix string but is not actually inside CWD.
+  const parent = path.dirname(CWD);
+  const sibling = path.join(parent, path.basename(CWD) + "-evil");
+  assert.ok(validateRunPayload({
+    repoPath: sibling,
+    taskPath: path.join(CWD, "task.yaml"),
+  }), "should reject sibling path that shares prefix string");
+});
+
+test("rejects taskPath that is a sibling prefix of cwd (not a child)", () => {
+  const parent = path.dirname(CWD);
+  const sibling = path.join(parent, path.basename(CWD) + "-evil");
+  assert.ok(validateRunPayload({
+    repoPath: CWD,
+    taskPath: sibling,
+  }), "should reject sibling taskPath that shares prefix string");
+});
+
+test("accepts deeply nested subdirectory of cwd", () => {
+  assert.equal(validateRunPayload({
+    repoPath: path.join(CWD, "a", "b", "c"),
+    taskPath: path.join(CWD, "x", "y", "task.yaml"),
+  }), null);
+});

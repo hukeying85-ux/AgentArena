@@ -1,71 +1,55 @@
 schemaVersion: agentarena.taskpack/v1
-id: official-failing-test-fix
-title: Official Failing Test Fix
-description: Repairs a failing test while preserving the surrounding test suite.
+id: failing-test-fix
+title: Failing Test Fix
+description: Fix a failing test by correcting the implementation.
 metadata:
   source: official
   owner: AgentArena
   difficulty: medium
-  objective: Measure whether an agent can isolate and repair a failing test case.
-  repoTypes:
-    - node
-    - test
-  tags:
-    - tests
-    - bugfix
-    - debugging
-  dependencies:
-    - node
-  judgeRationale: Test commands and targeted fixture checks validate the actual bugfix path.
-  differentiator: Tests debugging skill - weak agents may "fix" tests by making them pass incorrectly, or break other tests.
-  i18n:
-    zh-CN:
-      title: 失败测试修复
-      description: 修复一个失败的测试，同时保持其余测试套件正常运行。
-      objective: 衡量 Agent 能否定位并修复一个失败的测试用例。
-      judgeRationale: 测试命令和目标 fixture 检查验证了实际的 bugfix 路径。
-      differentiator: 测试调试能力——弱 Agent 可能通过错误方式让测试通过，或破坏其他测试。
+  objective: Test ability to diagnose and fix test failures.
+  judgeRationale: The agent must run tests, read failures, and fix the implementation.
+  repoTypes: ["node"]
+  tags: ["bugfix", "testing", "debugging"]
+  dependencies: []
+  differentiator: Tests iterative debugging — good harnesses run tests and iterate.
+
+repoSource: "builtin://nodejs-app"
+
 prompt: |
   ## Task | 任务
-  
-  There is a failing test in this repository. Your job is to:
-  
-  1. Run the test suite to identify the failing test
-  2. Analyze the test failure to understand the root cause
-  3. Fix the underlying bug in the implementation (NOT the test)
-  4. Ensure ALL tests pass after your fix
-  
-  ## Important | 重要
-  
-  - Do NOT modify the test file itself - fix the implementation
-  - Do NOT skip or disable the failing test
-  - Do NOT make changes that could break other passing tests
-  - The fix should be minimal and targeted
-  
-  ## Process | 流程
-  
-  1. Run `pnpm test` to see the failure
-  2. Read the test code to understand expected behavior
-  3. Find and fix the bug in the source code
-  4. Run tests again to verify all pass
+
+  There is a failing test. Fix the implementation to make it pass.
+
+  1. Run `node --test test/calculator.test.js` to see which tests fail
+  2. Read the failing test to understand what's expected
+  3. Read `src/calculator.js` to find the bug
+  4. Fix the bug (only change the buggy line, don't rewrite the function)
+  5. Run tests again to verify ALL pass
+
+  ## Constraints | 约束
+
+  - Only modify `src/calculator.js`
+  - Do NOT modify test files
+  - Only fix the specific bug — don't change working functions
+  - All tests must pass after your fix
+
 expectedChangedPaths:
-  - src/**/*.{js,mjs,ts,tsx}
-  - packages/**/src/**/*.{js,mjs,ts,tsx}
-  - lib/**/*.{js,mjs,ts,tsx}
+  - src/calculator.js
+
+envAllowList: []
+setupCommands: []
+teardownCommands: []
 judges:
-  - id: all-tests-pass
-    type: test-result
-    label: All tests pass
-    command: node -e "const fs=require('node:fs');const {spawnSync}=require('node:child_process');const report='.agentarena/failing-test-fix-results.json';fs.mkdirSync('.agentarena',{recursive:true});for(const [cmd,args] of [['pnpm',['test','--','--runInBand','--json','--outputFile',report]],['pnpm',['test','--','--runInBand','--reporter=json','--outputFile',report]],['npm',['run','test','--','--runInBand','--json','--outputFile',report]],['npm',['run','test','--','--runInBand','--reporter=json','--outputFile',report]]]){fs.rmSync(report,{force:true});const r=spawnSync(cmd,args,{stdio:'inherit',shell:process.platform==='win32'});if(!r.error&&fs.existsSync(report)&&fs.statSync(report).size>0){process.exit(r.status??1)}}process.exit(1)"
-    format: auto
-    reportFile: .agentarena/failing-test-fix-results.json
-    timeoutMs: 120000
-  - id: package-manifest-exists
-    type: file-exists
-    label: Package manifest still exists
-    path: package.json
-  - id: test-file-unchanged
+  - id: subtract-fixed
     type: command
-    label: Test file was not modified
-    command: node -e "const {execFileSync}=require('node:child_process');const out=execFileSync('git',['diff','--name-only'],{encoding:'utf8'});const changed=out.split(/\r?\n/).filter(Boolean);const touchedTests=changed.filter((file)=>/\.(test|spec)\.[cm]?[jt]sx?$/.test(file));if(touchedTests.length>0){console.error(touchedTests.join('\n'));process.exit(1)}"
+    label: subtract returns correct result
+    command: |
+      node -e "var c=require('./src/calculator');var a=require('node:assert/strict');a.strictEqual(c.subtract(5,3),2);a.strictEqual(c.subtract(10,10),0);console.log('PASS: subtract fixed');"
     timeoutMs: 10000
+    critical: true
+  - id: tests-pass
+    type: command
+    label: Calculator tests pass
+    command: node --test test/calculator.test.js
+    timeoutMs: 30000
+    critical: true
