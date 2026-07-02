@@ -6,6 +6,35 @@
 const DB_NAME = 'agentarena';
 const DB_VERSION = 1;
 
+const RUN_REQUIRED_STRING_FIELDS = ['runId'];
+
+function validateRun(run) {
+  if (run === null || typeof run !== 'object' || Array.isArray(run)) {
+    return 'run 必须是一个对象';
+  }
+  for (const field of RUN_REQUIRED_STRING_FIELDS) {
+    if (typeof run[field] !== 'string' || run[field].trim() === '') {
+      return `缺少必填字段 "${field}"（需要非空字符串）`;
+    }
+  }
+  if (run.task !== undefined && (run.task === null || typeof run.task !== 'object')) {
+    return '字段 "task" 必须是对象或 undefined';
+  }
+  if (run.results !== undefined && !Array.isArray(run.results)) {
+    return '字段 "results" 必须是数组或 undefined';
+  }
+  if (run.createdAt !== undefined && (typeof run.createdAt !== 'number' || run.createdAt < 0)) {
+    return '字段 "createdAt" 必须是非负数字或 undefined';
+  }
+  if (run.scores !== undefined && (run.scores === null || typeof run.scores !== 'object')) {
+    return '字段 "scores" 必须是对象或 undefined';
+  }
+  if (run.status !== undefined && typeof run.status !== 'string') {
+    return '字段 "status" 必须是字符串或 undefined';
+  }
+  return null;
+}
+
 /**
  * ResultStore 类 - 封装 IndexedDB 操作
  */
@@ -330,13 +359,17 @@ class ResultStore {
       }
       
       const payload = JSON.parse(text);
-      
+
       if (!payload.runs || !Array.isArray(payload.runs)) {
         return { success: false, count: 0, error: '无效的文件格式：缺少 runs 数据' };
       }
-      
+
       let count = 0;
       for (const run of payload.runs) {
+        const validationError = validateRun(run);
+        if (validationError) {
+          return { success: false, count, error: `无效的运行数据 (runId: ${run.runId ?? 'undefined'}): ${validationError}` };
+        }
         if (run.runId) {
           await this.saveRun(run);
           count++;

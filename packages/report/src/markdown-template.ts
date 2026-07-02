@@ -28,6 +28,10 @@ function formatTraceRichness(value: AdapterPreflightResult["capability"]["traceR
   return value;
 }
 
+function escapeMdInline(value: string): string {
+  return value.replaceAll("`", "\\`");
+}
+
 export function renderMarkdown(run: BenchmarkRun, locale: Locale, leaderboard?: LeaderboardData): string {
   const copy = getReportCopy(locale);
   const summary = summarizeRun(run);
@@ -37,7 +41,7 @@ export function renderMarkdown(run: BenchmarkRun, locale: Locale, leaderboard?: 
     "",
     `- ${copy.runIdLabel}: \`${run.runId}\``,
     `- ${copy.generatedAtLabel}: \`${run.createdAt}\``,
-    `- ${copy.taskLabel}: \`${run.task.title}\``,
+    `- ${copy.taskLabel}: ${escapeMdInline(run.task.title)}`,
     `- ${locale === "zh-CN" ? "评分模式" : "Score Mode"}: \`${getRunScoreMode(run)}\``,
     `- ${locale === "zh-CN" ? "评分权重" : "Score Weights"}: \`${JSON.stringify((run as ScoredRun).scoreWeights ?? {})}\``,
     `- ${locale === "zh-CN" ? "评分范围" : "Score Scope"}: \`${run.scoreScope ?? "run-local"}\``,
@@ -62,10 +66,10 @@ export function renderMarkdown(run: BenchmarkRun, locale: Locale, leaderboard?: 
 
   if (run.taskCompatibility) {
     lines.push(
-      `- ${locale === "zh-CN" ? "任务兼容性" : "Task Compatibility"}: \`${run.taskCompatibility.status}\` - ${run.taskCompatibility.summary}`
+      `- ${locale === "zh-CN" ? "任务兼容性" : "Task Compatibility"}: ${escapeMdInline(run.taskCompatibility.status)} - ${escapeMdCell(run.taskCompatibility.summary)}`
     );
     for (const check of run.taskCompatibility.checks.filter((item) => item.status !== "pass").slice(0, 5)) {
-      lines.push(`  - ${check.label}: ${check.message}${check.fix ? ` Fix: ${check.fix}` : ""}`);
+      lines.push(`  - ${escapeMdCell(check.label)}: ${escapeMdCell(check.message)}${check.fix ? ` Fix: ${escapeMdCell(check.fix)}` : ""}`);
     }
     lines.push("");
   }
@@ -151,22 +155,22 @@ export function renderMarkdown(run: BenchmarkRun, locale: Locale, leaderboard?: 
   if (failedResults.length > 0) {
     lines.push("", `## ${copy.failuresTitle}`, "");
     for (const result of failedResults) {
-      lines.push(`- \`${result.agentId}\`: ${result.summary}`);
+      lines.push(`- \`${escapeMdInline(result.agentId)}\`: ${escapeMdCell(result.summary)}`);
       const diagnostic = diagnoseResultFailure(result, run.task);
       if (diagnostic) {
-        lines.push(`  - Cause: ${diagnostic.cause}`);
+        lines.push(`  - Cause: ${escapeMdCell(diagnostic.cause)}`);
         for (const item of diagnostic.evidence) {
-          lines.push(`  - Evidence: ${item}`);
+          lines.push(`  - Evidence: ${escapeMdCell(item)}`);
         }
         for (const fix of diagnostic.fixes) {
-          lines.push(`  - Fix: ${fix}`);
+          lines.push(`  - Fix: ${escapeMdCell(fix)}`);
         }
       }
       const failedJudges = result.judgeResults.filter((judge) => !judge.success);
       for (const judge of failedJudges) {
         lines.push(
-          `  - judge \`${judge.label}\` (${judge.type})${judge.target ? ` target=${judge.target}` : ""}${
-            judge.expectation ? ` expect=${judge.expectation}` : ""
+          `  - judge \`${escapeMdInline(judge.label)}\` (${escapeMdCell(judge.type)})${judge.target ? ` target=${escapeMdCell(judge.target)}` : ""}${
+            judge.expectation ? ` expect=${escapeMdCell(judge.expectation)}` : ""
           }`
         );
       }
@@ -175,9 +179,9 @@ export function renderMarkdown(run: BenchmarkRun, locale: Locale, leaderboard?: 
 
   for (const result of scoredResults) {
     const runtime = formatRuntimeIdentity(result);
-    lines.push("", `### ${escapeMdCell(result.displayLabel ?? result.agentId)} (\`${result.variantId}\`)`, "");
-    lines.push(`- Summary: ${result.summary}`);
-    lines.push(`- Preflight: ${result.preflight.status} - ${result.preflight.summary}`);
+    lines.push("", `### ${escapeMdCell(result.displayLabel ?? result.agentId)} (${escapeMdInline(result.variantId)})`, "");
+    lines.push(`- Summary: ${escapeMdCell(result.summary)}`);
+    lines.push(`- Preflight: ${escapeMdCell(result.preflight.status)} - ${escapeMdCell(result.preflight.summary)}`);
     lines.push(
       `- Provider Identity: provider=${runtime.provider} | kind=${runtime.providerKind} | provider source=${runtime.providerSource}`,
       `- Model Identity: requested=${result.requestedConfig.model ?? "default"} | requested reasoning=${result.requestedConfig.reasoningEffort ?? "default"} | effective model=${runtime.model} | effective reasoning=${runtime.reasoning} | version=${runtime.version} | version source=${runtime.versionSource} | source=${runtime.source} | verification=${runtime.verification}`
@@ -208,12 +212,12 @@ export function renderMarkdown(run: BenchmarkRun, locale: Locale, leaderboard?: 
     const diagnostic = diagnoseResultFailure(result, run.task);
     if (diagnostic) {
       lines.push("- Failure Diagnosis:");
-      lines.push(`  - Cause: ${diagnostic.cause}`);
+      lines.push(`  - Cause: ${escapeMdCell(diagnostic.cause)}`);
       for (const item of diagnostic.evidence) {
-        lines.push(`  - Evidence: ${item}`);
+        lines.push(`  - Evidence: ${escapeMdCell(item)}`);
       }
       for (const fix of diagnostic.fixes) {
-        lines.push(`  - Fix: ${fix}`);
+        lines.push(`  - Fix: ${escapeMdCell(fix)}`);
       }
     }
 
@@ -221,9 +225,9 @@ export function renderMarkdown(run: BenchmarkRun, locale: Locale, leaderboard?: 
       lines.push("- Judges:");
       for (const judge of result.judgeResults) {
         lines.push(
-          `  - ${judge.label}: ${judge.success ? "pass" : "fail"} (${formatDuration(judge.durationMs)})${
-            judge.target ? ` target=${judge.target}` : ""
-          }${judge.expectation ? ` expect=${judge.expectation}` : ""}`
+          `  - ${escapeMdCell(judge.label)}: ${judge.success ? "pass" : "fail"} (${formatDuration(judge.durationMs)})${
+            judge.target ? ` target=${escapeMdCell(judge.target)}` : ""
+          }${judge.expectation ? ` expect=${escapeMdCell(judge.expectation)}` : ""}`
         );
       }
     }
@@ -242,7 +246,7 @@ export function renderPrComment(run: BenchmarkRun, locale: Locale, leaderboard?:
   const header = [
     `## ${copy.prCommentTitle}`,
     "",
-    `${copy.taskLabel}: \`${run.task.title}\``,
+    `${copy.taskLabel}: ${escapeMdInline(run.task.title)}`,
     "",
     `${locale === "zh-CN" ? "评分模式" : "Score mode"}: \`${getRunScoreMode(run)}\``,
     `${locale === "zh-CN" ? "评分权重" : "Score weights"}: \`${JSON.stringify((run as ScoredRun).scoreWeights ?? {})}\``,
@@ -264,10 +268,10 @@ export function renderPrComment(run: BenchmarkRun, locale: Locale, leaderboard?:
   if (run.taskCompatibility) {
     header.push(
       "",
-      `${locale === "zh-CN" ? "任务兼容性" : "Task compatibility"}: \`${run.taskCompatibility.status}\` - ${run.taskCompatibility.summary}`
+      `${locale === "zh-CN" ? "任务兼容性" : "Task compatibility"}: ${escapeMdInline(run.taskCompatibility.status)} - ${escapeMdCell(run.taskCompatibility.summary)}`
     );
     for (const check of run.taskCompatibility.checks.filter((item) => item.status !== "pass").slice(0, 3)) {
-      header.push(`- ${check.label}: ${check.message}${check.fix ? ` Fix: ${check.fix}` : ""}`);
+      header.push(`- ${escapeMdCell(check.label)}: ${escapeMdCell(check.message)}${check.fix ? ` Fix: ${escapeMdCell(check.fix)}` : ""}`);
     }
   }
 
@@ -298,7 +302,7 @@ export function renderPrComment(run: BenchmarkRun, locale: Locale, leaderboard?:
             ? result.preflight.summary
             : "ready";
     table.push(
-      `| ${attention} | ${escapeMdCell(result.displayLabel ?? result.agentId)} | ${escapeMdCell(result.baseAgentId)} | ${escapeMdCell(runtime.provider)} | ${escapeMdCell(runtime.providerKind)} | ${escapeMdCell(runtime.model)} | ${escapeMdCell(runtime.reasoning)} | ${escapeMdCell(runtime.version)} | ${escapeMdCell(runtime.verification)}/${escapeMdCell(runtime.source)} | ${formatSupportTier(result.preflight.capability.supportTier)} | ${result.preflight.status} | ${result.status} | ${formatCompositeScoreValue(result)} | ${formatDuration(result.durationMs)} | ${result.tokenUsage} | ${
+      `| ${attention} | ${escapeMdCell(result.displayLabel ?? result.agentId)} | ${escapeMdCell(result.baseAgentId)} | ${escapeMdCell(runtime.provider)} | ${escapeMdCell(runtime.providerKind)} | ${escapeMdCell(runtime.model)} | ${escapeMdCell(runtime.reasoning)} | ${escapeMdCell(runtime.version)} | ${escapeMdCell(runtime.verification)}/${escapeMdCell(runtime.source)} | ${formatSupportTier(result.preflight.capability.supportTier)} | ${escapeMdCell(result.preflight.status)} | ${escapeMdCell(result.status)} | ${formatCompositeScoreValue(result)} | ${formatDuration(result.durationMs)} | ${result.tokenUsage} | ${
         result.costKnown ? `$${result.estimatedCostUsd.toFixed(2)}` : "n/a"
       } | ${passedJudgeCount}/${result.judgeResults.length} | ${escapeMdCell(formatTestMetric(result))} | ${escapeMdCell(formatLintMetric(result))} | ${escapeMdCell(formatDiffPrecisionMetric(result))} | ${result.changedFiles.length} | ${escapeMdCell(note)} |`
     );
@@ -310,24 +314,24 @@ export function renderPrComment(run: BenchmarkRun, locale: Locale, leaderboard?:
   } else {
     for (const preflight of attentionPreflights) {
       reviewFocus.push(
-        `- preflight \`${preflight.agentId}\` (${formatSupportTier(preflight.capability.supportTier)}): ${preflight.status} - ${preflight.summary}`
+        `- preflight \`${escapeMdInline(preflight.agentId)}\` (${formatSupportTier(preflight.capability.supportTier)}): ${escapeMdCell(preflight.status)} - ${escapeMdCell(preflight.summary)}`
       );
     }
 
     for (const result of failedResults) {
-      reviewFocus.push(`- result \`${result.agentId}\`: ${result.summary}`);
+      reviewFocus.push(`- result \`${escapeMdInline(result.agentId)}\`: ${escapeMdCell(result.summary)}`);
       const diagnostic = diagnoseResultFailure(result, run.task);
       if (diagnostic) {
-        reviewFocus.push(`  - cause: ${diagnostic.cause}`);
+        reviewFocus.push(`  - cause: ${escapeMdCell(diagnostic.cause)}`);
         for (const fix of diagnostic.fixes) {
-          reviewFocus.push(`  - fix: ${fix}`);
+          reviewFocus.push(`  - fix: ${escapeMdCell(fix)}`);
         }
       }
       const failedJudges = result.judgeResults.filter((judge) => !judge.success);
       for (const judge of failedJudges) {
         reviewFocus.push(
-          `  - judge \`${judge.label}\` (${judge.type})${judge.target ? ` target=${judge.target}` : ""}${
-            judge.expectation ? ` expect=${judge.expectation}` : ""
+          `  - judge \`${escapeMdInline(judge.label)}\` (${escapeMdCell(judge.type)})${judge.target ? ` target=${escapeMdCell(judge.target)}` : ""}${
+            judge.expectation ? ` expect=${escapeMdCell(judge.expectation)}` : ""
           }`
         );
       }

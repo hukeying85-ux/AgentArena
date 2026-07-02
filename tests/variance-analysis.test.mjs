@@ -55,3 +55,18 @@ test("formatVarianceReport produces valid markdown", () => {
   assert.ok(markdown.includes("Result Confidence Analysis"));
   assert.ok(markdown.includes("Agent"));
 });
+
+test("single run has zero standard deviation", () => {
+  const runs = [createRun({ results: [createResult("agent-a", { compositeScore: 80 })] })];
+  const report = computeVarianceAnalysis(runs);
+  assert.equal(report.agents[0].scoreStdDev, 0);
+});
+
+test("identical scores have zero coefficient of variation", () => {
+  const runs = [
+    createRun({ results: [createResult("agent-a", { compositeScore: 80 })] }),
+    createRun({ results: [createResult("agent-a", { compositeScore: 80 })] })
+  ];
+  const report = computeVarianceAnalysis(runs);
+  assert.equal(report.agents[0].scoreCV, 0);
+});

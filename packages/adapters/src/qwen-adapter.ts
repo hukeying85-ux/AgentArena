@@ -14,7 +14,7 @@ import type { InvocationSpec } from "./adapter-capabilities.js";
 import { formatAdapterError } from "./adapter-diagnostics.js";
 import { buildAgentPrompt, createPreflightResult, getChangedFilesFromGit, savePromptArtifact } from "./adapter-helpers.js";
 import { probeHelp, probeInvocationVersion } from "./invocation-probes.js";
-import { agentTimeoutMs, runProcess } from "./process-utils.js";
+import { agentTimeoutMs, pathExists, runProcess } from "./process-utils.js";
 
 /**
  * Qwen Code CLI 能力定义
@@ -42,6 +42,11 @@ async function resolveQwenInvocation(): Promise<InvocationSpec> {
   // 支持环境变量覆盖
   if (process.env.AGENTARENA_QWEN_BIN?.trim()) {
     const command = process.env.AGENTARENA_QWEN_BIN.trim();
+    if (!(await pathExists(command))) {
+      throw new Error(
+        `AGENTARENA_QWEN_BIN points to non-existent file: ${command}`
+      );
+    }
     return { command, argsPrefix: [], displayCommand: command };
   }
 

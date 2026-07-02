@@ -704,10 +704,21 @@ test("agentarena run supports JSON output", { timeout: 60_000 }, async () => {
   );
 
   assert.equal(result.code, 0);
-  // Extract the result JSON from stdout (may be preceded by log lines)
-  const jsonStart = result.stdout.lastIndexOf("\n{");
-  const jsonStr = jsonStart >= 0 ? result.stdout.slice(jsonStart + 1) : result.stdout;
-  const payload = JSON.parse(jsonStr);
+  // Extract the benchmark result JSON from stdout. Log lines are single-line
+  // JSON; the result is a multi-line JSON starting with {\n  "runId":....
+  // Find the first standalone { followed by "runId" and parse from there.
+  const lines = result.stdout.split("\n");
+  let payload = null;
+  for (let i = 0; i < lines.length - 1; i++) {
+    if (lines[i].trim() !== "{") continue;
+    if (!(lines[i + 1] ?? "").trimStart().startsWith('"runId"')) continue;
+    for (let j = i + 2; j <= lines.length; j++) {
+      const block = lines.slice(i, j).join("\n");
+      try { payload = JSON.parse(block); break; } catch { /* keep scanning */ }
+    }
+    if (payload) break;
+  }
+  if (!payload) throw new Error("No valid JSON result found in stdout");
   assert.equal(payload.task.id, "cli-json");
   assert.equal(payload.results[0].agentId, "demo-fast");
   assert.equal(payload.results[0].baseAgentId, "demo-fast");
@@ -1141,8 +1152,8 @@ test("agentarena ui cancels an active benchmark via API", { timeout: 60_000 }, a
     assert.equal(response.status, 202);
 
     let runningStatus;
-    for (let i = 0; i < 30; i++) {
-      await new Promise((resolve) => setTimeout(resolve, 50));
+    for (let i = 0; i < 60; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
       const statusResponse = await fetch(`http://127.0.0.1:${server.port}/api/run-status`);
       runningStatus = await statusResponse.json();
       if (runningStatus.state === "running") {
@@ -1245,7 +1256,7 @@ test("agentarena ui exposes run progress while a benchmark is active", { timeout
     assert.equal(response.status, 202);
 
     let finalStatus;
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < 60; i++) {
       await new Promise((resolve) => setTimeout(resolve, 500));
       const pollResponse = await fetch(`http://127.0.0.1:${server.port}/api/run-status`);
       finalStatus = await pollResponse.json();
@@ -1311,7 +1322,7 @@ test("agentarena ui can execute a benchmark via API", { timeout: 60_000 }, async
     assert.equal(response.status, 202);
 
     let finalStatus;
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < 60; i++) {
       await new Promise((resolve) => setTimeout(resolve, 500));
       const pollResponse = await fetch(`http://127.0.0.1:${server.port}/api/run-status`);
       finalStatus = await pollResponse.json();

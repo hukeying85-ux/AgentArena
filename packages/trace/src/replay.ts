@@ -115,8 +115,8 @@ function groupEventsIntoSteps(
 
   for (let i = 1; i < sortedEvents.length; i++) {
     const event = sortedEvents[i];
-    const prevTime = new Date(sortedEvents[i - 1].timestamp).getTime();
-    const currTime = new Date(event.timestamp).getTime();
+    const prevTime = Date.parse(sortedEvents[i - 1].timestamp);
+    const currTime = Date.parse(event.timestamp);
     const category = categorizeEvent(event);
 
     // Start a new step if time gap exceeds window or category changed

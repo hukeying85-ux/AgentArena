@@ -134,6 +134,46 @@ function isPrivateIpv6(ip: string): boolean {
   return false;
 }
 
+function normalizeIpv6(ip: string): string {
+  if (ip.includes("::")) {
+    const [left, right] = ip.split("::", 2);
+    const leftGroups = left ? left.split(":").map(g => g.replace(/^0+/, "") || "0") : [];
+    const rightGroups = right ? right.split(":").map(g => g.replace(/^0+/, "") || "0") : [];
+    const missing = 8 - leftGroups.length - rightGroups.length;
+    const middle = Array(Math.max(0, missing)).fill("0");
+    if (leftGroups.length === 0) {
+      return "::" + rightGroups.join(":");
+    }
+    if (rightGroups.length === 0) {
+      return leftGroups.join(":") + "::";
+    }
+    return leftGroups.join(":") + "::" + rightGroups.join(":");
+  }
+  const groups = ip.split(":").map(g => g.replace(/^0+/, "") || "0");
+  let bestStart = -1;
+  let bestLen = 0;
+  let curStart = -1;
+  let curLen = 0;
+  for (let i = 0; i < groups.length; i++) {
+    if (groups[i] === "0") {
+      if (curStart === -1) { curStart = i; curLen = 1; }
+      else { curLen++; }
+    } else {
+      if (curLen > bestLen) { bestStart = curStart; bestLen = curLen; }
+      curStart = -1;
+      curLen = 0;
+    }
+  }
+  if (curLen > bestLen) { bestStart = curStart; bestLen = curLen; }
+  if (bestLen >= 2) {
+    const head = groups.slice(0, bestStart);
+    const tail = groups.slice(bestStart + bestLen);
+    if (head.length === 0 && tail.length === 0) return "::";
+    return [...head, "", ...tail].join(":");
+  }
+  return groups.join(":");
+}
+
 export function isInternalUrl(urlString: string): boolean {
   try {
     const parsed = new URL(urlString);
@@ -145,7 +185,7 @@ export function isInternalUrl(urlString: string): boolean {
     if (isPrivateIpv6(hostname)) return true;
     // Handle all IPv4-mapped IPv6 representations:
     // ::ffff:1.2.3.4, 0:0:0:0:0:ffff:1.2.3.4, ::ffff:xxxx:xxxx (hex pairs)
-    const normalized = hostname.replace(/^0:0:0:0:0:0:/, "::").replace(/^0+:0+:0+:0+:0+:0+:/, "::");
+    const normalized = normalizeIpv6(hostname);
     const ipv4Mapped = /^::(?:ffff:)?(\d+\.\d+\.\d+\.\d+)$/i;
     const match = normalized.match(ipv4Mapped);
     if (match) {

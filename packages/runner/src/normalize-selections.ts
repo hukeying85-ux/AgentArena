@@ -4,7 +4,7 @@
  * Extracted from agent-lifecycle.ts for independent testability.
  */
 
-import { getAdapter } from "@agentarena/adapters";
+import { getAdapter, listAvailableAdapters } from "@agentarena/adapters";
 import { type AgentSelection, createAgentSelection } from "@agentarena/core";
 
 /**
@@ -17,12 +17,18 @@ export function normalizeSelections(options: { agents?: AgentSelection[]; agentI
   const rawSelections =
     options.agents && options.agents.length > 0
       ? options.agents
-      : options.agentIds.map((agentId) =>
-          createAgentSelection({
+      : options.agentIds.map((agentId) => {
+          const adapter = getAdapter(agentId);
+          if (!adapter) {
+            throw new Error(
+              `Unknown agent "${agentId}". Available agents: ${listAvailableAdapters().map(a => a.id).join(", ")}`
+            );
+          }
+          return createAgentSelection({
             baseAgentId: agentId,
-            displayLabel: getAdapter(agentId).title
-          })
-        );
+            displayLabel: adapter.title
+          });
+        });
 
   const seenVariantIds = new Map<string, number>();
   return rawSelections.map((selection) => {

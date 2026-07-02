@@ -131,8 +131,8 @@ export function createCrossRunRenders({
 
     const body = rows
       .map((row) => {
-        const avgDuration = Math.round(row.stats.totalDurationMs / row.stats.totalRuns);
-        const avgTokens = Math.round(row.stats.totalTokens / row.stats.totalRuns);
+        const avgDuration = row.stats.totalDurationMs / row.stats.totalRuns;
+        const avgTokens = row.stats.totalTokens / row.stats.totalRuns;
         const avgCost =
           row.stats.costKnownCount > 0 ? (row.stats.totalCost / row.stats.costKnownCount).toFixed(4) : null;
         const successRate = ((row.stats.successCount / row.stats.totalRuns) * 100).toFixed(1);

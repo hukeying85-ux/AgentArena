@@ -424,9 +424,18 @@ export async function runPublish(parsed: ParsedArgs): Promise<void> {
       "The result file should be a summary.json from a benchmark run."
     );
   }
+
+  const absolutePath = path.resolve(resolvedPath);
+  const runsDir = path.resolve(".agentarena", "runs");
+  if (!absolutePath.startsWith(runsDir + path.sep) && absolutePath !== runsDir) {
+    throw new Error(
+      `Result file must be within .agentarena/runs/ directory. Got: ${resolvedPath}`
+    );
+  }
+
   let rawData: string;
   try {
-    rawData = await fs.readFile(resolvedPath, "utf8");
+    rawData = await fs.readFile(absolutePath, "utf8");
   } catch {
     throw new Error(`Cannot read result file: ${resolvedPath}`);
   }

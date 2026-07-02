@@ -51,8 +51,10 @@ export function restoreCachedRuns() {
 
 /**
  * Persist current runs to localStorage and IndexedDB.
+ * @param {Object} state
+ * @param {function(Error): void} [onError] - Called when IndexedDB persistence fails.
  */
-export function persistCachedRuns(state) {
+export function persistCachedRuns(state, onError) {
   if (state.runs.length === 0) {
     removeStorage(RUN_CACHE_STORAGE_KEY);
     return;
@@ -77,15 +79,16 @@ export function persistCachedRuns(state) {
     }
     writeStorage(RUN_CACHE_STORAGE_KEY, serialized);
 
-    // Async save to IndexedDB (non-blocking)
-    persistRunsToIndexedDB(state);
+    persistRunsToIndexedDB(state, onError);
   }, 300);
 }
 
 /**
  * Persist runs to IndexedDB asynchronously.
+ * @param {Object} state
+ * @param {function(Error): void} [onError] - Called when the save fails.
  */
-async function persistRunsToIndexedDB(state) {
+async function persistRunsToIndexedDB(state, onError) {
   if (!resultStore.isAvailable() || state.runs.length === 0) return;
   clearTimeout(idbPersistTimer);
   idbPersistTimer = setTimeout(async () => {
@@ -98,6 +101,7 @@ async function persistRunsToIndexedDB(state) {
       }
     } catch (err) {
       console.warn('IndexedDB save failed:', err);
+      onError?.(err);
     }
   }, 500);
 }

@@ -33,11 +33,10 @@ export async function runInitTaskpack(parsed: {
   const templateName = parsed.templateName ?? "repo-health";
   const template = TASKPACK_TEMPLATES[templateName];
   if (!template) {
-    console.error(`❌ Unknown template: "${templateName}"`);
-    console.error(`   未知的任务包模板："${templateName}"`);
-    console.error(`   Available templates: ${Object.keys(TASKPACK_TEMPLATES).join(", ")}`);
-    console.error(`   Usage: agentarena init-taskpack --template repo-health`);
-    process.exit(1);
+    throw new Error(
+      `Unknown template: "${templateName}". ` +
+      `Available: ${Object.keys(TASKPACK_TEMPLATES).join(", ")}`
+    );
   }
 
   const outputPath = path.resolve(parsed.outputPath ?? "agentarena.taskpack.yaml");
@@ -46,10 +45,7 @@ export async function runInitTaskpack(parsed: {
   try {
     await fs.access(outputPath);
     if (!parsed.force) {
-      console.error(`❌ File already exists: ${outputPath}`);
-      console.error(`   文件已存在：${outputPath}`);
-      console.error(`   Use a different name or add --force to overwrite.`);
-      process.exit(1);
+      throw new Error(`File already exists: ${outputPath}. Use --force to overwrite.`);
     }
   } catch (error) {
     if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
@@ -95,11 +91,9 @@ export async function runInitCi(parsed: {
     | "smoke"
     | "nightly";
   if (!["pull-request", "smoke", "nightly"].includes(ciTemplate)) {
-    console.error(`❌ Unknown CI template: "${ciTemplate}"`);
-    console.error(`   未知的 CI 模板："${ciTemplate}"`);
-    console.error(`   Available templates: pull-request, smoke, nightly`);
-    console.error(`   Usage: agentarena init-ci --ci-template=pull-request`);
-    process.exit(1);
+    throw new Error(
+      `Unknown CI template: "${ciTemplate}". Available: pull-request, smoke, nightly`
+    );
   }
   const ciOutputDir = parsed.ciOutputDir ?? ".agentarena/ci-benchmark";
   const parentPath = path.dirname(workflowPath);
@@ -107,10 +101,7 @@ export async function runInitCi(parsed: {
   try {
     await fs.access(workflowPath);
     if (!parsed.force) {
-      console.error(`❌ File already exists: ${workflowPath}`);
-      console.error(`   文件已存在：${workflowPath}`);
-      console.error(`   Use a different path or add --force to overwrite.`);
-      process.exit(1);
+      throw new Error(`File already exists: ${workflowPath}. Use --force to overwrite.`);
     }
   } catch (error) {
     if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
@@ -158,6 +149,19 @@ export async function runInit(parsed: {
   const repoPath = parsed.repoPath
     ? path.resolve(parsed.repoPath)
     : process.cwd();
+
+  try {
+    const stat = await fs.stat(repoPath);
+    if (!stat.isDirectory()) {
+      throw new Error(`repoPath is not a directory: ${repoPath}`);
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
+      throw new Error(`repoPath does not exist: ${repoPath}`);
+    }
+    throw error;
+  }
+
   const taskPackPath = parsed.outputPath
     ? path.resolve(parsed.outputPath)
     : path.join(repoPath, "agentarena.taskpack.yaml");
@@ -195,6 +199,7 @@ export async function runInit(parsed: {
 
   const { stringify: stringifyYaml } = await import("yaml");
   const yamlContent = stringifyYaml(demoTaskPack);
+  await fs.mkdir(path.dirname(taskPackPath), { recursive: true });
   await fs.writeFile(taskPackPath, yamlContent, "utf8");
   console.log(`\n✓ Generated demo task pack: ${taskPackPath}`);
 

@@ -184,10 +184,10 @@ export async function probeAuthConfig(
   hint?: string;
 }> {
   const env = environment ?? process.env;
-  const command = invocation.command.toLowerCase();
+  const basename = path.basename(invocation.command).toLowerCase().replace(/\.(exe|cmd|bat)$/i, "");
 
   // Claude Code: check ANTHROPIC_API_KEY or config file
-  if (command.includes("claude")) {
+  if (basename === "claude" || basename.startsWith("claude-")) {
     const hasKey = !!(env.ANTHROPIC_API_KEY || env.CLAUDE_API_KEY);
     if (hasKey) return { configured: true };
     // Check if there's a stored credential/config file. Claude Code has used
@@ -213,7 +213,7 @@ export async function probeAuthConfig(
   }
 
   // Codex: check OPENAI_API_KEY
-  if (command.includes("codex")) {
+  if (basename === "codex" || basename.startsWith("codex-")) {
     return {
       configured: !!env.OPENAI_API_KEY,
       hint: env.OPENAI_API_KEY ? undefined : "No OPENAI_API_KEY set"
@@ -221,7 +221,7 @@ export async function probeAuthConfig(
   }
 
   // Gemini: check GEMINI_API_KEY or GOOGLE_API_KEY
-  if (command.includes("gemini")) {
+  if (basename === "gemini" || basename.startsWith("gemini-")) {
     const hasKey = !!(env.GEMINI_API_KEY || env.GOOGLE_API_KEY);
     return {
       configured: hasKey,
@@ -230,7 +230,7 @@ export async function probeAuthConfig(
   }
 
   // Aider: check OPENAI_API_KEY or ANTHROPIC_API_KEY
-  if (command.includes("aider")) {
+  if (basename === "aider" || basename.startsWith("aider-")) {
     const hasKey = !!(env.OPENAI_API_KEY || env.ANTHROPIC_API_KEY);
     return {
       configured: hasKey,

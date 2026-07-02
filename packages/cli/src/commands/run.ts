@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { listAvailableAdapters } from "@agentarena/adapters";
-import { type BenchmarkRun, createCancellation, formatDuration, setJsonOutputMode } from "@agentarena/core";
+import { type BenchmarkRun, createCancellation, formatDuration, logger, setJsonOutputMode } from "@agentarena/core";
 import {
   aggregateMultiRuns,
   computeVarianceAnalysis,
@@ -66,18 +66,19 @@ async function loadHistoricalRuns(
   let totalBytesRead = 0;
   for (const candidate of candidates) {
     try {
-      const content = await fs.readFile(candidate.filePath, "utf8");
-      totalBytesRead += content.length;
+      const stat = await fs.stat(candidate.filePath);
+      totalBytesRead += stat.size;
       if (totalBytesRead > MAX_VARIANCE_BYTES) {
         console.warn(`[agentarena] Variance analysis stopped: exceeded ${Math.round(MAX_VARIANCE_BYTES / (1024 * 1024))}MB memory limit`);
         break;
       }
+      const content = await fs.readFile(candidate.filePath, "utf8");
       const run = JSON.parse(content) as BenchmarkRun;
       if (run.runId && run.runId !== currentRunId) {
         runs.push(run);
       }
-    } catch {
-      // Ignore corrupt or partial historical run files.
+    } catch (error) {
+      logger.debug("server", "load_historical_runs", `Skipping corrupt run file: ${candidate.filePath} (${error instanceof Error ? error.message : String(error)})`);
     }
   }
 
@@ -302,253 +303,253 @@ export async function runBenchmarkCommand(
     const runNumber = repeatIndex + 1;
     const runStartMs = Date.now();
 
-  if (parsed.format !== "json") {
-    console.log(`\nStarting AgentArena benchmark...`);
-    if (repeatCount > 1) {
-      console.log(`Repeat: ${runNumber}/${repeatCount}`);
-    }
-    console.log(`Repository: ${parsed.repoPath}`);
-    console.log(`Task: ${parsed.taskPath}`);
-    console.log(`Agents: ${parsed.agentIds.join(", ")}`);
-    if (resumeFromPath) {
-      console.log(`Resume from: ${resumeFromPath}`);
-    }
-    if (parsed.probeAuth) {
-      console.log(`Authentication probe: enabled`);
-      if (parsed.probeTimeout !== undefined) {
-        console.log(`Authentication probe timeout: ${parsed.probeTimeout}ms`);
+    if (parsed.format !== "json") {
+      console.log(`\nStarting AgentArena benchmark...`);
+      if (repeatCount > 1) {
+        console.log(`Repeat: ${runNumber}/${repeatCount}`);
       }
-    }
-    console.log("");
-  }
-
-  if (parsed.dryRun) {
-    const resolvedOutput = outputRootPath ?? "(default: <repo>/.agentarena/runs)";
-
-    // Run compatibility check for dry-run
-    let compatibilityResult: { status: string; summary: string; checks: Array<{ label: string; status: string; message: string; fix?: string }> } | null = null;
-    try {
-      const taskPack = await loadTaskPack(parsed.taskPath);
-      compatibilityResult = await checkTaskCompatibility(taskPack, parsed.repoPath);
-    } catch {
-      // Best-effort: don't fail dry-run if compatibility check fails
-    }
-
-    if (parsed.format === "json") {
-      console.log(
-        JSON.stringify(
-          {
-            dryRun: true,
-            repoPath: parsed.repoPath,
-            taskPath: parsed.taskPath,
-            outputPath: resolvedOutput,
-            resumeFrom: resumeFromPath ?? null,
-            scoreMode: parsed.scoreMode ?? "practical",
-            tokenBudget: parsed.tokenBudget ?? null,
-            repeat: repeatCount,
-            maxConcurrency: parsed.maxConcurrency ?? null,
-            probeAuth: parsed.probeAuth,
-            agents: selections.map((selection) => ({
-              baseAgentId: selection.baseAgentId,
-              variantId: selection.variantId,
-              displayLabel: selection.displayLabel,
-              model: selection.config?.model ?? null,
-            })),
-            compatibility: compatibilityResult,
-          },
-          null,
-          2,
-        ),
-      );
-    } else {
-      console.log("Dry run — resolved plan (no agents executed):");
-      console.log(`  Output:       ${resolvedOutput}`);
+      console.log(`Repository: ${parsed.repoPath}`);
+      console.log(`Task: ${parsed.taskPath}`);
+      console.log(`Agents: ${parsed.agentIds.join(", ")}`);
       if (resumeFromPath) {
-        console.log(`  Resume from:  ${resumeFromPath}`);
+        console.log(`Resume from: ${resumeFromPath}`);
       }
-      console.log(`  Score mode:   ${parsed.scoreMode ?? "practical"}`);
-      console.log(`  Token budget: ${parsed.tokenBudget ?? "(task default)"}`);
-      console.log(`  Repeat:       ${repeatCount}`);
-      console.log(`  Concurrency:  ${parsed.maxConcurrency ?? "(default)"}`);
-      console.log(`  Probe auth:   ${parsed.probeAuth ? "yes" : "no"}`);
-      console.log("  Agents:");
-      for (const selection of selections) {
-        const model = selection.config?.model
-          ? ` (model: ${selection.config.model})`
-          : "";
-        console.log(`    - ${selection.displayLabel}${model}`);
+      if (parsed.probeAuth) {
+        console.log(`Authentication probe: enabled`);
+        if (parsed.probeTimeout !== undefined) {
+          console.log(`Authentication probe timeout: ${parsed.probeTimeout}ms`);
+        }
+      }
+      console.log("");
+    }
+
+    if (parsed.dryRun) {
+      const resolvedOutput = outputRootPath ?? "(default: <repo>/.agentarena/runs)";
+
+      // Run compatibility check for dry-run
+      let compatibilityResult: { status: string; summary: string; checks: Array<{ label: string; status: string; message: string; fix?: string }> } | null = null;
+      try {
+        const taskPack = await loadTaskPack(parsed.taskPath);
+        compatibilityResult = await checkTaskCompatibility(taskPack, parsed.repoPath);
+      } catch {
+        // Best-effort: don't fail dry-run if compatibility check fails
       }
 
-      // Show compatibility status
-      if (compatibilityResult) {
-        const statusIcon = { compatible: "✅", warning: "⚠️", incompatible: "❌" }[compatibilityResult.status] ?? "🔍";
-        console.log(`\n${statusIcon} Task compatibility: ${compatibilityResult.status}`);
-        console.log(`   ${compatibilityResult.summary}`);
-        const failedChecks = compatibilityResult.checks.filter((c) => c.status !== "pass");
-        if (failedChecks.length > 0) {
-          console.log("   Issues:");
-          for (const check of failedChecks.slice(0, 5)) {
-            const icon = check.status === "fail" ? "  ✗" : "  ⚠";
-            console.log(`${icon} ${check.label}: ${check.message}`);
-            if (check.fix) {
-              console.log(`     Fix: ${check.fix}`);
+      if (parsed.format === "json") {
+        console.log(
+          JSON.stringify(
+            {
+              dryRun: true,
+              repoPath: parsed.repoPath,
+              taskPath: parsed.taskPath,
+              outputPath: resolvedOutput,
+              resumeFrom: resumeFromPath ?? null,
+              scoreMode: parsed.scoreMode ?? "practical",
+              tokenBudget: parsed.tokenBudget ?? null,
+              repeat: repeatCount,
+              maxConcurrency: parsed.maxConcurrency ?? null,
+              probeAuth: parsed.probeAuth,
+              agents: selections.map((selection) => ({
+                baseAgentId: selection.baseAgentId,
+                variantId: selection.variantId,
+                displayLabel: selection.displayLabel,
+                model: selection.config?.model ?? null,
+              })),
+              compatibility: compatibilityResult,
+            },
+            null,
+            2,
+          ),
+        );
+      } else {
+        console.log("Dry run — resolved plan (no agents executed):");
+        console.log(`  Output:       ${resolvedOutput}`);
+        if (resumeFromPath) {
+          console.log(`  Resume from:  ${resumeFromPath}`);
+        }
+        console.log(`  Score mode:   ${parsed.scoreMode ?? "practical"}`);
+        console.log(`  Token budget: ${parsed.tokenBudget ?? "(task default)"}`);
+        console.log(`  Repeat:       ${repeatCount}`);
+        console.log(`  Concurrency:  ${parsed.maxConcurrency ?? "(default)"}`);
+        console.log(`  Probe auth:   ${parsed.probeAuth ? "yes" : "no"}`);
+        console.log("  Agents:");
+        for (const selection of selections) {
+          const model = selection.config?.model
+            ? ` (model: ${selection.config.model})`
+            : "";
+          console.log(`    - ${selection.displayLabel}${model}`);
+        }
+
+        // Show compatibility status
+        if (compatibilityResult) {
+          const statusIcon = { compatible: "✅", warning: "⚠️", incompatible: "❌" }[compatibilityResult.status] ?? "🔍";
+          console.log(`\n${statusIcon} Task compatibility: ${compatibilityResult.status}`);
+          console.log(`   ${compatibilityResult.summary}`);
+          const failedChecks = compatibilityResult.checks.filter((c) => c.status !== "pass");
+          if (failedChecks.length > 0) {
+            console.log("   Issues:");
+            for (const check of failedChecks.slice(0, 5)) {
+              const icon = check.status === "fail" ? "  ✗" : "  ⚠";
+              console.log(`${icon} ${check.label}: ${check.message}`);
+              if (check.fix) {
+                console.log(`     Fix: ${check.fix}`);
+              }
+            }
+            if (failedChecks.length > 5) {
+              console.log(`   ... and ${failedChecks.length - 5} more issues`);
             }
           }
-          if (failedChecks.length > 5) {
-            console.log(`   ... and ${failedChecks.length - 5} more issues`);
+        }
+
+        console.log("\nRe-run without --dry-run to execute.");
+      }
+      return;
+    }
+
+    function elapsed(): string {
+      const sec = Math.floor((Date.now() - runStartMs) / 1000);
+      const m = Math.floor(sec / 60);
+      const s = sec % 60;
+      return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+    }
+
+    let cancelled = false;
+    const cancellationController = new AbortController();
+    const cancellation = createCancellation(cancellationController.signal);
+    const sigintHandler = () => {
+      if (cancelled) {
+        process.exit(1);
+      }
+      cancelled = true;
+      cancellationController.abort();
+      console.error(
+        "\nCancelling benchmark... (press Ctrl+C again to force quit)",
+      );
+    };
+    process.on("SIGINT", sigintHandler);
+
+    let benchmark: BenchmarkRun;
+    try {
+      const previousProbeTimeout = process.env.AGENTARENA_PREFLIGHT_TIMEOUT_MS;
+      if (parsed.probeAuth && parsed.probeTimeout !== undefined) {
+        process.env.AGENTARENA_PREFLIGHT_TIMEOUT_MS = String(parsed.probeTimeout);
+      }
+      try {
+        benchmark = await runBenchmark({
+          repoPath: parsed.repoPath,
+          taskPath: parsed.taskPath,
+          agentIds: selections.map((selection) => selection.baseAgentId),
+          agents: selections,
+          runId: resumeRunId,
+          outputPath: outputRootPath,
+          resumeFrom: resumeFromPath,
+          probeAuth: parsed.probeAuth,
+          updateSnapshots: parsed.updateSnapshots,
+          cleanupWorkspaces: parsed.cleanupWorkspaces,
+          maxConcurrency: parsed.maxConcurrency,
+          scoreMode: parsed.scoreMode,
+          tokenBudget: parsed.tokenBudget,
+          debug: parsed.debug,
+          cancellation,
+          onProgress:
+            parsed.format === "json"
+              ? undefined
+              : (event: BenchmarkProgressEvent) => {
+                  const prefix = event.displayLabel
+                    ? `[${event.displayLabel}] `
+                    : "";
+                  process.stderr.write(`  [${elapsed()}] ${prefix}${event.message}\n`);
+                },
+        });
+      } finally {
+        if (parsed.probeAuth && parsed.probeTimeout !== undefined) {
+          if (previousProbeTimeout === undefined) {
+            delete process.env.AGENTARENA_PREFLIGHT_TIMEOUT_MS;
+          } else {
+            process.env.AGENTARENA_PREFLIGHT_TIMEOUT_MS = previousProbeTimeout;
           }
         }
       }
-
-      console.log("\nRe-run without --dry-run to execute.");
-    }
-    return;
-  }
-
-  function elapsed(): string {
-    const sec = Math.floor((Date.now() - runStartMs) / 1000);
-    const m = Math.floor(sec / 60);
-    const s = sec % 60;
-    return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  }
-
-  let cancelled = false;
-  const cancellationController = new AbortController();
-  const cancellation = createCancellation(cancellationController.signal);
-  const sigintHandler = () => {
-    if (cancelled) {
-      process.exit(1);
-    }
-    cancelled = true;
-    cancellationController.abort();
-    console.error(
-      "\nCancelling benchmark... (press Ctrl+C again to force quit)",
-    );
-  };
-  process.on("SIGINT", sigintHandler);
-
-  let benchmark: BenchmarkRun;
-  try {
-    const previousProbeTimeout = process.env.AGENTARENA_PREFLIGHT_TIMEOUT_MS;
-    if (parsed.probeAuth && parsed.probeTimeout !== undefined) {
-      process.env.AGENTARENA_PREFLIGHT_TIMEOUT_MS = String(parsed.probeTimeout);
-    }
-    try {
-      benchmark = await runBenchmark({
-        repoPath: parsed.repoPath,
-        taskPath: parsed.taskPath,
-        agentIds: selections.map((selection) => selection.baseAgentId),
-        agents: selections,
-        runId: resumeRunId,
-        outputPath: outputRootPath,
-        resumeFrom: resumeFromPath,
-        probeAuth: parsed.probeAuth,
-        updateSnapshots: parsed.updateSnapshots,
-        cleanupWorkspaces: parsed.cleanupWorkspaces,
-        maxConcurrency: parsed.maxConcurrency,
-        scoreMode: parsed.scoreMode,
-        tokenBudget: parsed.tokenBudget,
-        debug: parsed.debug,
-        cancellation,
-        onProgress:
-          parsed.format === "json"
-            ? undefined
-            : (event: BenchmarkProgressEvent) => {
-                const prefix = event.displayLabel
-                  ? `[${event.displayLabel}] `
-                  : "";
-                process.stderr.write(`  [${elapsed()}] ${prefix}${event.message}\n`);
-              },
-      });
     } finally {
-      if (parsed.probeAuth && parsed.probeTimeout !== undefined) {
-        if (previousProbeTimeout === undefined) {
-          delete process.env.AGENTARENA_PREFLIGHT_TIMEOUT_MS;
-        } else {
-          process.env.AGENTARENA_PREFLIGHT_TIMEOUT_MS = previousProbeTimeout;
+      process.removeListener("SIGINT", sigintHandler);
+    }
+
+    const report = await writeReport(benchmark, { locale: reportLocale });
+    const scoredBenchmark = enrichRunWithScores(benchmark);
+
+    // Generate CSV export
+    const { generateCsv } = await import("@agentarena/report");
+    const csvPath = path.join(benchmark.outputPath, "results.csv");
+    await fs.writeFile(csvPath, generateCsv(benchmark), "utf8");
+
+    // Generate decision report. Cost/ROI projections assume a team size and daily
+    // run count; both default to a small-team scenario and are overridable via
+    // --team-size / --daily-runs.
+    const DEFAULT_TEAM_SIZE = 10;
+    const DEFAULT_DAILY_RUNS = 5;
+    const teamSize = parsed.teamSize ?? DEFAULT_TEAM_SIZE;
+    const dailyRuns = parsed.dailyRuns ?? DEFAULT_DAILY_RUNS;
+    const decisionReport = generateDecisionReport(benchmark, {
+      teamSize,
+      dailyRuns,
+    });
+    const decisionReportPath = path.join(
+      benchmark.outputPath,
+      "decision-report.md",
+    );
+    await fs.writeFile(
+      decisionReportPath,
+      formatDecisionReport(decisionReport, reportLocale),
+      "utf8",
+    );
+
+    // Variance analysis: check for previous runs with the same task
+    const runsDir = path.dirname(benchmark.outputPath);
+    let varianceReportText: string | null = null;
+    let trendReportPath: string | null = null;
+    try {
+      const previousRuns = await loadHistoricalRuns(runsDir, benchmark.runId);
+
+      const comparableRuns = previousRuns.filter(
+        (r): r is BenchmarkRun =>
+          r.task?.id === benchmark.task?.id,
+      );
+      if (comparableRuns.length > 1) {
+        const comparisonRuns = [...comparableRuns, benchmark];
+        const varianceReport = computeVarianceAnalysis(comparisonRuns);
+        varianceReportText = formatVarianceReport(varianceReport);
+
+        // Multi-run trend: aggregate the prior comparable runs together with the
+        // current run (already in memory — no extra scan) and write a trend.md
+        // artifact summarizing per-agent performance across runs.
+        try {
+          const trendComparison = aggregateMultiRuns(comparisonRuns);
+          const trendReport = formatMultiRunReport(trendComparison);
+          trendReportPath = path.join(benchmark.outputPath, "trend.md");
+          await fs.writeFile(trendReportPath, trendReport, "utf8");
+        } catch (trendError) {
+          trendReportPath = null;
+          console.warn(`[agentarena] Trend report skipped: ${trendError instanceof Error ? trendError.message : String(trendError)}`);
         }
       }
+    } catch (varianceError) {
+      console.warn(`[agentarena] Variance analysis skipped: ${varianceError instanceof Error ? varianceError.message : String(varianceError)}`);
     }
-  } finally {
-    process.removeListener("SIGINT", sigintHandler);
-  }
 
-  const report = await writeReport(benchmark, { locale: reportLocale });
-  const scoredBenchmark = enrichRunWithScores(benchmark);
-
-  // Generate CSV export
-  const { generateCsv } = await import("@agentarena/report");
-  const csvPath = path.join(benchmark.outputPath, "results.csv");
-  await fs.writeFile(csvPath, generateCsv(benchmark), "utf8");
-
-  // Generate decision report. Cost/ROI projections assume a team size and daily
-  // run count; both default to a small-team scenario and are overridable via
-  // --team-size / --daily-runs.
-  const DEFAULT_TEAM_SIZE = 10;
-  const DEFAULT_DAILY_RUNS = 5;
-  const teamSize = parsed.teamSize ?? DEFAULT_TEAM_SIZE;
-  const dailyRuns = parsed.dailyRuns ?? DEFAULT_DAILY_RUNS;
-  const decisionReport = generateDecisionReport(benchmark, {
-    teamSize,
-    dailyRuns,
-  });
-  const decisionReportPath = path.join(
-    benchmark.outputPath,
-    "decision-report.md",
-  );
-  await fs.writeFile(
-    decisionReportPath,
-    formatDecisionReport(decisionReport, reportLocale),
-    "utf8",
-  );
-
-  // Variance analysis: check for previous runs with the same task
-  const runsDir = path.dirname(benchmark.outputPath);
-  let varianceReportText: string | null = null;
-  let trendReportPath: string | null = null;
-  try {
-    const previousRuns = await loadHistoricalRuns(runsDir, benchmark.runId);
-
-    const comparableRuns = previousRuns.filter(
-      (r): r is BenchmarkRun =>
-        r.task?.id === benchmark.task?.id,
-    );
-    if (comparableRuns.length > 1) {
-      const comparisonRuns = [...comparableRuns, benchmark];
-      const varianceReport = computeVarianceAnalysis(comparisonRuns);
-      varianceReportText = formatVarianceReport(varianceReport);
-
-      // Multi-run trend: aggregate the prior comparable runs together with the
-      // current run (already in memory — no extra scan) and write a trend.md
-      // artifact summarizing per-agent performance across runs.
-      try {
-        const trendComparison = aggregateMultiRuns(comparisonRuns);
-        const trendReport = formatMultiRunReport(trendComparison);
-        trendReportPath = path.join(benchmark.outputPath, "trend.md");
-        await fs.writeFile(trendReportPath, trendReport, "utf8");
-      } catch (trendError) {
-        trendReportPath = null;
-        console.warn(`[agentarena] Trend report skipped: ${trendError instanceof Error ? trendError.message : String(trendError)}`);
-      }
+    const outputSummary = buildBenchmarkOutputSummary(benchmark, report);
+    if (parsed.format === "json") {
+      jsonSummaries.push(outputSummary);
+    } else {
+      printBenchmarkOutput(scoredBenchmark, report, decisionReport, decisionReportPath, csvPath, trendReportPath, varianceReportText, reportLocale);
     }
-  } catch (varianceError) {
-    console.warn(`[agentarena] Variance analysis skipped: ${varianceError instanceof Error ? varianceError.message : String(varianceError)}`);
-  }
 
-  const outputSummary = buildBenchmarkOutputSummary(benchmark, report);
-  if (parsed.format === "json") {
-    jsonSummaries.push(outputSummary);
-  } else {
-    printBenchmarkOutput(scoredBenchmark, report, decisionReport, decisionReportPath, csvPath, trendReportPath, varianceReportText, reportLocale);
+    if (benchmark.results.some((result) => result.status !== "success")) {
+      process.exitCode = 1;
+    }
+    if (cancelled) {
+      break;
+    }
   }
-
-  if (benchmark.results.some((result) => result.status !== "success")) {
-    process.exitCode = 1;
-  }
-  if (cancelled) {
-    break;
-  }
-}
 
   if (parsed.format === "json") {
     console.log(

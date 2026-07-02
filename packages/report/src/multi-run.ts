@@ -95,9 +95,9 @@ export function formatMultiRunReport(comparison: MultiRunComparison): string {
   lines.push("|-------|------|-----------|---------|--------------|--------------|----------|-------|");
 
   for (const agent of comparison.agents) {
-    const trendEmoji = agent.trend === "improving" ? "up" : agent.trend === "declining" ? "down" : "stable";
+    const trendLabel = agent.trend === "improving" ? "up" : agent.trend === "declining" ? "down" : "stable";
     lines.push(
-      `| ${escapeMdCell(agent.displayLabel)} | ${agent.runCount} | ${agent.avgScore.toFixed(1)} | ${agent.scoreStdDev.toFixed(1)} | ${(agent.successRate * 100).toFixed(0)}% | ${(agent.avgDurationMs / 1000).toFixed(0)}s | $${agent.avgCostUsd.toFixed(2)} | ${trendEmoji} |`
+      `| ${escapeMdCell(agent.displayLabel)} | ${agent.runCount} | ${agent.avgScore.toFixed(1)} | ${agent.scoreStdDev.toFixed(1)} | ${(agent.successRate * 100).toFixed(0)}% | ${(agent.avgDurationMs / 1000).toFixed(0)}s | $${agent.avgCostUsd.toFixed(2)} | ${trendLabel} |`
     );
   }
 

@@ -263,7 +263,7 @@ test("runBenchmark executes setup and teardown commands in declaration order", a
       {
         label: "Create initial marker",
         command:
-          "node -e \"setTimeout(()=>{require('node:fs').writeFileSync('order.txt','first\\n')},150)\""
+          "node -e \"setTimeout(()=>{require('node:fs').writeFileSync('order.txt','first\\n')},500)\" // 500ms delay to test hook ordering"
       },
       {
         label: "Append second marker",
@@ -882,7 +882,8 @@ test("runBenchmark aborts adapter execution when agent timeout elapses", async (
     teardownCommands: []
   });
 
-  process.env.AGENTARENA_AGENT_EXECUTE_TIMEOUT_MS = "10";
+  // Short timeout to test timeout handling; demo adapter completes in ~100ms
+  process.env.AGENTARENA_AGENT_EXECUTE_TIMEOUT_MS = "50";
 
   try {
     const benchmark = await runBenchmark({

@@ -266,7 +266,10 @@ export async function collectEvidence(
   try {
     const changedFilesPath = path.join(evidenceDir, EVIDENCE_FILES.CHANGED_FILES);
     const content = await fs.readFile(changedFilesPath, "utf8");
-    result.changedFiles = JSON.parse(content) as string[];
+    const parsed = JSON.parse(content);
+    if (Array.isArray(parsed) && parsed.every(e => typeof e === "string")) {
+      result.changedFiles = parsed;
+    }
   } catch {
     // File doesn't exist or invalid - skip
   }

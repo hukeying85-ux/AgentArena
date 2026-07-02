@@ -72,17 +72,28 @@ export class HealthCache {
         this.loaded = true;
         return;
       }
-      const entries = parsed as HealthCacheEntry[];
-      for (const entry of entries) {
-        if (!entry || typeof entry !== "object" || !entry.adapterId || !entry.providerId || !entry.status) {
-          logger.warn("core", "health_cache.invalid_entry", "Skipping invalid health cache entry");
+      for (const entry of parsed) {
+        if (!entry || typeof entry !== "object") {
+          logger.warn("core", "health_cache.invalid_entry", "Skipping non-object health cache entry");
+          continue;
+        }
+        if (typeof entry.adapterId !== "string" || typeof entry.providerId !== "string" || typeof entry.status !== "string") {
+          logger.warn("core", "health_cache.invalid_entry", "Skipping entry with missing/invalid string fields");
+          continue;
+        }
+        if (entry.timestamp !== undefined && typeof entry.timestamp !== "number") {
+          logger.warn("core", "health_cache.invalid_entry", "Skipping entry with non-numeric timestamp");
+          continue;
+        }
+        if (entry.ttlMs !== undefined && (typeof entry.ttlMs !== "number" || !Number.isFinite(entry.ttlMs))) {
+          logger.warn("core", "health_cache.invalid_entry", "Skipping entry with invalid ttlMs");
           continue;
         }
         const key = this.getKey(entry.adapterId, entry.providerId, entry.endpoint);
-        this.entries.set(key, entry);
+        this.entries.set(key, entry as HealthCacheEntry);
       }
-    } catch {
-      // Cache file doesn't exist or is invalid — start fresh
+    } catch (error) {
+      logger.warn("core", "health_cache.load_failed", `Failed to load health cache: ${error instanceof Error ? error.message : String(error)}`);
     }
 
     this.loaded = true;

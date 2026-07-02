@@ -5,6 +5,20 @@
 
 ---
 
+## [通用] 2026-07-02 templates.ts 中 spawnSync 使用 shell:true 导致命令注入风险
+
+- 现象：`packages/cli/src/templates.ts` 中三处 `spawnSync` 调用在 Windows 上使用 `shell: process.platform === "win32"`，shell 会解释参数中的特殊字符，存在命令注入风险。
+- 根因：`shell: true` 在 Windows 上通过 `cmd.exe` 执行命令，参数中的 `&`、`|`、`>` 等字符会被 shell 解释。虽然当前参数来自内部模板而非用户输入，但这是安全反模式。
+- 解法：移除所有三处的 `shell: process.platform === "win32"` 选项。所有命令（`pnpm`、`npm`、`npx`）都是已知二进制文件，参数以数组形式传递，Node.js 的 `spawnSync` 在 Windows 上能直接通过 `CreateProcess` 解析 `.cmd`/`.exe`，无需 shell 介入。
+- 教训：`spawnSync` 传数组参数时永远不需要 `shell: true`。`shell: true` 仅在需要 shell 内置功能（如管道、通配符展开）时才使用，且此时应确保参数经过适当转义。
+
+## [通用] 2026-07-02 splice 在循环中固定位置插入导致输出逆序
+
+- 现象：`decision-report.ts` 中 failure diagnosis 区块的条目顺序与 `report.failureDiagnostics` 数组顺序相反。
+- 根因：循环内反复调用 `lines.splice(lines.length - 3, 0, ...)` 在固定位置插入，每次新内容都挤到之前插入内容的前面，导致整体逆序。
+- 解法：先用 `diagLines` 数组按正序收集所有诊断行，循环结束后一次性 `lines.splice(lines.length - 3, 0, ...diagLines)` 插入。
+- 教训：在循环中用 `splice` 向同一位置插入会反转顺序。正确做法是先收集再批量插入，或用 `unshift` 反向遍历。
+
 ## [通用] 2026-07-02 --json 模式下结构化日志污染 stdout 导致输出不可解析
 
 - 现象：`agentarena run --json` 的 stdout 里混入了 INFO 级别的 JSON 日志行，导致 `jq` 等工具解析失败。

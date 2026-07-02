@@ -86,9 +86,12 @@ export class StreamJsonTransport implements Transport {
       "--output-format",
       "stream-json",               // Structured JSON events (one per line)
       "--verbose",                 // Required for full structured output (undocumented requirement)
-      "--dangerously-skip-permissions", // Skip all interactive permission prompts (yolo mode)
       "--no-session-persistence",  // Don't save session state between runs
     ];
+
+    if (process.env.AGENTARENA_SKIP_PERMISSIONS !== "0") {
+      args.push("--dangerously-skip-permissions");
+    }
 
     const processResult = await runProcess(
       this.invocation.command,
@@ -210,9 +213,12 @@ export class TextTransport implements Transport {
       "-p",
       "--output-format",
       "text",
-      "--dangerously-skip-permissions", // Skip all interactive permission prompts (yolo mode)
       "--no-session-persistence",
     ];
+
+    if (process.env.AGENTARENA_SKIP_PERMISSIONS !== "0") {
+      args.push("--dangerously-skip-permissions");
+    }
 
     const processResult = await runProcess(
       this.invocation.command,

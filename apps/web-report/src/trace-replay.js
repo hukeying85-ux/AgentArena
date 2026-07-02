@@ -156,8 +156,7 @@ export function createTraceReplayModule({ escapeHtml, t }) {
 
   function startPlayback() {
     if (playInterval) {
-      clearInterval(playInterval);
-      playInterval = null;
+      stopPlayback();
       updateControls();
       return;
     }
@@ -201,10 +200,20 @@ export function createTraceReplayModule({ escapeHtml, t }) {
   function hide() {
     const section = document.getElementById('trace-replay-section');
     if (section) section.classList.add('hidden');
+    stopPlayback();
+  }
+
+  function stopPlayback() {
     if (playInterval) {
       clearInterval(playInterval);
       playInterval = null;
     }
+  }
+
+  function destroy() {
+    stopPlayback();
+    currentTimeline = null;
+    currentStepIndex = 0;
   }
 
   return {
@@ -212,6 +221,7 @@ export function createTraceReplayModule({ escapeHtml, t }) {
     show,
     hide,
     isVisible,
-    setupEventListeners
+    setupEventListeners,
+    destroy
   };
 }

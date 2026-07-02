@@ -919,7 +919,7 @@ function renderComparisonBars(run) {
       dimensions: dimKeys.map(key => {
         let value = 0;
         if (key === 'status') value = r.status === 'success' ? 100 : 0;
-        else if (key === 'tests') value = (r.judgeResults?.filter(j => j.success).length / Math.max(r.judgeResults?.length || 1, 1)) * 100;
+        else if (key === 'tests') value = (r.judgeResults?.filter(j => j.success).length / (r.judgeResults?.length || 1)) * 100;
         else if (key === 'duration') value = Math.max(0, 100 - Math.min((r.durationMs || 0) / 60000, 1) * 100);
         else if (key === 'cost') value = r.estimatedCostUsd ? Math.max(0, 100 - Math.min(r.estimatedCostUsd, 1) * 100) : 50;
         else if (key === 'precision') value = Math.max(diffPrecisionScore(r), 0) * 100;

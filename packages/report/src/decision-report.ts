@@ -474,18 +474,19 @@ export function formatDecisionReport(report: DecisionReport, locale?: string): s
   lines.push(``);
   lines.push(`\`\`\`bash`);
   if ((report.failureDiagnostics?.length ?? 0) > 0) {
-    lines.splice(lines.length - 3, 0, `## Failure diagnosis`, ``);
+    const diagLines: string[] = [`## Failure diagnosis`, ``];
     for (const item of report.failureDiagnostics) {
-      lines.splice(lines.length - 3, 0, `### ${item.displayLabel}`, ``);
-      lines.splice(lines.length - 3, 0, `- Cause: ${item.diagnostic.cause}`);
+      diagLines.push(`### ${item.displayLabel}`, ``);
+      diagLines.push(`- Cause: ${item.diagnostic.cause}`);
       for (const evidence of item.diagnostic.evidence) {
-        lines.splice(lines.length - 3, 0, `- Evidence: ${evidence}`);
+        diagLines.push(`- Evidence: ${evidence}`);
       }
       for (const fix of item.diagnostic.fixes) {
-        lines.splice(lines.length - 3, 0, `- Fix: ${fix}`);
+        diagLines.push(`- Fix: ${fix}`);
       }
-      lines.splice(lines.length - 3, 0, ``);
+      diagLines.push(``);
     }
+    lines.splice(lines.length - 3, 0, ...diagLines);
   }
 
   lines.push(report.reproduceCommand);

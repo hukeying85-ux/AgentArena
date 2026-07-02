@@ -21,7 +21,7 @@ if (!pkg.scripts || !pkg.scripts[${JSON.stringify(scriptName)}]) {
   process.exit(1);
 }
 for (const [cmd, args] of [["pnpm", ["run", ${JSON.stringify(scriptName)}]], ["npm", ["run", ${JSON.stringify(scriptName)}]]]) {
-  const result = spawnSync(cmd, args, { stdio: "inherit", shell: process.platform === "win32" });
+  const result = spawnSync(cmd, args, { stdio: "inherit" });
   if (!result.error) {
     process.exit(result.status ?? 1);
   }
@@ -61,7 +61,7 @@ const candidates = [
 let lastStatus = 1;
 for (const [cmd, args] of candidates) {
   rmSync(reportFileValue, { force: true });
-  const result = spawnSync(cmd, args, { stdio: "pipe", encoding: "utf8", shell: process.platform === "win32" });
+  const result = spawnSync(cmd, args, { stdio: "pipe", encoding: "utf8" });
   if (result.stdout) process.stdout.write(result.stdout);
   if (result.stderr) process.stderr.write(result.stderr);
   if (!result.error && existsSync(reportFileValue) && statSync(reportFileValue).size > 0) {
@@ -110,7 +110,7 @@ const candidates = hasBiome
   : [["pnpm", ["exec", "eslint", ".", "--format", "json"]], ["npx", ["eslint", ".", "--format", "json"]]];
 let lastStatus = 1;
 for (const [cmd, args] of candidates) {
-  const result = spawnSync(cmd, args, { stdio: "pipe", encoding: "utf8", shell: process.platform === "win32" });
+  const result = spawnSync(cmd, args, { stdio: "pipe", encoding: "utf8" });
   if (!result.error) {
     const lintOutput = result.stdout || "[]";
     writeFileSync(reportFileValue, lintOutput);

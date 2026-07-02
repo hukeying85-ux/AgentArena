@@ -258,3 +258,23 @@ test("absolute path to node is allowed", () => {
 test("unallowed command with .exe extension is still rejected", () => {
   assert.throws(() => parseCommand("malware.exe --payload"), /not in the allowed command list/i);
 });
+
+test("command path with only dot is rejected", () => {
+  assert.throws(() => parseCommand(". --payload"), /not in the allowed command list/i);
+});
+
+test("command path with dot-dot is rejected", () => {
+  assert.throws(() => parseCommand(".. --payload"), /not in the allowed command list/i);
+});
+
+test("environment variable expansion in command is treated as literal", () => {
+  const [cmd, args] = parseCommand('echo "$HOME"');
+  assert.equal(cmd, "echo");
+  assert.deepEqual(args, ["$HOME"]);
+});
+
+test("percent expansion in command is treated as literal", () => {
+  const [cmd, args] = parseCommand('echo "%USERPROFILE%"');
+  assert.equal(cmd, "echo");
+  assert.deepEqual(args, ["%USERPROFILE%"]);
+});

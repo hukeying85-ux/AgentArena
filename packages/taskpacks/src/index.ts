@@ -13,6 +13,7 @@ import { parse as parseYaml } from "yaml";
 
 import {
   assertObject,
+  assertOptionalBoolean,
   assertOptionalNonNegativeInteger,
   assertOptionalNumber,
   assertOptionalString,
@@ -125,19 +126,6 @@ function normalizeDifficultyEvolution(value: unknown): NonNullable<TaskPackMetad
   };
 }
 
-// Helper for normalizer to access assertOptionalBoolean
-function assertOptionalBooleanLocal(value: unknown, label: string): boolean | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  if (typeof value !== "boolean") {
-    throw new Error(
-      `Task pack field "${label}" must be a boolean. Received type: ${typeof value}.`
-    );
-  }
-  return value;
-}
-
 function normalizeJudge(
   value: Record<string, unknown>,
   index: number,
@@ -164,7 +152,7 @@ function normalizeJudge(
   const label = assertString(value.label, `judges[${index}].label`);
   const critical = value.critical === undefined
     ? (descriptor?.isCriticalByDefault ?? false)
-    : (assertOptionalBooleanLocal(value.critical, `judges[${index}].critical`) ?? false);
+    : (assertOptionalBoolean(value.critical, `judges[${index}].critical`) ?? false);
 
   const normalizer = JUDGE_NORMALIZERS[type];
   if (normalizer) {

@@ -1,7 +1,5 @@
-import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { promisify } from "node:util";
 import {
   type AdapterCapability,
   type AdapterExecutionContext,
@@ -10,8 +8,7 @@ import {
   type AgentResolvedRuntime,
   logger
 } from "@agentarena/core";
-
-const execFileAsync = promisify(execFile);
+import { runProcess } from "./process-utils.js";
 
 const INTERNAL_CHANGED_FILE_PATTERNS = [
   ".aa-evidence/",
@@ -117,11 +114,8 @@ export async function savePromptArtifact(
 
 export async function getChangedFilesFromGit(workspacePath: string): Promise<ChangedFilesHintResult> {
   try {
-    const { stdout } = await execFileAsync("git", ["diff", "--name-only", "HEAD"], {
-      cwd: workspacePath,
-      encoding: "utf8"
-    });
-    return { files: stdout.trim().split("\n").filter(Boolean).filter((file) => !isInternalChangedFile(file)), reliable: true };
+    const result = await runProcess("git", ["diff", "--name-only", "HEAD"], workspacePath, 30_000);
+    return { files: result.stdout.trim().split("\n").filter(Boolean).filter((file) => !isInternalChangedFile(file)), reliable: true };
   } catch (error: unknown) {
     const stderr = (error instanceof Error && "stderr" in error) ? String((error as NodeJS.ErrnoException & { stderr?: string }).stderr ?? "") : "";
     const rawCode = (error instanceof Error && "code" in error) ? (error as Record<string, unknown>).code : undefined;

@@ -1,3 +1,4 @@
+import { promises as fsPromises } from "node:fs";
 import type {
   AdapterCapability,
   AdapterExecutionContext,
@@ -263,12 +264,11 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
 
     // Save stdout/stderr to files for debugging (legacy)
     try {
-      const fs = await import("node:fs/promises");
       const stdoutPath = context.workspacePath + "/agent-stdout.jsonl";
-      await fs.default.writeFile(stdoutPath, execution.stdout, "utf8");
+      await fsPromises.writeFile(stdoutPath, execution.stdout, "utf8");
       if (execution.stderr.trim()) {
         const stderrPath = context.workspacePath + "/agent-stderr.log";
-        await fs.default.writeFile(stderrPath, execution.stderr, "utf8");
+        await fsPromises.writeFile(stderrPath, execution.stderr, "utf8");
       }
     } catch (writeError) {
       logger.debug("adapter", "artifact.write_failed", `Failed to write agent artifacts: ${writeError instanceof Error ? writeError.message : String(writeError)}`);

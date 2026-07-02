@@ -134,13 +134,11 @@ export class JsonlTraceRecorder {
 
   private enqueue(writeFn: () => Promise<void>, label: string): void {
     if (this.queueDepth >= JsonlTraceRecorder.MAX_QUEUE_DEPTH) {
-      // Drop the oldest queued write to bound memory.
-      // The actual file I/O still happens in order; we just skip awaiting
-      // the previous tail so the promise chain can be GC'd.
       this.droppedWrites++;
-      logger.warn("trace", "trace.backpressure", `Trace queue depth exceeded ${JsonlTraceRecorder.MAX_QUEUE_DEPTH}; dropped oldest queued write`, {
+      logger.warn("trace", "trace.backpressure", `Trace queue depth exceeded ${JsonlTraceRecorder.MAX_QUEUE_DEPTH}; dropping incoming write`, {
         metadata: { filePath: this.filePath, droppedWrites: this.droppedWrites }
       });
+      return;
     }
 
     this.queueDepth++;
@@ -237,15 +235,33 @@ export class JsonlTraceRecorder {
   }
 
   async getEventTypes(): Promise<string[]> {
-    const events = await this.readAll();
-    const types = new Set(events.map((event) => event.type));
+    const types = new Set<string>();
+    for await (const event of this.streamEvents()) {
+      types.add(event.type);
+    }
     return Array.from(types).sort();
   }
 
   async getAgentIds(): Promise<string[]> {
-    const events = await this.readAll();
-    const agentIds = new Set(events.map((event) => event.agentId));
+    const agentIds = new Set<string>();
+    for await (const event of this.streamEvents()) {
+      if (event.agentId) agentIds.add(event.agentId);
+    }
     return Array.from(agentIds).sort();
+  }
+
+  private async *streamEvents(): AsyncGenerator<TraceEvent> {
+    try {
+      const stream = createReadStream(this.filePath, { encoding: "utf8" });
+      const rl = createInterface({ input: stream, crlfDelay: Infinity });
+      for await (const line of rl) {
+        if (line.trim()) {
+          try { yield JSON.parse(line) as TraceEvent; } catch { /* skip malformed */ }
+        }
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
   }
 
   async clear(): Promise<void> {

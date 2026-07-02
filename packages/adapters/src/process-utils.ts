@@ -250,7 +250,10 @@ async function runWindowsClaudeDetached(
 
     const envAssignments = Object.entries(environment ?? {})
       .filter((entry): entry is [string, string] => typeof entry[1] === "string")
-      .map(([key, value]) => `Set-Item -LiteralPath ${quotePowerShellSingle(`Env:${key}`)} -Value ${quotePowerShellSingle(value)}`)
+      .map(([key, value]) => {
+        const safeValue = value.replace(/[\r\n]/g, " ");
+        return `Set-Item -LiteralPath ${quotePowerShellSingle(`Env:${key}`)} -Value ${quotePowerShellSingle(safeValue)}`;
+      })
       .join("\n");
     const redirectInput = stdinInput !== undefined ? ` -RedirectStandardInput ${quotePowerShellSingle(stdinPath)}` : "";
     const script = [

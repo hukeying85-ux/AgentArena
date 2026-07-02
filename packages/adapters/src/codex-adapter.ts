@@ -184,7 +184,7 @@ export class CodexCliAdapter implements AgentAdapter {
   }
 
   async execute(context: AdapterExecutionContext): Promise<AdapterExecutionResult> {
-    const metadataDir = path.join(context.workspacePath, "agentarena-demo");
+    const metadataDir = path.join(context.workspacePath, "agentarena-codex");
     const outputLastMessagePath = path.join(metadataDir, "codex-last-message.txt");
     await ensureDirectory(metadataDir);
 

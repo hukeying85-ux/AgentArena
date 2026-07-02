@@ -241,10 +241,10 @@ export function buildLeaderboard(
     }).length;
     const firstPassRate = agentRuns.length > 0 ? firstPassCount / agentRuns.length : 0;
 
-    const lastSeenAt = agentRuns
-      .map((r) => r.createdAt)
-      .sort((a, b) => new Date(a).getTime() - new Date(b).getTime())
-      .reverse()[0] ?? new Date().toISOString();
+    const lastSeenAt = agentRuns.reduce<string>((latest, r) => {
+      if (!r.createdAt) return latest;
+      return r.createdAt > latest ? r.createdAt : latest;
+    }, "") || new Date().toISOString();
 
     // 样本充足性：至少 3 次 run 才算稳定
     const sampleSizeSufficient = agentRuns.length >= 3;

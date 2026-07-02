@@ -55,10 +55,10 @@ export function assertOptionalNumber(value: unknown, label: string): number | un
   if (value === undefined) {
     return undefined;
   }
-  if (typeof value !== "number") {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
     throw new Error(
-      `Task pack field "${label}" must be a number. ` +
-      `Received type: ${typeof value}. ` +
+      `Task pack field "${label}" must be a finite number. ` +
+      `Received: ${value}. ` +
       `Example: "${label}": 1.5`
     );
   }

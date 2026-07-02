@@ -171,10 +171,11 @@ export function computeCompositeScore(
   // Rule 2: Critical judge failure → partial band (use only applicable non-critical weights)
   if (hasCriticalJudgeFailure(result)) {
     // Build partial weights from only the components used in the partial score
-    const partialWeightKeys = ["tests", "nonCriticalJudges", "lint", "precision", "duration", "cost"];
     const rawPartialWeights: Record<string, number> = {};
-    for (const key of partialWeightKeys) {
-      if (weights[key] !== undefined) rawPartialWeights[key] = weights[key];
+    for (const key of Object.keys(weights)) {
+      if (key !== "status" && key !== "criticalJudges") {
+        rawPartialWeights[key] = weights[key];
+      }
     }
     const n = normalizeWeights(rawPartialWeights);
     const weightedPartial =

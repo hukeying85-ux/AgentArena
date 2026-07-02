@@ -742,7 +742,19 @@ export function renderWeightSliders(container, currentWeights, onChange, options
       label.style.fontSize = '13px';
       const displayName = labelMap[key] || key;
       const pct = (value * 100).toFixed(0);
-      label.innerHTML = `<span>${escapeHtml(displayName)}</span> <span class="weight-value" style="font-weight:600;min-width:36px;text-align:right;display:inline-block">${pct}%</span>`;
+      label.textContent = '';
+      const nameSpan = document.createElement('span');
+      nameSpan.textContent = displayName;
+      label.appendChild(nameSpan);
+      label.appendChild(document.createTextNode(' '));
+      const valueSpan = document.createElement('span');
+      valueSpan.className = 'weight-value';
+      valueSpan.style.fontWeight = '600';
+      valueSpan.style.minWidth = '36px';
+      valueSpan.style.textAlign = 'right';
+      valueSpan.style.display = 'inline-block';
+      valueSpan.textContent = `${pct}%`;
+      label.appendChild(valueSpan);
 
       const input = document.createElement('input');
       input.type = 'range';

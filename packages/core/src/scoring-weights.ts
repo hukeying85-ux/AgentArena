@@ -34,8 +34,8 @@
  *   than an expensive correct one.
  *
  * - "rotating-tasks": Modeled after LiveBench. resolutionRate (25%) and
- *   acceptanceRate (20%) are primary to prevent score inflation from task
- *   familiarity. Status (15%) is deliberately low.
+ *   acceptanceRate (10%) are primary to prevent score inflation from task
+ *   familiarity. Status (20%) is deliberately low.
  *
  * - "comprehensive": Equal weight across all dimensions for users who want
  *   maximum signal. No single component dominates.
