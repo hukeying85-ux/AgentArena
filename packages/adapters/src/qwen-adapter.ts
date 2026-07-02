@@ -321,7 +321,9 @@ export class QwenCodeAdapter implements AgentAdapter {
       "--prompt",
       QWEN_STDIN_PROMPT,
       "--output-format",
-      "json"
+      "json",
+      "--approval-mode",
+      "yolo", // Skip all approval prompts to prevent task blocking
     ];
 
     // If model is specified, try to pass it (may not be supported by all versions)

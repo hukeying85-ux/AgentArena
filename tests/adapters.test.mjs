@@ -490,13 +490,12 @@ test("Codex adapter passes configured sandbox mode to the CLI", async () => {
     });
 
     const captured = JSON.parse(await readFile(capturePath, "utf8"));
-    const sandboxIndex = captured.argv.indexOf("--sandbox");
+    const yoloIndex = captured.argv.indexOf("--dangerously-bypass-approvals-and-sandbox");
     const startEvent = traceEvents.find((event) => event.type === "adapter.start");
 
     assert.equal(result.status, "success");
-    assert.notEqual(sandboxIndex, -1);
-    assert.equal(captured.argv[sandboxIndex + 1], "danger-full-access");
-    assert.equal(captured.argv.includes("workspace-write"), false);
+    assert.notEqual(yoloIndex, -1, "should include --dangerously-bypass-approvals-and-sandbox flag");
+    assert.equal(captured.argv.includes("--sandbox"), false, "should not include --sandbox when using yolo mode");
     assert.equal(startEvent?.metadata?.sandboxMode, "danger-full-access");
   } finally {
     if (originalCodexBin === undefined) {

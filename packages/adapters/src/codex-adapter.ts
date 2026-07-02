@@ -191,14 +191,13 @@ export class CodexCliAdapter implements AgentAdapter {
     const prompt = buildAgentPrompt(context);
     await savePromptArtifact(prompt, context.workspacePath, context);
     const invocation = await resolveCodexInvocation();
-    const sandboxMode = resolveCodexSandboxMode(context.environment);
+    const sandboxMode = resolveCodexSandboxMode(context.environment); // Still resolved for trace metadata
     const args = [
       ...invocation.argsPrefix,
       "exec",
       "--skip-git-repo-check",
       "--ephemeral",
-      "--sandbox",
-      sandboxMode,
+      "--dangerously-bypass-approvals-and-sandbox", // Yolo mode: skip all approval prompts and sandbox restrictions
       "--cd",
       context.workspacePath,
       "--output-last-message",
@@ -232,7 +231,7 @@ export class CodexCliAdapter implements AgentAdapter {
       metadata: {
         command: invocation.displayCommand,
         args,
-        sandboxMode,
+        sandboxMode, // Configured sandbox mode (actual execution uses --dangerously-bypass-approvals-and-sandbox)
         requestedConfig: context.selection.config,
         resolvedRuntime: runtimeWithVersion
       }

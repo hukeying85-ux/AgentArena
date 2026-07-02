@@ -86,8 +86,7 @@ export class StreamJsonTransport implements Transport {
       "--output-format",
       "stream-json",               // Structured JSON events (one per line)
       "--verbose",                 // Required for full structured output (undocumented requirement)
-      "--permission-mode",
-      "bypassPermissions",         // Skip interactive permission prompts (internal flag)
+      "--dangerously-skip-permissions", // Skip all interactive permission prompts (yolo mode)
       "--no-session-persistence",  // Don't save session state between runs
     ];
 
@@ -211,8 +210,7 @@ export class TextTransport implements Transport {
       "-p",
       "--output-format",
       "text",
-      "--permission-mode",
-      "bypassPermissions",
+      "--dangerously-skip-permissions", // Skip all interactive permission prompts (yolo mode)
       "--no-session-persistence",
     ];
 

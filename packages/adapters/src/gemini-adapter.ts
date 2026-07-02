@@ -41,7 +41,7 @@ export function createGeminiAdapter(): AgentAdapter {
     id: "gemini-cli",
     title: "Gemini CLI",
     command: "gemini",
-    commandArgs: ["--output-format", "json", "--permission-mode", "bypassPermissions"],
+    commandArgs: ["--output-format", "json", "--yolo"],
     capability: GEMINI_CAPABILITY,
     binEnvVar: "AGENTARENA_GEMINI_BIN",
     extraArgs: (runtime: AgentResolvedRuntime) =>
