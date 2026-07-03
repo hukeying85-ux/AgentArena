@@ -111,15 +111,30 @@ async function queryTraceFileStream(
 
 export class JsonlTraceRecorder {
   private static readonly MAX_QUEUE_DEPTH = 1000;
+  private static readonly DEFAULT_BUFFER_SIZE = 50;
   private directoryEnsured = false;
   private writeQueue: Promise<void> = Promise.resolve();
   private queueDepth = 0;
   private droppedWrites = 0;
   private writeFailed = false;
+  private buffer: TraceEvent[] = [];
+  private flushTimer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(private readonly filePath: string) {}
+  constructor(
+    private readonly filePath: string,
+    private readonly bufferSize: number = 0
+  ) {}
 
   async close(): Promise<void> {
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = null;
+    }
+    if (this.buffer.length > 0) {
+      const events = this.buffer;
+      this.buffer = [];
+      await this.writeEvents(events);
+    }
     await this.writeQueue;
   }
 
@@ -129,7 +144,42 @@ export class JsonlTraceRecorder {
    * the recorder is being shut down.
    */
   async flush(): Promise<void> {
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = null;
+    }
+    if (this.buffer.length > 0) {
+      const events = this.buffer;
+      this.buffer = [];
+      await this.writeEvents(events);
+    }
     await this.writeQueue;
+  }
+
+  private async writeEvents(events: TraceEvent[]): Promise<void> {
+    const filePath = this.filePath;
+    this.enqueue(async () => {
+      if (!this.directoryEnsured) {
+        await ensureDirectory(path.dirname(filePath));
+        this.directoryEnsured = true;
+      }
+      const lines = events.map((e) => JSON.stringify(e)).join("\n") + "\n";
+      await fs.appendFile(filePath, lines, "utf8");
+    }, "Trace buffered write");
+  }
+
+  private scheduleFlush(): void {
+    if (this.flushTimer) return;
+    this.flushTimer = setTimeout(() => {
+      this.flushTimer = null;
+      if (this.buffer.length > 0) {
+        const events = this.buffer;
+        this.buffer = [];
+        this.writeEvents(events).catch((error) => {
+          logger.error("trace", "trace.flush_failed", "Buffered flush failed", { error });
+        });
+      }
+    }, 100);
   }
 
   private enqueue(writeFn: () => Promise<void>, label: string): void {
@@ -156,19 +206,29 @@ export class JsonlTraceRecorder {
   }
 
   async record(event: TraceEvent): Promise<void> {
-    // If a previous write failed, don't queue more - fail fast
     if (this.writeFailed) {
       throw new Error(`Trace recording failed for ${this.filePath}. Previous write failed, refusing to queue more events.`);
     }
 
-    const filePath = this.filePath;
-    this.enqueue(async () => {
-      if (!this.directoryEnsured) {
-        await ensureDirectory(path.dirname(filePath));
-        this.directoryEnsured = true;
+    if (this.bufferSize <= 1) {
+      const filePath = this.filePath;
+      this.enqueue(async () => {
+        if (!this.directoryEnsured) {
+          await ensureDirectory(path.dirname(filePath));
+          this.directoryEnsured = true;
+        }
+        await fs.appendFile(filePath, `${JSON.stringify(event)}\n`, "utf8");
+      }, "Trace write");
+    } else {
+      this.buffer.push(event);
+      if (this.buffer.length >= this.bufferSize) {
+        const events = this.buffer;
+        this.buffer = [];
+        await this.writeEvents(events);
+      } else {
+        this.scheduleFlush();
       }
-      await fs.appendFile(filePath, `${JSON.stringify(event)}\n`, "utf8");
-    }, "Trace write");
+    }
 
     await this.writeQueue;
   }

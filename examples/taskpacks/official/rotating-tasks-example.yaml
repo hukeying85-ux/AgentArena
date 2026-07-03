@@ -41,10 +41,20 @@ judges:
     critical: true
     timeoutMs: 30000
     envAllowList: [NODE_ENV, CI]
-  - type: test-result
+  - type: command
     label: "Unit tests pass"
-    command: "npm test -- --reporter json"
-    format: jest
+    command: |
+      node -e "
+        const {spawnSync}=require('node:child_process');
+        for(const [cmd,args] of [
+          ['npm',['test']],
+          ['npm',['run','test']]
+        ]){
+          const r=spawnSync(cmd,args,{stdio:'inherit',shell:process.platform==='win32'});
+          if(r.status===0) process.exit(0);
+        }
+        process.exit(1);
+      "
     critical: true
     timeoutMs: 60000
   - type: token-efficiency

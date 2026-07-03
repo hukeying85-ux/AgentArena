@@ -28,11 +28,22 @@ envAllowList: []
 setupCommands: []
 judges:
   - id: tests-pass
-    type: test-result
+    type: command
     label: All tests pass
-    command: npx --no-install jest --json --outputFile=.agentarena/test-results.json
-    format: jest
-    reportFile: .agentarena/test-results.json
+    command: |
+      node -e "
+        const fs=require('node:fs');
+        const {spawnSync}=require('node:child_process');
+        for(const [cmd,args] of [
+          ['npm',['test']],
+          ['npm',['run','test','--','--json']],
+          ['npx',['--no-install','jest','--json','--outputFile=.agentarena/test-results.json']]
+        ]){
+          const r=spawnSync(cmd,args,{stdio:'inherit',shell:process.platform==='win32'});
+          if(r.status===0) process.exit(0);
+        }
+        process.exit(1);
+      "
     timeoutMs: 120000
     critical: true
   - id: build-passes

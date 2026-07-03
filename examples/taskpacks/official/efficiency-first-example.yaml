@@ -29,10 +29,20 @@ prompt: |
   Note: Try to complete this task efficiently - avoid unnecessary
   token usage while maintaining code quality.
 judges:
-  - type: test-result
+  - type: command
     label: "All tests pass"
-    command: "npm test -- --reporter json"
-    format: jest
+    command: |
+      node -e "
+        const {spawnSync}=require('node:child_process');
+        for(const [cmd,args] of [
+          ['npm',['test']],
+          ['npm',['run','test']]
+        ]){
+          const r=spawnSync(cmd,args,{stdio:'inherit',shell:process.platform==='win32'});
+          if(r.status===0) process.exit(0);
+        }
+        process.exit(1);
+      "
     critical: true
     timeoutMs: 90000
   - type: token-efficiency

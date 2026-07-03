@@ -55,6 +55,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Scoring: critical judge failure scoring uses user-configured weights instead of hardcoded multipliers
 - Judges: unknown judge types return structured failure instead of crashing with undefined
 - Server: constant-time auth comparison always iterates full token length (no timing leak)
+- claude-adapter: fixed `fs.default.writeFile` runtime TypeError (was `fs.default.writeFile`, should be `fs.writeFile`)
+- utils.ts: replaced greedy IPv6 normalization regex with correct `normalizeIpv6` implementation
+- html-template: removed `'unsafe-inline'` from CSP `style-src` directive
+- markdown-template: escaped all user-controlled values to prevent Markdown injection
+- decision-report: fixed reversed failure diagnosis output from splice-in-loop anti-pattern
+- transport.ts: made `--dangerously-skip-permissions` configurable via `AGENTARENA_SKIP_PERMISSIONS` env var
+- process-utils: escaped newlines in PowerShell environment variable values
+- invocation-probes: use basename matching instead of substring `includes` for agent type detection
+- qwen-adapter: validate custom binary path existence before use
+- adapter-helpers: replaced bare `execFileAsync` with `runProcess` (timeout + abort signal)
+- init.ts: replaced `process.exit()` with `throw Error` for graceful error handling
+- init.ts: create parent directories before writing files
+- run.ts: fixed misleading indentation in repeat loop body
+- run.ts: check file size with `stat` before `readFile` to prevent OOM
+- templates.ts: removed `shell:true` from `spawnSync` to prevent command injection
+- cleanup.ts: use `console.log` instead of `console.error` for informational output
+- health-cache: added runtime type guards for JSON.parse results
+- evidence.ts: validate `changedFiles` is string array before use
+- scoring-weights: fixed documentation mismatch (status weight 15% → 20%)
+- leaderboard: replaced O(n log n) sort with O(n) reduce for `lastSeenAt`
+- scoring: derive `partialWeightKeys` from weights dynamically instead of hardcoding
+- web-report charts: replaced `innerHTML` with `textContent` + `createElement`
+- web-report result-cache: propagate IndexedDB write errors via callback
+- web-report storage: validate imported run data structure
+- web-report trace-replay: ensure `playInterval` cleanup on component destroy
+- taskpacks: removed duplicate `assertOptionalBooleanLocal` function
+- trace: fixed backpressure mechanism (was counting but not dropping writes)
+- trace: use streaming reads for `getEventTypes`/`getAgentIds`
+- replay: use `Date.parse` instead of `new Date()` in hot loop
+
+### Performance
+- trace: added optional write buffering for `JsonlTraceRecorder` (disabled by default, enable with `bufferSize > 1`)
+
+### Documentation
+- Added task pack authoring guide (`docs/taskpack-authoring.md`)
 - Server: X-Forwarded-For uses last entry before proxy to resist spoofing
 - Adapters: qwen-adapter variable shadowing fixed, pricing uses correct model key
 - Adapters: claude-adapter includes parsed.error in status determination
