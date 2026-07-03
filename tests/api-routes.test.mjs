@@ -29,10 +29,12 @@ async function withTempProviderRegistry(fn) {
   const originalRoot = process.env.AGENTARENA_CLAUDE_PROFILE_ROOT;
   const originalFile = process.env.AGENTARENA_CLAUDE_PROFILES_FILE;
   const originalPrefix = process.env.AGENTARENA_CLAUDE_SECRET_PREFIX;
+  const originalDnsCheck = process.env.AGENTARENA_SKIP_DNS_CHECK;
 
   process.env.AGENTARENA_CLAUDE_PROFILE_ROOT = tempDir;
   process.env.AGENTARENA_CLAUDE_PROFILES_FILE = path.join(tempDir, "profiles.json");
   process.env.AGENTARENA_CLAUDE_SECRET_PREFIX = `AgentArena/test/${Date.now()}/`;
+  process.env.AGENTARENA_SKIP_DNS_CHECK = "1";
 
   try {
     await fn();
@@ -43,6 +45,8 @@ async function withTempProviderRegistry(fn) {
     else process.env.AGENTARENA_CLAUDE_PROFILES_FILE = originalFile;
     if (originalPrefix === undefined) delete process.env.AGENTARENA_CLAUDE_SECRET_PREFIX;
     else process.env.AGENTARENA_CLAUDE_SECRET_PREFIX = originalPrefix;
+    if (originalDnsCheck === undefined) delete process.env.AGENTARENA_SKIP_DNS_CHECK;
+    else process.env.AGENTARENA_SKIP_DNS_CHECK = originalDnsCheck;
     await rm(tempDir, { recursive: true, force: true });
   }
 }

@@ -560,7 +560,8 @@ export async function saveClaudeProviderProfile(input: ClaudeProviderProfileInpu
   // internal/private. Without this, an attacker could register a domain that
   // initially resolves to a public IP (passing isInternalUrl) but later resolves
   // to 127.0.0.1 at request time, bypassing the SSRF protection.
-  if (input.baseUrl) {
+  // Skip when AGENTARENA_SKIP_DNS_CHECK=1 (test environments with captive DNS).
+  if (input.baseUrl && process.env.AGENTARENA_SKIP_DNS_CHECK !== "1") {
     try {
       const isDnsInternal = await hasInternalDnsResolution(input.baseUrl);
       if (isDnsInternal) {

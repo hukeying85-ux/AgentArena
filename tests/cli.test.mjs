@@ -989,7 +989,8 @@ test("agentarena ui exposes Claude provider profile APIs", { timeout: 60_000 }, 
     {
       AGENTARENA_CLAUDE_PROFILE_ROOT: tempDir,
       AGENTARENA_CLAUDE_PROFILES_FILE: registryPath,
-      AGENTARENA_CLAUDE_SECRET_PREFIX: `AgentArena/test/${Date.now()}/`
+      AGENTARENA_CLAUDE_SECRET_PREFIX: `AgentArena/test/${Date.now()}/`,
+      AGENTARENA_SKIP_DNS_CHECK: "1"
     }
   );
 

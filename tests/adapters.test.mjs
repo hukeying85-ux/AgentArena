@@ -630,16 +630,23 @@ test("parseGeminiEvents ignores non-JSON lines", () => {
 
 test("new adapter preflight returns missing when CLI not installed", async () => {
   const adaptersToTest = ["gemini-cli", "aider", "kilo-cli", "opencode"];
+  let missingCount = 0;
   for (const adapterId of adaptersToTest) {
     const adapter = getAdapter(adapterId);
     const preflight = await adapter.preflight({ probeAuth: false });
     assert.equal(preflight.agentId, adapterId);
-    // When CLI is not installed, status should be "missing"
-    assert.ok(
-      preflight.status === "missing" || preflight.status === "unverified",
-      `${adapterId}: expected missing or unverified, got ${preflight.status}`
-    );
+    // When CLI is not installed, status should be "missing" or "unverified".
+    // Adapters that are actually installed on this machine return "ready".
+    if (preflight.status !== "ready") {
+      assert.ok(
+        preflight.status === "missing" || preflight.status === "unverified",
+        `${adapterId}: expected missing or unverified, got ${preflight.status}`
+      );
+      missingCount++;
+    }
   }
+  // At least some adapters should be missing in any environment
+  assert.ok(missingCount > 0, "Expected at least one adapter to be missing");
 });
 
 test("Claude provider profiles persist metadata without leaking secrets", async () => {
@@ -648,9 +655,11 @@ test("Claude provider profiles persist metadata without leaking secrets", async 
   const originalRoot = process.env.AGENTARENA_CLAUDE_PROFILE_ROOT;
   const originalFile = process.env.AGENTARENA_CLAUDE_PROFILES_FILE;
   const originalPrefix = process.env.AGENTARENA_CLAUDE_SECRET_PREFIX;
+  const originalDnsCheck = process.env.AGENTARENA_SKIP_DNS_CHECK;
   process.env.AGENTARENA_CLAUDE_PROFILE_ROOT = tempDir;
   process.env.AGENTARENA_CLAUDE_PROFILES_FILE = registryPath;
   process.env.AGENTARENA_CLAUDE_SECRET_PREFIX = `AgentArena/test/${Date.now()}/`;
+  process.env.AGENTARENA_SKIP_DNS_CHECK = "1";
 
   let profileId;
   try {
@@ -713,6 +722,8 @@ test("Claude provider profiles persist metadata without leaking secrets", async 
     } else {
       process.env.AGENTARENA_CLAUDE_SECRET_PREFIX = originalPrefix;
     }
+    if (originalDnsCheck === undefined) delete process.env.AGENTARENA_SKIP_DNS_CHECK;
+    else process.env.AGENTARENA_SKIP_DNS_CHECK = originalDnsCheck;
     await rm(tempDir, { recursive: true, force: true });
   }
 });
@@ -750,9 +761,11 @@ test("resolveClaudeRuntime and workspace settings respect provider profiles", as
   const originalRoot = process.env.AGENTARENA_CLAUDE_PROFILE_ROOT;
   const originalFile = process.env.AGENTARENA_CLAUDE_PROFILES_FILE;
   const originalPrefix = process.env.AGENTARENA_CLAUDE_SECRET_PREFIX;
+  const originalDnsCheck = process.env.AGENTARENA_SKIP_DNS_CHECK;
   process.env.AGENTARENA_CLAUDE_PROFILE_ROOT = tempDir;
   process.env.AGENTARENA_CLAUDE_PROFILES_FILE = registryPath;
   process.env.AGENTARENA_CLAUDE_SECRET_PREFIX = `AgentArena/test/${Date.now()}/`;
+  process.env.AGENTARENA_SKIP_DNS_CHECK = "1";
 
   let profileId;
   try {
@@ -839,6 +852,8 @@ test("resolveClaudeRuntime and workspace settings respect provider profiles", as
     } else {
       process.env.AGENTARENA_CLAUDE_SECRET_PREFIX = originalPrefix;
     }
+    if (originalDnsCheck === undefined) delete process.env.AGENTARENA_SKIP_DNS_CHECK;
+    else process.env.AGENTARENA_SKIP_DNS_CHECK = originalDnsCheck;
     await rm(tempDir, { recursive: true, force: true });
   }
 });

@@ -80,8 +80,10 @@ async function withTempRoot(fn) {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "agentarena-test-"));
   const originalRoot = process.env.AGENTARENA_CLAUDE_PROFILE_ROOT;
   const originalFile = process.env.AGENTARENA_CLAUDE_PROFILES_FILE;
+  const originalDnsCheck = process.env.AGENTARENA_SKIP_DNS_CHECK;
   process.env.AGENTARENA_CLAUDE_PROFILE_ROOT = tmpDir;
   process.env.AGENTARENA_CLAUDE_PROFILES_FILE = path.join(tmpDir, "claude-provider-profiles.json");
+  process.env.AGENTARENA_SKIP_DNS_CHECK = "1";
   try {
     await fn(tmpDir);
   } finally {
@@ -89,6 +91,8 @@ async function withTempRoot(fn) {
     if (!originalRoot) delete process.env.AGENTARENA_CLAUDE_PROFILE_ROOT;
     process.env.AGENTARENA_CLAUDE_PROFILES_FILE = originalFile ?? "";
     if (!originalFile) delete process.env.AGENTARENA_CLAUDE_PROFILES_FILE;
+    if (originalDnsCheck === undefined) delete process.env.AGENTARENA_SKIP_DNS_CHECK;
+    else process.env.AGENTARENA_SKIP_DNS_CHECK = originalDnsCheck;
     await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
   }
 }
