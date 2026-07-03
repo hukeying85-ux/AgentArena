@@ -4,8 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { TraceReplayer } from "../packages/trace/dist/replay.js";
 import { JsonlTraceRecorder } from "../packages/trace/dist/index.js";
+import { TraceReplayer } from "../packages/trace/dist/replay.js";
 
 test("TraceReplayer builds timeline from events", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "trace-replay-"));

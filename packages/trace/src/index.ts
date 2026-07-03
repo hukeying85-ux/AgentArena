@@ -111,7 +111,6 @@ async function queryTraceFileStream(
 
 export class JsonlTraceRecorder {
   private static readonly MAX_QUEUE_DEPTH = 1000;
-  private static readonly DEFAULT_BUFFER_SIZE = 50;
   private directoryEnsured = false;
   private writeQueue: Promise<void> = Promise.resolve();
   private queueDepth = 0;
