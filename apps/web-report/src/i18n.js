@@ -878,7 +878,7 @@ const zhCN = {
   launcherTaskSelectLabel: "官方任务包",
 
   // Search
-  searchRuns: "搜索 run...",
+  searchRuns: "搜索运行记录...",
 
   // Comparison
   allStatuses: "全部状态",
