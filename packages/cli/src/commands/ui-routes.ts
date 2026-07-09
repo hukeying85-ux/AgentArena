@@ -3,9 +3,10 @@ import { promises as fs } from "node:fs";
 import type http from "node:http";
 import path from "node:path";
 import type { getCodexDefaultResolvedRuntime } from "@agentarena/adapters";
-import { createCancellation, createRunId, isAbortError, isPathInsideWorkspace, metrics } from "@agentarena/core";
+import { AgentLogStore, createCancellation, createRunId, isAbortError, isPathInsideWorkspace, metrics } from "@agentarena/core";
 import { writeReport } from "@agentarena/report";
 import { type BenchmarkProgressEvent, runBenchmark } from "@agentarena/runner";
+import { TraceTailer } from "@agentarena/trace";
 import {
   checkAuthHeader,
   checkCorsOrigin,
@@ -44,6 +45,7 @@ import {
   type UiRunStatus,
   WEB_REPORT_DIST_ROOT,
 } from "./shared.js";
+import { SseConnection } from "./sse.js";
 
 export { WEB_REPORT_DIST_ROOT };
 
@@ -68,6 +70,10 @@ function escapeHtmlAttribute(value: string): string {
 export interface ActiveUiRun {
   promise: Promise<unknown>;
   cancel: () => void;
+  /** Agent log store for this run — populated when the run starts. */
+  agentLogStore?: AgentLogStore;
+  /** Live SSE connections subscribed to this run's events. */
+  sseConnections?: Set<SseConnection>;
 }
 
 /**
@@ -117,6 +123,14 @@ export interface RequestContext {
   runStarting: boolean;
   setRunStarting: (val: boolean) => void;
   flushSaveRunState: () => Promise<void>;
+  /**
+   * Persistent per-run log stores. Keyed by runId so logs survive after
+   * activeRun is nulled (e.g. for post-run failure diagnosis).
+   * Eviction: keeps last MAX_PERSISTED_LOG_RUNS runs.
+   */
+  agentLogStores: Map<string, AgentLogStore>;
+  /** Get log store for a completed run (by runId) */
+  getLogStore: (runId: string) => AgentLogStore | undefined;
 }
 
 export function createRequestHandler(ctx: RequestContext) {
@@ -291,6 +305,48 @@ export function createRequestHandler(ctx: RequestContext) {
         return;
       }
 
+      // GET /api/agent-logs?agentId=xxx&limit=50[&runId=xxx] — per-agent log lines
+      // Supports both live (activeRun) and post-run (persisted by runId) queries.
+      if (request.method === "GET" && requestUrl.pathname === "/api/agent-logs") {
+        const agentId = requestUrl.searchParams.get("agentId") ?? "";
+        const runId = requestUrl.searchParams.get("runId") ?? "";
+        const limit = Number.parseInt(requestUrl.searchParams.get("limit") ?? "200", 10);
+        // Try active run first (live), then fall back to persisted store (post-run)
+        const store = ctx.activeRun?.agentLogStore ?? (runId ? ctx.getLogStore(runId) : undefined);
+        if (!store) {
+          sendApiResponse(response, jsonResponse({ logs: [] }));
+          return;
+        }
+        const logs = store.last(agentId, Number.isFinite(limit) ? Math.min(limit, 1000) : 200);
+        sendApiResponse(response, jsonResponse({ agentId, logs }));
+        return;
+      }
+
+      // GET /api/run-stream?token=xxx — SSE live event stream
+      if (request.method === "GET" && requestUrl.pathname === "/api/run-stream") {
+        const token = requestUrl.searchParams.get("token") ?? "";
+        if (token !== ctx.authToken) {
+          response.writeHead(401, { "Content-Type": "text/plain", "Cache-Control": "no-store" });
+          response.end("Unauthorized");
+          return;
+        }
+        // SSE connections are tracked on the active run and closed when the
+        // run completes. If no run is active, send a single snapshot event.
+        // Pass request for reliable client-disconnect detection.
+        const conn = new SseConnection(response, request);
+        if (ctx.activeRun) {
+          ctx.activeRun.sseConnections?.add(conn);
+          // Send current snapshot immediately on connect
+          conn.send("snapshot", ctx.activeRunStatus);
+        } else {
+          // No active run — send current status and close
+          conn.send("snapshot", ctx.activeRunStatus);
+          conn.close("no-run", { message: "No active benchmark run." });
+        }
+        // Return without calling end() — SseConnection manages the response lifecycle.
+        return;
+      }
+
       // POST /api/run — kept in-line due to deep state coupling
       if (request.method === "POST" && requestUrl.pathname === "/api/run") {
         // Mutex guard: In Node.js's single-threaded event loop, the check and assignment
@@ -334,6 +390,7 @@ export function createRequestHandler(ctx: RequestContext) {
           sendApiResponse(response, jsonResponse({ error: "At least one agent selection is required." }, 400));
           return;
         }
+        const outputPath = path.resolve(runPayload.outputPath || path.join(process.cwd(), ".agentarena", "ui-runs"));
 
         // Reset status to clean state before starting a new run
         const freshStatus: UiRunStatus = {
@@ -353,7 +410,7 @@ export function createRequestHandler(ctx: RequestContext) {
           startedAt: new Date().toISOString(),
           repoPath: runPayload.repoPath,
           taskPath: runPayload.taskPath,
-          outputPath: runPayload.outputPath
+          outputPath
         });
         ctx.appendRunLog({
           phase: "starting",
@@ -363,17 +420,25 @@ export function createRequestHandler(ctx: RequestContext) {
         const cancellationController = new AbortController();
         const cancellation = createCancellation(cancellationController.signal);
         const currentRunGeneration = ctx.incrementRunGeneration();
+        const uiRunId = createRunId();
+
+        // SSE connection tracking + agent log store — declared in outer scope
+        // so the finally block (which runs even on error) can close connections
+        // and the SSE endpoint can access the log store immediately.
+        const runSseConnections = new Set<SseConnection>();
+        const agentLogStore = new AgentLogStore(1000);
+
+        // Trace tailers — one per running agent, emits real-time trace records via SSE
+        const traceTailers = new Map<string, { tailer: TraceTailer; variantId: string }>();
 
         const activeRun = {
           cancel: () => cancellationController.abort(),
+          sseConnections: runSseConnections,
+          agentLogStore,
           promise: (async () => {
           // Mutex is now transferred to activeRun; clear the starting flag
           ctx.setRunStarting(false);
           try {
-            const uiRunId = createRunId();
-            const outputPath = runPayload.outputPath
-              ? path.resolve(runPayload.outputPath)
-              : undefined;
             const benchmark = await runBenchmark({
               runId: uiRunId,
               repoPath: runPayload.repoPath,
@@ -388,13 +453,17 @@ export function createRequestHandler(ctx: RequestContext) {
               scoreMode: runPayload.scoreMode,
               tokenBudget: runPayload.tokenBudget ? (Number(runPayload.tokenBudget) || undefined) : undefined,
               cancellation,
+              enableActivityEvents: true,
+              agentLogStore,
               onProgress: (event: BenchmarkProgressEvent) => {
                 const phase =
                   event.phase === "starting" || event.phase === "preflight"
                     ? event.phase
                     : event.phase === "report"
                       ? "report"
-                      : "benchmark";
+                      : event.phase === "agent-activity"
+                        ? "benchmark"
+                        : "benchmark";
                 ctx.setRunStatus({
                   phase,
                   currentAgentId:
@@ -408,7 +477,8 @@ export function createRequestHandler(ctx: RequestContext) {
                   currentDisplayLabel:
                     event.phase === "agent-start" || event.phase === "agent-finish"
                       ? event.displayLabel
-                      : ctx.activeRunStatus.currentDisplayLabel
+                      : ctx.activeRunStatus.currentDisplayLabel,
+                  snapshot: event.snapshot ?? ctx.activeRunStatus.snapshot
                 });
                 ctx.appendRunLog({
                   phase,
@@ -417,8 +487,88 @@ export function createRequestHandler(ctx: RequestContext) {
                   variantId: event.variantId,
                   displayLabel: event.displayLabel
                 });
+
+                // Prune connections whose client disconnected (browser refresh) so
+                // the Set doesn't accumulate stale references during long runs.
+                // Safe to mutate a Set during for..of iteration.
+                for (const conn of runSseConnections) {
+                  if (conn.isClosed) {
+                    runSseConnections.delete(conn);
+                  }
+                }
+                // Broadcast to all connected SSE clients
+                for (const conn of runSseConnections) {
+                  if (conn.isClosed) continue;
+                  if (event.phase === "agent-activity") {
+                    conn.send("activity", {
+                      agentId: event.agentId,
+                      variantId: event.variantId,
+                      displayLabel: event.displayLabel,
+                      line: event.line,
+                      seq: event.seq,
+                      stream: event.stream,
+                      ts: Date.now()
+                    });
+                  } else {
+                    conn.send("progress", {
+                      phase: event.phase,
+                      message: event.message,
+                      agentId: event.agentId,
+                      variantId: event.variantId,
+                      displayLabel: event.displayLabel,
+                      snapshot: event.snapshot,
+                      ts: Date.now()
+                    });
+                  }
+                }
+
+                // Trace tailer lifecycle — start on agent-start, stop on agent-finish
+                if (event.phase === "agent-start" && event.variantId && outputPath) {
+                  const tracePath = path.join(outputPath, "agents", event.variantId, "trace.jsonl");
+                  // Only start if not already tailing this variant
+                  if (!traceTailers.has(event.variantId)) {
+                    const tailer = new TraceTailer(tracePath, (record) => {
+                      // Broadcast new trace records to all SSE clients
+                      for (const conn of runSseConnections) {
+                        if (conn.isClosed) continue;
+                        conn.send("trace-record", {
+                          agentId: event.agentId,
+                          variantId: event.variantId,
+                          displayLabel: event.displayLabel,
+                          record,
+                          ts: Date.now()
+                        });
+                      }
+                    });
+                    tailer.start();
+                    traceTailers.set(event.variantId, { tailer, variantId: event.variantId });
+                  }
+                }
+                if (event.phase === "agent-finish" && event.variantId) {
+                  const entry = traceTailers.get(event.variantId);
+                  if (entry) {
+                    entry.tailer.stop();  // grace tick flushes trailing records
+                    traceTailers.delete(event.variantId);
+                  }
+                }
               }
             });
+
+            // Persist the log store BEFORE activeRun is nulled in finally.
+            // This enables /api/agent-logs?runId=xxx to work post-run.
+            ctx.agentLogStores.set(uiRunId, agentLogStore);
+            // Evict oldest if over capacity (keep last 10 runs)
+            const MAX_PERSISTED = 10;
+            if (ctx.agentLogStores.size > MAX_PERSISTED) {
+              const oldest = ctx.agentLogStores.keys().next().value;
+              if (oldest) ctx.agentLogStores.delete(oldest);
+            }
+
+            // Store references so SSE endpoint and /api/agent-logs can access them
+            if (ctx.activeRun) {
+              ctx.activeRun.agentLogStore = agentLogStore;
+              ctx.activeRun.sseConnections = runSseConnections;
+            }
 
             const runCancelled =
               cancellationController.signal.aborted || benchmark.results.some((result) => result.status === "cancelled");
@@ -485,6 +635,18 @@ export function createRequestHandler(ctx: RequestContext) {
                   }
             );
           } finally {
+            // Stop all trace tailers (they were tracking this run)
+            for (const [, entry] of traceTailers) {
+              try { entry.tailer.stop(); } catch { /* ignore */ }
+            }
+            traceTailers.clear();
+            // Close all SSE connections (they were tracking this run)
+            for (const conn of runSseConnections) {
+              if (!conn.isClosed) {
+                try { conn.close("done", { runId: uiRunId }); } catch { /* ignore */ }
+              }
+            }
+            runSseConnections.clear();
             // Only update state if this is still the current run (not stale from a cancel/restart)
             if (currentRunGeneration === ctx.runGeneration) {
               if (ctx.activeRunStatus.state !== "cancelling" && ctx.activeRunStatus.state !== "cancelled" && ctx.activeRunStatus.state !== "error") {
@@ -524,9 +686,15 @@ export function createRequestHandler(ctx: RequestContext) {
       // ─── Static file serving ───
 
       if (request.method === "GET") {
+        // SECURITY: resolve the web root via realpath once so symlink / \\?\ long-path
+        // forms cannot escape the containment check below.
+        const rootReal = await fs.realpath(WEB_REPORT_DIST_ROOT).catch(() => WEB_REPORT_DIST_ROOT);
         let filePath = requestUrl.pathname === "/" ? path.join(WEB_REPORT_DIST_ROOT, "index.html") : path.join(WEB_REPORT_DIST_ROOT, requestUrl.pathname.replace(/^\/+/, ""));
         filePath = path.normalize(filePath);
-        const insideWorkspace = await isPathInsideWorkspace(WEB_REPORT_DIST_ROOT, filePath);
+        // Re-resolve the target via realpath (falls back to the normalized path if
+        // it does not exist yet, e.g. SPA routes) so symlink escapes are caught.
+        const fileReal = await fs.realpath(filePath).catch(() => filePath);
+        const insideWorkspace = await isPathInsideWorkspace(rootReal, fileReal);
         if (!insideWorkspace) {
           sendApiResponse(response, textResponse("Forbidden", 403));
           return;
