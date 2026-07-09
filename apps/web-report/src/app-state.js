@@ -97,6 +97,7 @@ const state = {
   language: "zh-CN",
   notice: null,
   noticeKind: null,
+  _lastNoticedKind: null,
   serviceInfo: null,
   availableAdapters: [],
   availableTaskPacks: [],

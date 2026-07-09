@@ -154,7 +154,52 @@ function hideLoading() {
 function showError(message) {
   state.notice = `Warning: ${message}`;
   state.noticeKind = "error";
+  showToast(`Warning: ${message}`, "error");
   render();
+}
+
+// ---------------------------------------------------------------------------
+// Toast notification system — fixed-position, always-visible feedback.
+// Replaces hidden inline messages that users missed when scrolled away.
+// ---------------------------------------------------------------------------
+let toastTimers = new Map();
+
+function showToast(message, kind = "success", duration = 5000) {
+  const container = document.getElementById("toast-container");
+  if (!container) return;
+
+  const toast = document.createElement("div");
+  toast.className = `toast toast-${kind}`;
+  toast.setAttribute("role", kind === "error" ? "alert" : "status");
+
+  const iconMap = { success: "✓", error: "⚠", warning: "⚠" };
+  const icon = iconMap[kind] || "•";
+
+  toast.innerHTML = `
+    <span class="toast-icon">${icon}</span>
+    <span class="toast-message">${escapeHtml(String(message))}</span>
+    <button type="button" class="toast-close" aria-label="Close">&times;</button>
+  `;
+
+  // Close on click or X button
+  const close = () => {
+    if (toast.dataset.removing) return;
+    toast.dataset.removing = "true";
+    toast.classList.add("removing");
+    const timer = toastTimers.get(toast);
+    if (timer) { clearTimeout(timer); toastTimers.delete(toast); }
+    setTimeout(() => toast.remove(), 250);
+  };
+
+  toast.querySelector(".toast-close").addEventListener("click", (e) => { e.stopPropagation(); close(); });
+  toast.addEventListener("click", close);
+  container.appendChild(toast);
+
+  // Auto-dismiss
+  if (duration > 0) {
+    const timer = setTimeout(close, duration);
+    toastTimers.set(toast, timer);
+  }
 }
 
 function setText(id, value) {
@@ -869,12 +914,11 @@ function render() {
   try { renderStaticText(); } catch(e) { console.error("[agentarena] renderStaticText error:", e); renderErrors.push(`Static text: ${e instanceof Error ? e.message : String(e)}`); }
   if (elements.resultLoaderMessage) {
     const noticeText = state.notice ?? "";
-    elements.resultLoaderMessage.textContent = noticeText;
-    elements.resultLoaderMessage.hidden = !noticeText;
-    // Reflect notice kind via CSS class for color coding (success vs error)
-    elements.resultLoaderMessage.classList.remove("notice-success", "notice-error");
-    if (noticeText && state.noticeKind) {
-      elements.resultLoaderMessage.classList.add(`notice-${state.noticeKind}`);
+    // Push ALL notices to a fixed-position toast so they're visible regardless
+    // of scroll position (fixes the "error msg is above the fold" problem).
+    if (noticeText && state.noticeKind && state.noticeKind !== state._lastNoticedKind) {
+      showToast(noticeText, state.noticeKind);
+      state._lastNoticedKind = state.noticeKind;
     }
   }
   try { renderLauncher(); } catch(e) { console.error("[agentarena] renderLauncher error:", e); renderErrors.push(`Launcher: ${e instanceof Error ? e.message : String(e)}`); }

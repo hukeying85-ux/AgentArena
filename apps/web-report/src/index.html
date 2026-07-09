@@ -362,7 +362,6 @@
             </section>
             <details id="result-loader-panel" class="detail-card workspace-card workspace-card-secondary workspace-loader" open>
               <summary id="result-loader-summary" data-i18n="loadHistoryTitle">加载历史报告</summary>
-              <div id="result-loader-message" class="result-loader-message hidden" role="alert" aria-live="assertive"></div>
               <div id="loading-indicator" class="loading-indicator hidden" role="status" aria-live="polite" aria-label="Loading">
                 <div class="loading-spinner" aria-hidden="true"></div>
                 <span id="loading-message" class="muted">Loading results...</span>
@@ -845,5 +844,10 @@
         });
       }
     </script>
+
+    <!-- Toast notification container — fixed position so errors are always visible
+         regardless of scroll position. Solves the "error msg is above the fold,
+         user can't see it" problem. -->
+    <div id="toast-container" class="toast-container" aria-live="assertive" aria-atomic="true"></div>
   </body>
 </html>

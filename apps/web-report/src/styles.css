@@ -7931,6 +7931,132 @@ button, a, .card, .panel, select, input, .tag {
   content: "⚠";
 }
 
+/* === TOAST NOTIFICATIONS — fixed position, always visible ===
+   Solves the "error is at top of panel, user is at bottom" scroll problem.
+   Toasts slide up from the bottom and auto-dismiss. */
+
+.toast-container {
+  position: fixed;
+  bottom: var(--space-5);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: var(--space-2);
+  align-items: stretch;
+  max-width: min(480px, calc(100vw - var(--space-8)));
+  width: 100%;
+  pointer-events: none;
+}
+
+.toast {
+  pointer-events: auto;
+  padding: var(--space-3) var(--space-4);
+  padding-right: var(--space-8);
+  border-radius: var(--radius-lg);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-relaxed);
+  box-shadow: var(--shadow-lg);
+  position: relative;
+  cursor: pointer;
+  animation: toastSlideUp 0.3s var(--ease-out);
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  border: 1px solid transparent;
+}
+
+.toast.removing {
+  animation: toastFadeOut 0.25s var(--ease-in-out) forwards;
+}
+
+@keyframes toastSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes toastFadeOut {
+  to {
+    opacity: 0;
+    transform: translateY(8px) scale(0.95);
+  }
+}
+
+.toast-success {
+  background: var(--success-soft);
+  border-color: var(--success-soft-strong);
+  color: var(--success-light);
+}
+
+.toast-success .toast-icon {
+  color: var(--success-light);
+}
+
+.toast-error {
+  background: var(--danger-soft);
+  border-color: var(--danger-soft-strong);
+  color: var(--danger-light);
+}
+
+.toast-error .toast-icon {
+  color: var(--danger-light);
+}
+
+.toast-warning {
+  background: var(--warning-soft);
+  border-color: var(--warning-soft-strong);
+  color: var(--warning-light);
+}
+
+.toast-warning .toast-icon {
+  color: var(--warning-light);
+}
+
+.toast-icon {
+  flex-shrink: 0;
+  font-size: 1rem;
+  line-height: 1.4;
+  width: 18px;
+  text-align: center;
+}
+
+.toast-message {
+  flex: 1;
+}
+
+.toast-close {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: currentColor;
+  opacity: 0.6;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity var(--transition-fast);
+}
+
+.toast-close:hover {
+  opacity: 1;
+  background: rgba(0,0,0,0.1);
+}
+
 /* === SUB-OPTIONS — "More options" with clear affordance === */
 .sub-options {
   margin-top: var(--space-3);
