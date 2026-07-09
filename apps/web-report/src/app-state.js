@@ -47,6 +47,9 @@ import { DEFAULT_SCORE_WEIGHTS } from "./view-model/scoring.js";
  * @property {Object|null} runStatus - Current run status from polling
  * @property {number|null} runStatusPollTimer - Interval timer ID
  * @property {number} runStatusRequestSeq - Request sequence for race protection
+ * @property {Object} agentLogs - Per-agent log ring buffers: { [variantId]: string[] }
+ * @property {Object} agentActivity - Per-agent current activity: { [variantId]: { line, ts } }
+ * @property {Object|null} streamClient - SSE/poll transport client (StreamClient | null)
  *
  * Launcher variant state:
  * @property {Array} launcherSelectedAgentIds - Non-variant agent IDs
@@ -93,6 +96,7 @@ const state = {
   standaloneMarkdown: null,
   language: "zh-CN",
   notice: null,
+  noticeKind: null,
   serviceInfo: null,
   availableAdapters: [],
   availableTaskPacks: [],
@@ -101,6 +105,9 @@ const state = {
   runStatus: null,
   runStatusPollTimer: null,
   runStatusRequestSeq: 0,
+  agentLogs: {},
+  agentActivity: {},
+  streamClient: null,
   launcherSelectedAgentIds: [],
   launcherCodexVariants: [],
   launcherClaudeVariants: [],

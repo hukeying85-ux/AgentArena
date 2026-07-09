@@ -52,6 +52,7 @@ import {
 } from "./task-utils.js";
 import { createTraceReplayModule } from "./trace-replay.js";
 import { initUiPreferences } from "./ui-preferences.js";
+import "./ui/toast.js";
 import { formatDuration } from "./utils/format.js";
 import { resultStore } from "./utils/storage.js";
 import {
@@ -83,8 +84,10 @@ import {
 } from "./view-model.js";
 
 /**
- * 维护地图（慎改契约）：HTTP `/api/*` JSON 见 `tests/contracts-http-api.test.mjs` · 服务端鉴权见 `tests/server-unit.test.mjs` ·
- * Trace JSONL / TraceEvent 见 `tests/trace-event-contract.test.mjs` · 运维说明见仓库 `docs/ui-and-adapters.md`。
+ * Maintenance map: HTTP `/api/*` JSON is covered by `tests/contracts-http-api.test.mjs`;
+ * server auth is covered by `tests/server-unit.test.mjs`;
+ * Trace JSONL / TraceEvent is covered by `tests/trace-event-contract.test.mjs`;
+ * operational notes live in `docs/ui-and-adapters.md`.
  */
 
 // state is imported from ./app-state.js
@@ -149,7 +152,8 @@ function hideLoading() {
 }
 
 function showError(message) {
-  state.notice = `⚠️ ${message}`;
+  state.notice = `Warning: ${message}`;
+  state.noticeKind = "error";
   render();
 }
 
@@ -275,11 +279,11 @@ function summarizeJudges(taskPack) { return summarizeJudgesImpl(taskPack, t); }
 function runFocusLine(run) {
   const resultCount = (run.results ?? []).length;
 
-  // Single agent — no meaningful "best/fastest/cheapest" comparison
+  // Single agent: no meaningful "best/fastest/cheapest" comparison
   if (resultCount < 2) {
     return localText(
       "本次仅 1 个 agent，无对比基准。",
-      "Only 1 agent in this run — no comparison baseline."
+      "Only 1 agent in this run - no comparison baseline."
     );
   }
 
@@ -469,8 +473,8 @@ let lastRenderedLang = null;
 function renderStaticText() {
   if (lastRenderedLang === state.language) return;
   document.title = state.run
-    ? `AgentArena · ${state.run.task.title}`
-    : `AgentArena · ${t("sidebarTagline")}`;
+    ? `AgentArena \u00b7 ${state.run.task.title}`
+    : `AgentArena \u00b7 ${t("sidebarTagline")}`;
   setText("result-loader-summary", t("loadHistoryTitle"));
   setText("app-title", t("sidebarTagline"));
   setText("app-description", t("appDescription"));
@@ -519,7 +523,7 @@ function renderStaticText() {
   setText("score-weight-cost-label", t("scoreWeightCost"));
   const presetButtons = elements.scoreWeightPresets?.querySelectorAll("button[data-score-preset]") ?? [];
   // Only three presets need translated labels here (correctness-first, efficiency-first,
-  // comprehensive) — the rest use `data-i18n` attributes wired by renderStaticText.
+  // comprehensive); the rest use `data-i18n` attributes wired by renderStaticText.
   for (const button of presetButtons) {
     const presetId = button.dataset.scorePreset;
     switch (presetId) {
@@ -650,8 +654,8 @@ function renderStaticText() {
   if (elements.themeSelect) {
     const currentTheme = document.documentElement.getAttribute("data-theme");
     elements.themeSelect.value = currentTheme;
-    elements.themeSelect.options[0].text = `🌙 ${t("themeLabelDark")}`;
-    elements.themeSelect.options[1].text = `☀️ ${t("themeLabelLight")}`;
+    elements.themeSelect.options[0].text = t("themeLabelDark");
+    elements.themeSelect.options[1].text = t("themeLabelLight");
   }
   elements.judgeSearch.placeholder = t("judgeSearchPlaceholder");
   elements.languageSelect.value = state.language;
@@ -726,7 +730,7 @@ function applyRuns(runs, markdownByRunId = new Map()) {
   state.runs = sortRuns(deduped);
   state.markdownByRunId = markdownByRunId;
   // Prefer the currently selected run, then the first available run
-  // Don't use readLocationState() here — it may reference a stale runId
+  // Do not use readLocationState() here; it may reference a stale runId.
   state.selectedRunId =
     state.runs.some((run) => run.runId === state.selectedRunId)
       ? state.selectedRunId
@@ -849,11 +853,11 @@ async function renderCommunityView() {
 /**
  * Master render function. Call order matters:
  *
- * 1. renderStaticText() — sets all i18n text nodes (no DOM dependency)
- * 2. renderLauncher()   — updates launcher panel (independent)
- * 3. renderRunList()    — builds run list DOM (creates elements used by dashboard)
- * 4. renderDashboard()  — reads run list DOM, renders comparison/verdict/agent detail
- * 5. renderCommunityView() — async fetch, renders community leaderboard
+ * 1. renderStaticText() sets all i18n text nodes (no DOM dependency)
+ * 2. renderLauncher() updates launcher panel (independent)
+ * 3. renderRunList() builds run list DOM (creates elements used by dashboard)
+ * 4. renderDashboard() reads run list DOM, renders comparison/verdict/agent detail
+ * 5. renderCommunityView() async fetch, renders community leaderboard
  *
  * DO NOT reorder without verifying that downstream functions don't depend on
  * DOM elements created by upstream functions. Specifically, renderDashboard()
@@ -864,8 +868,14 @@ function render() {
 
   try { renderStaticText(); } catch(e) { console.error("[agentarena] renderStaticText error:", e); renderErrors.push(`Static text: ${e instanceof Error ? e.message : String(e)}`); }
   if (elements.resultLoaderMessage) {
-    elements.resultLoaderMessage.textContent = state.notice ?? "";
-    elements.resultLoaderMessage.hidden = !state.notice;
+    const noticeText = state.notice ?? "";
+    elements.resultLoaderMessage.textContent = noticeText;
+    elements.resultLoaderMessage.hidden = !noticeText;
+    // Reflect notice kind via CSS class for color coding (success vs error)
+    elements.resultLoaderMessage.classList.remove("notice-success", "notice-error");
+    if (noticeText && state.noticeKind) {
+      elements.resultLoaderMessage.classList.add(`notice-${state.noticeKind}`);
+    }
   }
   try { renderLauncher(); } catch(e) { console.error("[agentarena] renderLauncher error:", e); renderErrors.push(`Launcher: ${e instanceof Error ? e.message : String(e)}`); }
   try { renderRunList(); } catch(e) { console.error("[agentarena] renderRunList error:", e); renderErrors.push(`Run list: ${e instanceof Error ? e.message : String(e)}`); }
@@ -908,7 +918,7 @@ function render() {
 
   // Show render errors visibly so users can report them instead of staring at a blank page
   if (renderErrors.length > 0) {
-    state.notice = `⚠️ Render errors (${renderErrors.length}): ${renderErrors.join("; ")}`;
+    state.notice = `Warning: Render errors (${renderErrors.length}): ${renderErrors.join("; ")}`;
     if (elements.resultLoaderMessage) {
       elements.resultLoaderMessage.textContent = state.notice;
       elements.resultLoaderMessage.hidden = false;
@@ -983,7 +993,7 @@ function updateSidebarSubtitle(substate, runName) {
   const labels = {
     idle: state.language === 'zh-CN' ? '选择配置，开始跑分' : 'Configure to start',
     running: state.language === 'zh-CN' ? '跑分进行中…' : 'Running…',
-    done: state.language === 'zh-CN' ? `运行报告 · ${runName || ''}` : `Report · ${runName || ''}`,
+    done: state.language === 'zh-CN' ? `运行报告 \u00b7 ${runName || ''}` : `Report \u00b7 ${runName || ''}`,
     error: state.language === 'zh-CN' ? '运行失败' : 'Run failed'
   };
   el.textContent = labels[substate] || (state.language === 'zh-CN' ? '跑分配置' : 'Benchmark');
@@ -1024,7 +1034,7 @@ elements.launcherTaskSelect.addEventListener("change", (event) => {
         }
       }
     }
-    // Task pack path summary — hide full path for official packs
+    // Task pack path summary: hide full path for official packs.
     const taskPackSummary = document.getElementById("task-pack-summary");
     const taskPackShortName = document.getElementById("task-pack-short-name");
     if (taskPackSummary && taskPackShortName) {
@@ -1157,11 +1167,11 @@ function showPreflightToast(buttonEl, status, summary) {
 
   const toast = document.createElement("span");
   toast.className = `preflight-toast ${status}`;
-  const icon = status === "ready" ? "✓" : status === "unverified" ? "?" : "✗";
+  const icon = status === "ready" ? "OK" : status === "unverified" ? "?" : "ERR";
   const labelKey = `testConnection${status.charAt(0).toUpperCase() + status.slice(1)}`;
   const label = t(labelKey);
   // Show both label and summary inline so the user can see WHY it failed
-  toast.textContent = summary ? `${icon} ${label} — ${summary}` : `${icon} ${label}`;
+  toast.textContent = summary ? `${icon} ${label} - ${summary}` : `${icon} ${label}`;
   buttonEl.parentElement?.appendChild(toast);
 
   // Auto-remove after 8 seconds (longer so user can read)
@@ -1210,6 +1220,11 @@ elements.launcherScoreMode?.addEventListener("change", (event) => {
 });
 elements.launcherAgents?.addEventListener("change", (event) => {
   const target = event.target;
+  if (target instanceof HTMLElement && target.closest("[data-provider-editor='true']")) {
+    syncLauncherStateFromDom();
+    renderLauncherValidation(validateLauncher());
+    return;
+  }
   if (target?.id === "launcher-global-model-enabled") {
     state.launcherGlobalModelEnabled = target.checked;
     // Toggle input row visibility without full re-render
@@ -1329,9 +1344,19 @@ elements.launcherAgents.addEventListener("click", async (event) => {
     void (async () => {
       try {
         await saveProviderProfileFromEditor();
-        state.notice = localText("Claude Provider 已保存。", "Claude provider saved.");
+        state.notice = localText("Claude provider saved.", "Claude provider saved.");
+        state.noticeKind = "success";
       } catch (error) {
-        state.notice = error instanceof Error ? error.message : String(error);
+        // Surface "Failed to fetch" with actionable guidance instead of a silent notice.
+        const msg = error instanceof Error ? error.message : String(error);
+        const isFetchError = msg.toLowerCase().includes("fetch") || msg.toLowerCase().includes("network");
+        state.notice = isFetchError
+          ? localText(
+              "保存失败：无法连接到本地服务。请确认 AgentArena UI 服务器正在运行，且页面是通过 http://127.0.0.1:4320 访问的（不能通过其他地址访问）。",
+              "Save failed: cannot reach local service. Make sure the AgentArena UI server is running and the page was opened via http://127.0.0.1:4320 (not another address)."
+            )
+          : msg;
+        state.noticeKind = "error";
       }
       render();
     })();
@@ -1346,7 +1371,7 @@ elements.launcherAgents.addEventListener("click", async (event) => {
     void (async () => {
       try {
         await deleteProviderProfileById(profileId);
-        state.notice = localText("Claude Provider 已删除。", "Claude provider deleted.");
+        state.notice = localText("Claude provider deleted.", "Claude provider deleted.");
       } catch (error) {
         state.notice = error instanceof Error ? error.message : String(error);
       }
@@ -1411,7 +1436,7 @@ elements.launcherAgents.addEventListener("click", async (event) => {
     handleTestConnection(target);
   }
 
-  // Detect all agents button — uses the new /api/agent-detection endpoint
+  // Detect all agents button uses the new /api/agent-detection endpoint.
   // which checks every adapter (including ones not shown in the UI).
   if (target.id === "detect-all-agents") {
     target.disabled = true;
@@ -1501,7 +1526,7 @@ elements.launcherToggle.addEventListener("click", () => {
   renderLauncher();
 });
 
-// Back to launcher button — clear run state and show launcher
+// Back to launcher button: clear run state and show launcher.
 if (elements.backToLauncher) {
   elements.backToLauncher.addEventListener("click", () => {
     // Clear run state so render() shows workspace-home with launcher
@@ -1807,14 +1832,14 @@ const restoredCache = restoreCachedRuns();
 if (restoredCache) {
   state.standaloneMarkdown = restoredCache.standaloneMarkdown;
   applyRuns(restoredCache.runs, restoredCache.markdownByRunId);
-  state.notice = localText("已恢复最近一次缓存结果，可离线查看。", "Restored the latest cached report for offline viewing.");
+  state.notice = localText("Restored the latest cached report for offline viewing.", "Restored the latest cached report for offline viewing.");
 } else {
-  // localStorage 无缓存时，尝试从 IndexedDB 恢复
+  // localStorage 鏃犵紦瀛樻椂锛屽皾璇曚粠 IndexedDB 鎭㈠
   restoreRunsFromIndexedDB().then((idbData) => {
     if (idbData && idbData.runs.length > 0 && state.runs.length === 0) {
       applyRuns(idbData.runs, idbData.markdownByRunId);
       state.notice = localText(
-        "已从 IndexedDB 恢复历史数据。",
+        "Restored history from IndexedDB.",
         "Restored history from IndexedDB."
       );
       render();
@@ -1822,7 +1847,7 @@ if (restoredCache) {
   });
 }
 
-// 跨运行对比功能 — delegated to cross-run-events module
+// Cross-run comparison is delegated to the cross-run-events module.
 initCrossRunEvents({
   elements,
   state,
@@ -1953,11 +1978,11 @@ window.addEventListener("popstate", () => {
   state.language = locationState.language ?? readStorage("agentarena.webReport.language") ?? state.language;
   document.documentElement.lang = state.language === "zh-CN" ? "zh-CN" : "en";
 
-  // Validate runId exists in loaded runs — clear URL param if not found
+  // Validate runId exists in loaded runs; clear URL param if not found.
   if (locationState.runId && state.runs.some((run) => run.runId === locationState.runId)) {
     state.selectedRunId = locationState.runId;
   } else if (locationState.runId) {
-    // Run not found — clear stale URL params
+    // Run not found; clear stale URL params.
     state.selectedRunId = state.runs[0]?.runId ?? null;
     syncLocationState(state);
   }
@@ -1984,7 +2009,7 @@ function loadDemoData() {
   setTimeout(() => {
     applyRuns([demoRun]);
     state.notice = localText(
-      "演示数据已加载。这是一个模拟的 benchmark 结果，展示了 AgentArena 的主要功能。",
+      "Demo data loaded. This is a simulated benchmark result showcasing AgentArena main features.",
       "Demo data loaded. This is a simulated benchmark result showcasing AgentArena's main features."
     );
     
@@ -2018,17 +2043,17 @@ function showIndexedDBWarning() {
 
   const icon = document.createElement('span');
   icon.className = 'warning-icon';
-  icon.textContent = '⚠️';
+  icon.textContent = '!';
 
   const text = document.createElement('span');
   text.className = 'warning-text';
   text.textContent = state.language === 'zh-CN'
-    ? '当前处于隐私模式，数据不会持久化保存。建议切换到普通模式以使用完整功能。'
+    ? 'You are in private mode. Data will not be persisted. Please switch to normal mode for full functionality.'
     : 'You are in private mode. Data will not be persisted. Please switch to normal mode for full functionality.';
 
   const closeBtn = document.createElement('button');
   closeBtn.className = 'warning-close';
-  closeBtn.textContent = '×';
+  closeBtn.textContent = 'x';
   closeBtn.addEventListener('click', () => notice.remove());
 
   notice.append(icon, text, closeBtn);
@@ -2043,7 +2068,7 @@ detectService();
 syncLocationState(state);
 
 // Wire extracted UI modules before first render
-initUiPreferences({ render, renderStaticText, t });
+initUiPreferences({ render, renderStaticText });
 initSidebar();
 
 render();

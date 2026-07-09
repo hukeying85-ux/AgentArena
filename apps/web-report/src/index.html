@@ -362,13 +362,13 @@
             </section>
             <details id="result-loader-panel" class="detail-card workspace-card workspace-card-secondary workspace-loader" open>
               <summary id="result-loader-summary" data-i18n="loadHistoryTitle">加载历史报告</summary>
-              <p id="result-loader-message" class="muted result-loader-message" hidden></p>
+              <div id="result-loader-message" class="result-loader-message hidden" role="alert" aria-live="assertive"></div>
               <div id="loading-indicator" class="loading-indicator hidden" role="status" aria-live="polite" aria-label="Loading">
                 <div class="loading-spinner" aria-hidden="true"></div>
                 <span id="loading-message" class="muted">Loading results...</span>
               </div>
               <label class="file-picker recommended-picker btn-primary">
-                <strong id="runs-folder-title">📁 打开结果文件夹 <span class="btn-badge">推荐</span></strong>
+                <strong id="runs-folder-title">打开结果文件夹 <span class="btn-badge">推荐</span></strong>
                 <p id="runs-folder-hint" class="muted picker-help">Load an existing run when you want to compare earlier baselines or inspect a saved result again.</p>
                 <input id="runs-folder" type="file" webkitdirectory directory multiple />
               </label>
@@ -378,7 +378,12 @@
                 <input id="summary-file" type="file" accept=".json,application/json" />
               </label>
               <details class="sub-options">
-                <summary data-i18n="moreOptions" style="cursor:pointer; font-size: 0.85rem; color: var(--color-muted, #6b7280); padding: 8px 0;">更多选项</summary>
+                <summary>
+                  <span class="sub-options-label">
+                    <svg class="sub-options-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                    <span data-i18n="moreOptions">更多选项</span>
+                  </span>
+                </summary>
                 <label class="file-picker btn-ghost">
                   <strong id="markdown-file-title">打开 Markdown Summary</strong>
                   <p id="markdown-file-hint" class="muted picker-help">Adds share text, PR table, and markdown panel for the selected run.</p>

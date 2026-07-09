@@ -7883,3 +7883,94 @@ button, a, .card, .panel, select, input, .tag {
   font-size: var(--text-sm) !important;
   padding: 5px 12px !important;
 }
+
+/* === ERROR MESSAGE — prominent, hard to miss (fixes hidden error issue) === */
+.result-loader-message {
+  margin: var(--space-3) 0 !important;
+  padding: var(--space-3) var(--space-4) !important;
+  border-radius: var(--radius-md) !important;
+  font-size: var(--text-sm) !important;
+  line-height: var(--leading-relaxed) !important;
+  border: 1px solid var(--danger-soft-strong) !important;
+  background: var(--danger-soft) !important;
+  color: var(--danger-light) !important;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  font-weight: var(--weight-medium);
+}
+
+.result-loader-message::before {
+  content: "⚠";
+  flex-shrink: 0;
+  font-size: 1rem;
+  line-height: 1.4;
+}
+
+.result-loader-message:empty {
+  display: none;
+}
+
+.result-loader-message.notice-success {
+  border-color: var(--success-soft-strong) !important;
+  background: var(--success-soft) !important;
+  color: var(--success-light) !important;
+}
+
+.result-loader-message.notice-success::before {
+  content: "✓";
+}
+
+.result-loader-message.notice-error {
+  border-color: var(--danger-soft-strong) !important;
+  background: var(--danger-soft) !important;
+  color: var(--danger-light) !important;
+}
+
+.result-loader-message.notice-error::before {
+  content: "⚠";
+}
+
+/* === SUB-OPTIONS — "More options" with clear affordance === */
+.sub-options {
+  margin-top: var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--space-2);
+}
+
+.sub-options > summary {
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+}
+
+.sub-options > summary::-webkit-details-marker {
+  display: none;
+}
+
+.sub-options-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-sm) !important;
+  color: var(--text-muted) !important;
+  padding: 6px 0;
+  transition: color var(--transition-fast);
+}
+
+.sub-options-label:hover {
+  color: var(--accent-light) !important;
+}
+
+.sub-options-icon {
+  transition: transform var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.sub-options[open] .sub-options-icon {
+  transform: rotate(180deg);
+}
+
+.sub-options > summary ~ * {
+  margin-top: var(--space-3);
+}
