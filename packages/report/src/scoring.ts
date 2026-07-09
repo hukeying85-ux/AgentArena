@@ -143,12 +143,17 @@ export function computeScoreComponents(
  * 1. Failed run → pressed into FAILED_SCORE_BAND (10–40)
  * 2. Critical judge failure → pressed into CRITICAL_FAIL_SCORE_BAND (50–70)
  * 3. Completed run → weighted linear combination, mapped to 0–100
+ *
+ * @param precomputedComponents - When caller already has components (e.g. from
+ *   `enrichRunWithScores`), pass them in to avoid recomputing the same values
+ *   twice. Falls back to `computeScoreComponents(result, run)` when omitted.
  */
 export function computeCompositeScore(
   result: BenchmarkRun["results"][number],
   run: BenchmarkRun,
   scoreWeights?: Record<string, number>,
-  scoreMode?: ScoreMode
+  scoreMode?: ScoreMode,
+  precomputedComponents?: ReturnType<typeof computeScoreComponents>
 ): number {
   if (isScoreExcluded(result)) {
     return 0;
@@ -166,7 +171,7 @@ export function computeCompositeScore(
     return Math.round(Math.min(FAILED_SCORE_BAND.max, baseScore + efficiencyBonus * FAILED_EFFICIENCY_SCALE) * 10) / 10;
   }
 
-  const components = computeScoreComponents(result, run);
+  const components = precomputedComponents ?? computeScoreComponents(result, run);
 
   // Rule 2: Critical judge failure → partial band (use only applicable non-critical weights)
   if (hasCriticalJudgeFailure(result)) {
@@ -252,6 +257,13 @@ export function computeScoreReasons(result: BenchmarkRun["results"][number], run
 /**
  * Enrich a run with computed scores.
  * This is the main entry point called by the report pipeline.
+ *
+ * The per-result `scoreComponents` are computed once here and serialized into
+ * summary.json. They are the single source of truth for the component values;
+ * the frontend reads them and only performs the weighted aggregation locally
+ * when the user adjusts weights in the UI. This eliminates the previous
+ * dual-source-of-truth where backend and frontend each recomputed components
+ * independently (and could silently diverge).
  */
 export function enrichRunWithScores(run: BenchmarkRun): ScoredRun {
   const rawMode = hasScoreMetadata(run) ? run.scoreMode : undefined;
@@ -266,12 +278,18 @@ export function enrichRunWithScores(run: BenchmarkRun): ScoredRun {
     scoreValidityNote:
       run.scoreValidityNote ??
       "Scores only compare variants inside this run. Treat them as local rankings for the current agent version, model, and provider settings.",
-    results: run.results.map((result) => ({
-      ...result,
-      compositeScore: isScoreExcluded(result)
-        ? undefined
-        : computeCompositeScore(result, run, scoreWeights, scoreMode),
-      scoreReasons: computeScoreReasons(result, run)
-    }))
+    results: run.results.map((result) => {
+      if (isScoreExcluded(result)) {
+        return { ...result, compositeScore: undefined, scoreReasons: computeScoreReasons(result, run) };
+      }
+      // Compute components once, reuse for both compositeScore and storage.
+      const components = computeScoreComponents(result, run);
+      return {
+        ...result,
+        scoreComponents: components,
+        compositeScore: computeCompositeScore(result, run, scoreWeights, scoreMode, components),
+        scoreReasons: computeScoreReasons(result, run)
+      };
+    })
   };
 }

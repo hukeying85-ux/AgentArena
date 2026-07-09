@@ -646,3 +646,100 @@ test("enrichRunWithScores computes scoreReasons for each result", () => {
   const enriched = enrichRunWithScores(run);
   assert.ok(Array.isArray(enriched.results[0].scoreReasons));
 });
+
+test("enrichRunWithScores attaches scoreComponents to each comparable result", () => {
+  const result = createResult({
+    status: "success",
+    durationMs: 1000,
+    estimatedCostUsd: 0.05,
+    costKnown: true,
+    judgeResults: [
+      { success: true, critical: true },
+      { success: true, type: "test-result", totalCount: 5, passedCount: 5 }
+    ]
+  });
+  const run = createRun({ results: [result] });
+  const enriched = enrichRunWithScores(run);
+
+  const components = enriched.results[0].scoreComponents;
+  assert.ok(components, "scoreComponents should be attached to comparable results");
+  assert.equal(typeof components.status, "number");
+  assert.equal(typeof components.tests, "number");
+  assert.equal(typeof components.criticalJudges, "number");
+  assert.equal(typeof components.nonCriticalJudges, "number");
+  assert.equal(typeof components.lint, "number");
+  assert.equal(typeof components.precision, "number");
+  assert.equal(typeof components.duration, "number");
+  assert.equal(typeof components.cost, "number");
+  assert.equal(typeof components.resolutionRate, "number");
+  assert.equal(typeof components.tokenEfficiency, "number");
+  assert.equal(typeof components.acceptanceRate, "number");
+  assert.equal(typeof components.categoryScore, "number");
+  assert.equal(typeof components.failToPassTests, "number");
+  assert.equal(typeof components.passToPassTests, "number");
+  // Verify components match what computeScoreComponents would produce independently
+  const independent = backendComputeScoreComponents(result, run);
+  for (const key of Object.keys(independent)) {
+    assert.ok(
+      Math.abs(components[key] - independent[key]) < 0.0001,
+      `scoreComponents.${key} should match computeScoreComponents: ${components[key]} vs ${independent[key]}`
+    );
+  }
+});
+
+test("enrichRunWithScores does NOT attach scoreComponents to excluded results", () => {
+  const result = createResult({
+    status: "failed",
+    scoreExcluded: true,
+    scoreExclusionReason: "Task pack does not match this repository."
+  });
+  const run = createRun({ results: [result] });
+  const enriched = enrichRunWithScores(run);
+  assert.equal(enriched.results[0].scoreComponents, undefined);
+});
+
+test("frontend getCompositeScoreDetails uses backend scoreComponents when available", () => {
+  // Simulate a result that arrived from summary.json with backend-computed components
+  const result = createResult({
+    status: "success",
+    durationMs: 1500,
+    estimatedCostUsd: 0.08,
+    costKnown: true,
+    judgeResults: [
+      { success: true, critical: true },
+      { success: true, type: "test-result", totalCount: 5, passedCount: 4 }
+    ]
+  });
+  const run = createRun({ results: [result], expectedChangedPaths: ["src/a.ts"] });
+
+  // Pre-attach backend-computed components (simulating what summary.json contains)
+  const backendComponents = backendComputeScoreComponents(result, run);
+  result.scoreComponents = backendComponents;
+
+  // Frontend should produce a score that matches the backend's compositeScore
+  const backendScore = computeCompositeScore(result, run, undefined, "practical");
+  const frontendScore = getCompositeScoreDetails(result, run, getScoreWeightPreset("practical")).total;
+
+  assert.ok(
+    Math.abs(backendScore - frontendScore) < 0.2,
+    `Frontend (with backend components) should match backend score: backend=${backendScore} frontend=${frontendScore}`
+  );
+});
+
+test("frontend falls back to local computeScoreComponents when scoreComponents absent", () => {
+  const result = createResult({
+    status: "success",
+    durationMs: 2000,
+    judgeResults: [
+      { success: true, type: "test-result", totalCount: 10, passedCount: 8, critical: true }
+    ]
+  });
+  const run = createRun({ results: [result] });
+  // NO result.scoreComponents — legacy data path
+  assert.equal(result.scoreComponents, undefined);
+
+  const details = getCompositeScoreDetails(result, run, getScoreWeightPreset("practical"));
+  // Verify local fallback produced sensible components
+  assert.equal(details.components.tests, 0.8);
+  assert.ok(details.total > 0);
+});

@@ -152,9 +152,36 @@ export function getReportCopy(locale: Locale): ReportCopy {
   return REPORT_COPY[locale] ?? REPORT_COPY.en;
 }
 
+/**
+ * Individual score components (0–1 scale) that sum into `compositeScore`.
+ *
+ * Computed once by the backend in `enrichRunWithScores()` and serialized into
+ * summary.json. The frontend reads these as the single source of truth and
+ * only recomputes when absent (legacy runs) or when the user adjusts weights
+ * (in which case only the weighted aggregation runs client-side — the
+ * component values themselves never change with weight adjustments).
+ */
+export type ScoreComponents = {
+  status: number;
+  tests: number;
+  criticalJudges: number;
+  nonCriticalJudges: number;
+  lint: number;
+  precision: number;
+  duration: number;
+  cost: number;
+  resolutionRate: number;
+  tokenEfficiency: number;
+  acceptanceRate: number;
+  categoryScore: number;
+  failToPassTests: number;
+  passToPassTests: number;
+};
+
 export type ScoredResult = BenchmarkRun["results"][number] & {
   compositeScore?: number;
   scoreReasons?: string[];
+  scoreComponents?: ScoreComponents;
 };
 
 export type ScoredRun = BenchmarkRun & {
@@ -168,9 +195,15 @@ export function isResultScoreExcluded(result: BenchmarkRun["results"][number]): 
 }
 
 export function formatCompositeScoreValue(result: BenchmarkRun["results"][number]): string {
-  return isResultScoreExcluded(result)
-    ? "n/a"
-    : (result.compositeScore ?? 0).toFixed(1);
+  if (isResultScoreExcluded(result)) {
+    return "n/a";
+  }
+  const score = result.compositeScore;
+  return typeof score === "number" && Number.isFinite(score) ? score.toFixed(1) : "n/a";
+}
+
+export function formatCostUsd(value: number | undefined, known: boolean): string {
+  return known && typeof value === "number" && Number.isFinite(value) ? `$${value.toFixed(2)}` : "n/a";
 }
 
 export function hasScoreMetadata(run: BenchmarkRun): run is BenchmarkRun & { scoreMode?: ScoreMode; scoreWeights?: Record<string, number> } {
@@ -234,14 +267,33 @@ function sanitizeWorkspaceScopedPath(value: string, workspacePath: string, agent
   return portableBasename(value);
 }
 
+const COMMAND_SECRET_PATTERNS: RegExp[] = [
+  /\B--(?:token|api[-_]?key|apikey|password|passwd|secret|auth|authorization)\b/i,
+  /\b(?:password|passwd|secret|token|api[-_]?key|apikey|authorization)\s*[=:]/i,
+  /\b(?:gh|github)_?(?:token|pat)\b/i,
+  /\bbearer\s+[A-Za-z0-9._-]+/i
+];
+
 function sanitizeCommandForDiagnostics(command: string | undefined): string | undefined {
   if (!command) {
     return undefined;
   }
-  if (/\bnpx\s+--no-install\b|\bpnpx\s+--no-install\b/u.test(command)) {
+  const trimmed = command.trim();
+  if (trimmed.length === 0) {
+    return undefined;
+  }
+  if (/\bnpx\s+--no-install\b|\bpnpx\s+--no-install\b/u.test(trimmed)) {
     return "[redacted: npx --no-install]";
   }
-  return "[redacted]";
+  // Redact commands that embed credentials inline, but keep benign commands
+  // (e.g. `npm test`) visible for diagnostics.
+  if (COMMAND_SECRET_PATTERNS.some((pattern) => pattern.test(trimmed))) {
+    return "[redacted: command contains credentials]";
+  }
+  // Mask any long high-entropy token-like argument so it cannot leak a secret.
+  return trimmed.replace(/\b([A-Za-z0-9_-]{24,})\b/g, (match) =>
+    /[A-Z]/.test(match) && /[a-z]/.test(match) && /[0-9]/.test(match) ? "[redacted-token]" : match
+  );
 }
 
 export function sanitizeRun(run: BenchmarkRun): BenchmarkRun {
@@ -302,10 +354,13 @@ export function summarizeRun(run: BenchmarkRun): {
   const successCount = run.results.filter((result) => result.status === "success").length;
   const failedCount = run.results.filter((result) => result.status === "failed").length;
   const scoreExcludedCount = run.results.filter((result) => isResultScoreExcluded(result)).length;
-  const totalTokens = run.results.reduce((total, result) => total + result.tokenUsage, 0);
+  const totalTokens = run.results.reduce(
+    (total, result) => total + (Number.isFinite(result.tokenUsage) ? result.tokenUsage : 0),
+    0
+  );
   const knownCostUsd = run.results
     .filter((result) => result.costKnown)
-    .reduce((total, result) => total + result.estimatedCostUsd, 0);
+    .reduce((total, result) => total + (Number.isFinite(result.estimatedCostUsd) ? result.estimatedCostUsd : 0), 0);
 
   return {
     totalAgents: run.results.length,

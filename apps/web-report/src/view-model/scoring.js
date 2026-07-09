@@ -297,8 +297,34 @@ function weightedJudgePassRatio(judges) {
 }
 
 /**
- * Compute all individual score components for a result within a run.
+ * Resolve score components for a result.
+ *
+ * Single-source-of-truth: if the backend serialized `result.scoreComponents`
+ * into summary.json, use those authoritative values directly. Only fall back
+ * to local computation for legacy/adhoc results that lack the field.
+ *
+ * @param {Object} result
+ * @param {Object} run
+ * @returns {Object}
+ */
+export function getScoreComponents(result, run) {
+  if (result.scoreComponents) {
+    // Backend provides 13 base fields; derive the internal failure flag locally
+    // from the authoritative `criticalJudges` value (0 means at least one
+    // critical judge failed, since the backend returns 1 when none exist).
+    return {
+      ...result.scoreComponents,
+      _hasCriticalFailure: result.scoreComponents.criticalJudges < 1
+        && (result.judgeResults ?? []).some(j => j.critical === true)
+    };
+  }
+  return computeScoreComponents(result, run);
+}
+
+/**
+ * Compute all individual score components locally.
  * Mirrors `computeScoreComponents()` from packages/report/src/scoring.ts.
+ * Used as a fallback for legacy runs lacking backend-computed components.
  * @param {Object} result
  * @param {Object} run
  * @returns {Object}
@@ -448,7 +474,9 @@ export function normalizeApplicableWeights(weights, result, run) {
  *
  * When the user hasn't changed weights, prefer using `result.compositeScore`
  * (pre-computed by the backend). This function is used for dynamic re-scoring
- * when the user adjusts weight sliders.
+ * when the user adjusts weight sliders. Components are read from the backend's
+ * `result.scoreComponents` when available (single source of truth); only the
+ * weighted aggregation runs client-side.
  *
  * @param {Object} result
  * @param {Object} run
@@ -456,7 +484,7 @@ export function normalizeApplicableWeights(weights, result, run) {
  * @returns {CompositeScoreResult}
  */
 export function getCompositeScoreDetails(result, run, weights = DEFAULT_SCORE_WEIGHTS) {
-  const components = computeScoreComponents(result, run);
+  const components = getScoreComponents(result, run);
   if (isScoreExcluded(result)) {
     return {
       total: 0,
@@ -581,7 +609,7 @@ export function getCompositeScoreReasons(result, run, weights = DEFAULT_SCORE_WE
     return result.scoreReasons;
   }
 
-  const components = computeScoreComponents(result, run);
+  const components = getScoreComponents(result, run);
   const reasons = [];
 
   if (result.status !== "success") {
