@@ -916,13 +916,27 @@ function render() {
     const noticeText = state.notice ?? "";
     // Push ALL notices to a fixed-position toast so they're visible regardless
     // of scroll position (fixes the "error msg is above the fold" problem).
-    if (noticeText && state.noticeKind && state.noticeKind !== state._lastNoticedKind) {
+    // _lastNoticedKind is reset by each action (save/delete) so repeated actions
+    // with the same kind always show their feedback.
+    if (noticeText && state.noticeKind) {
       showToast(noticeText, state.noticeKind);
-      state._lastNoticedKind = state.noticeKind;
     }
   }
   try { renderLauncher(); } catch(e) { console.error("[agentarena] renderLauncher error:", e); renderErrors.push(`Launcher: ${e instanceof Error ? e.message : String(e)}`); }
   try { renderRunList(); } catch(e) { console.error("[agentarena] renderRunList error:", e); renderErrors.push(`Run list: ${e instanceof Error ? e.message : String(e)}`); }
+
+  // After render, highlight the newly saved provider card so the user sees where it went
+  if (state._highlightProviderId) {
+    requestAnimationFrame(() => {
+      const card = document.querySelector(`[data-profile-id="${state._highlightProviderId}"]`);
+      if (card) {
+        card.classList.add("saved-highlight");
+        card.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        setTimeout(() => card.classList.remove("saved-highlight"), 3200);
+      }
+      state._highlightProviderId = null;
+    });
+  }
 
   // Update sticky bar visibility based on launcher panel visibility
   updateStickyBarVisibility();
@@ -1386,14 +1400,25 @@ elements.launcherAgents.addEventListener("click", async (event) => {
 
   if (target.getAttribute("data-role") === "provider-save") {
     void (async () => {
+      let savedName = "";
       try {
+        const editor = elements.launcherAgents.querySelector("[data-provider-editor='true']");
+        savedName = editor?.querySelector('[data-role="provider-name"]')?.value?.trim() || "";
         await saveProviderProfileFromEditor();
-        state.notice = localText("Claude provider saved.", "Claude provider saved.");
+        // Always reset _lastNoticedKind so the success toast fires even if the
+        // user saves multiple providers in a row (same kind = same toast).
+        state._lastNoticedKind = null;
+        state.notice = savedName
+          ? localText(`Provider "${savedName}" 已保存。`, `Provider "${savedName}" saved.`)
+          : localText("Claude provider saved.", "Claude provider saved.");
         state.noticeKind = "success";
+        // Highlight the saved profile so the user sees where to find it
+        state._highlightProviderId = state.availableProviderProfiles.at(-1)?.id ?? null;
       } catch (error) {
         // Surface "Failed to fetch" with actionable guidance instead of a silent notice.
         const msg = error instanceof Error ? error.message : String(error);
         const isFetchError = msg.toLowerCase().includes("fetch") || msg.toLowerCase().includes("network");
+        state._lastNoticedKind = null;
         state.notice = isFetchError
           ? localText(
               "保存失败：无法连接到本地服务。请确认 AgentArena UI 服务器正在运行，且页面是通过 http://127.0.0.1:4320 访问的（不能通过其他地址访问）。",

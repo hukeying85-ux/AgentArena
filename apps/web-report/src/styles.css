@@ -7931,6 +7931,18 @@ button, a, .card, .panel, select, input, .tag {
   content: "⚠";
 }
 
+/* === PROVIDER SAVE HIGHLIGHT — pulse the newly saved variant card === */
+@keyframes providerSavePulse {
+  0%   { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.5); border-color: var(--success-light); }
+  50%  { box-shadow: 0 0 0 6px rgba(16, 185, 129, 0.15); border-color: var(--success-light); }
+  100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+}
+
+.variant-card.saved-highlight {
+  animation: providerSavePulse 1.5s var(--ease-out) 2;
+  border-color: var(--success-light) !important;
+}
+
 /* === TOAST NOTIFICATIONS — fixed position, always visible ===
    Solves the "error is at top of panel, user is at bottom" scroll problem.
    Toasts slide up from the bottom and auto-dismiss. */
