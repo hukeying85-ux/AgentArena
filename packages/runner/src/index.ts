@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 
 import { preflightAdapters } from "@agentarena/adapters";
-import {
+import {AgentLogStore, 
   type AgentRunResult,
   type AgentSelection,
   type BenchmarkCancellation,
@@ -12,7 +12,7 @@ import {
   logger,
   type ScoreMode,
   type TaskCompatibilityResult,
-  throwIfAborted,
+  throwIfAborted,writeJsonAtomic 
 } from "@agentarena/core";
 import { runAgent } from "./agent-lifecycle.js";
 import { agentConcurrency, mapWithConcurrency } from "./concurrency.js";
@@ -60,6 +60,20 @@ export interface BenchmarkOptions {
   scoreMode?: ScoreMode;
   tokenBudget?: number;
   debug?: boolean;
+  /**
+   * When true, the runner emits fine-grained `agent-activity` progress
+   * events (stdout/stderr lines) AND per-agent log capture. Default-off
+   * to honor STABILITY.md — no existing consumer sees new behavior
+   * unless they opt in.
+   */
+  enableActivityEvents?: boolean;
+  /**
+   * Per-agent log store for capturing stdout/stderr lines during the run.
+   * When provided AND enableActivityEvents is true, log lines are appended
+   * here AND emitted as progress events. The UI server holds the reference
+   * to serve /api/agent-logs.
+   */
+  agentLogStore?: AgentLogStore;
 }
 
 export interface BenchmarkProgressEvent {
@@ -69,24 +83,51 @@ export interface BenchmarkProgressEvent {
     | "agent-start"
     | "agent-finish"
     | "report"
-    | "complete";
+    | "complete"
+    | "agent-activity";
   message: string;
   agentId?: string;
   variantId?: string;
   displayLabel?: string;
   metadata?: Record<string, unknown>;
+  /**
+   * Present only when phase === "agent-activity". The raw stdout/stderr
+   * line content (truncated to 500 chars for event-bus safety).
+   */
+  line?: string;
+  /** Present only when phase === "agent-activity". Monotonic per-agent seq. */
+  seq?: number;
+  /** Present only when phase === "agent-activity". Which stdio stream. */
+  stream?: "stdout" | "stderr";
+  /**
+   * Present on every non-starting event. Aggregate run progress snapshot
+   * so CLI and web UI share one computation source.
+   */
+  snapshot?: RunProgressSnapshot;
+}
+
+/**
+ * Aggregate progress snapshot emitted with every progress event.
+ * Single source of truth for progress bars, stalled detection, and ETA.
+ */
+export interface RunProgressSnapshot {
+  total: number;
+  finished: number;
+  running: string[];          // variantIds of currently running agents
+  failed: number;
+  /** variantId -> last activity epoch ms (Date.now()) */
+  lastActivityByAgent: Record<string, number>;
 }
 
 async function writeRunMarker(
   outputPath: string,
-  state: "in-progress" | "complete" | "failed",
+  state: "in-progress" | "complete" | "failed" | "cancelled",
   metadata: Record<string, unknown> = {}
 ): Promise<void> {
   try {
-    await fs.writeFile(
+    await writeJsonAtomic(
       path.join(outputPath, "run-state.json"),
-      JSON.stringify({ state, updatedAt: new Date().toISOString(), ...metadata }, null, 2),
-      "utf8"
+      { state, updatedAt: new Date().toISOString(), ...metadata }
     );
   } catch (error) {
     logger.warn("runner", "run_marker.write_failed", `Failed to write run marker for ${outputPath}: ${error instanceof Error ? error.message : String(error)}`);
@@ -210,6 +251,57 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
     }
   };
 
+  // Progress snapshot — single source of truth for progress bars, stalled
+  // detection, and ETA. `total` is set once after selections are normalized
+  // (not incremented per agent). Per-agent lifecycle state lives in
+  // `statusByAgent` (each worker touches only its own variantId); the
+  // `running` array and counters are *derived* from that map at emit time,
+  // removing the previous pattern where concurrent closures incrementally
+  // mutated shared counters (which would silently miscount if an `await` were
+  // ever inserted between read and write).
+  let snapshotTotal = 0;
+  const statusByAgent = new Map<string, "running" | "success" | "failed">();
+  const lastActivityByAgent: Record<string, number> = {};
+
+  // Monotonic per-run activity sequence counter. Ensures every activity event
+  // gets a unique, ordered seq that survives debounce coalescing. Enables
+  // future SSE reconnection via Last-Event-ID.
+  let activitySeqCounter = 0;
+
+  /** Derive the progress snapshot from authoritative per-agent state. */
+  function deriveSnapshot(): RunProgressSnapshot {
+    let finished = 0;
+    let failed = 0;
+    const running: string[] = [];
+    for (const [variantId, status] of statusByAgent) {
+      if (status === "running") {
+        running.push(variantId);
+      } else {
+        finished++;
+        if (status === "failed") failed++;
+      }
+    }
+    return { total: snapshotTotal, finished, running, failed, lastActivityByAgent: { ...lastActivityByAgent } };
+  }
+
+  /** Attach the current snapshot to a progress event before sending. */
+  const emitProgress = async (event: BenchmarkProgressEvent): Promise<void> => {
+    // agent-activity events are high-frequency; skip snapshot attach for them
+    // to avoid creating garbage objects 8+ times/sec/agent.
+    if (event.phase !== "agent-activity") {
+      event.snapshot = deriveSnapshot();
+    }
+    await safeProgress(event);
+  };
+
+  /** Get next monotonic seq for an activity event. */
+  const nextActivitySeq = (): number => activitySeqCounter++;
+
+  // Per-agent log store: use the one passed in (UI server) or create a
+  // throwaway one (CLI mode) so the capture path is always the same.
+  const agentLogStore = options.agentLogStore ?? new AgentLogStore(1000);
+  const enableActivity = options.enableActivityEvents === true;
+
   // Step 1: Resolve and validate the repository
   const resolved = await resolveAndValidateRepo(options);
   const repoPath = resolved.repoPath;
@@ -243,7 +335,8 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
     logger.warn(
       "runner",
       "resume.task_mismatch",
-      `Ignoring resume results from ${options.resumeFrom}: task id ${resumeState.taskId} does not match ${task.id}.`
+      `Ignoring resume results from ${options.resumeFrom}: task id ${resumeState.taskId} does not match ${task.id}. ` +
+      `Discarding ${resumeState.results.size} cached agent result(s) (per-variantId) — the run will be re-executed.`
     );
   }
 
@@ -261,6 +354,9 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
   });
 
   const selections = normalizeSelections(options);
+  // Set total once to the full selection count — NOT incremented per agent.
+  // This ensures progress percentage is correct from the start (e.g. 0/40, not 0/1).
+  snapshotTotal = selections.length;
   // Track all workspace paths for cleanup. Added BEFORE runAgent so that even
   // if runAgent throws, the path is in the Set for the finally-block cleanup.
   // If the entire benchmark is aborted before a callback runs, that workspace
@@ -272,7 +368,7 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
   let taskCompatibility: TaskCompatibilityResult | undefined;
   let completedNormally = false;
   try {
-  await safeProgress({
+  await emitProgress({
     phase: "starting",
     message: `Created run ${runId}.`,
     metadata: { runId, outputPath }
@@ -290,7 +386,7 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
       const failedChecks = compatibility.checks
         .filter((check) => check.status !== "pass")
         .map((check) => `${check.label}: ${check.message}${check.fix ? ` Fix: ${check.fix}` : ""}`);
-      await safeProgress({
+      await emitProgress({
         phase: "preflight",
         message: `Task compatibility warning: ${compatibility.summary}`,
         metadata: {
@@ -309,7 +405,7 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
         { metadata: { failedChecks } }
       );
     } else {
-      await safeProgress({
+      await emitProgress({
         phase: "preflight",
         message: "Task compatibility check passed.",
         metadata: {
@@ -332,7 +428,7 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
   }
 
   // Step 3: Run preflight checks
-  await safeProgress({
+  await emitProgress({
     phase: "preflight",
     message: `Running preflight for ${selections.length} agent selection(s).`,
     metadata: { count: selections.length }
@@ -350,7 +446,7 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
     throw new Error(`Preflight failed: ${errorDetails.message}`);
   }
 
-  await safeProgress({
+  await emitProgress({
     phase: "preflight",
     message: `Preflight finished. ${preflights.filter((value) => value.status === "ready").length}/${preflights.length} ready.`,
     metadata: {
@@ -367,7 +463,7 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
 
     await Promise.all(results.map((result) => writeAgentResult(outputPath, result)));
 
-    await safeProgress({
+    await emitProgress({
       phase: "complete",
       message: `Benchmark did not run agents because the task pack is incompatible with this repository: ${incompatibleCompatibility.summary}`,
       metadata: {
@@ -412,7 +508,10 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
       const resumedResult = resumeResults.get(preflight.variantId);
       if (resumedResult) {
         const result: AgentRunResult = { ...resumedResult, preflight };
-        await safeProgress({
+        // Mark terminal status; `deriveSnapshot()` recomputes counters/array.
+        statusByAgent.set(preflight.variantId, result.status === "failed" ? "failed" : "success");
+        lastActivityByAgent[preflight.variantId] = Date.now();
+        await emitProgress({
           phase: "agent-finish",
           agentId: result.agentId,
           variantId: result.variantId,
@@ -431,7 +530,11 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
       const workspacePath = path.join(workspaceRootPath, preflight.variantId);
       workspacePaths.add(workspacePath);
 
-      await safeProgress({
+      // Mark as running; `deriveSnapshot()` recomputes the running array.
+      statusByAgent.set(preflight.variantId, "running");
+      lastActivityByAgent[preflight.variantId] = Date.now();
+
+      await emitProgress({
         phase: "agent-start",
         agentId: preflight.agentId,
         variantId: preflight.variantId,
@@ -445,7 +548,33 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
         result = await runAgent(repoPath, outputPath, workspaceRootPath, task, preflight, {
           updateSnapshots: options.updateSnapshots,
           cancellation,
-          debug: options.debug
+          debug: options.debug,
+          enableActivityEvents: enableActivity,
+          agentLogStore: enableActivity ? agentLogStore : undefined,
+          nextActivitySeq: enableActivity ? nextActivitySeq : undefined,
+          onActivity: enableActivity
+            ? (line, stream, seq) => {
+                const eventLine = line.slice(0, 500);
+                lastActivityByAgent[preflight.variantId] = Date.now();
+                void emitProgress({
+                  phase: "agent-activity",
+                  agentId: preflight.agentId,
+                  variantId: preflight.variantId,
+                  displayLabel: preflight.displayLabel,
+                  message: eventLine,
+                  line: eventLine,
+                  seq,
+                  stream
+                }).catch((error) => {
+                  logger.warn(
+                    "runner",
+                    "activity.progress_failed",
+                    `Failed to emit activity for ${preflight.displayLabel}: ${error instanceof Error ? error.message : String(error)}`,
+                    { error }
+                  );
+                });
+              }
+            : undefined
         });
       } catch (error) {
         if (isAbortError(error)) {
@@ -462,6 +591,10 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
         }
       }
 
+      // Mark terminal status; `deriveSnapshot()` recomputes counters/array.
+      statusByAgent.set(preflight.variantId, result.status === "failed" ? "failed" : "success");
+      lastActivityByAgent[preflight.variantId] = Date.now();
+
       try {
         await writeAgentResult(outputPath, result);
       } catch (persistError) {
@@ -473,7 +606,7 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
         );
       }
 
-      await safeProgress({
+      await emitProgress({
         phase: "agent-finish",
         agentId: result.agentId,
         variantId: result.variantId,
@@ -515,7 +648,7 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
 
   const completedWithCancellation = aborted || results.some((value) => value.status === "cancelled");
 
-  await safeProgress({
+  await emitProgress({
     phase: "complete",
     message: `${completedWithCancellation ? "Benchmark cancelled" : "Benchmark run finished"} for ${results.length} result(s).`,
     metadata: {
@@ -527,7 +660,11 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
   });
 
   completedNormally = true;
-  await writeRunMarker(outputPath, completedWithCancellation ? "failed" : "complete", {
+  // A run that completed with one or more cancelled agents (but also successes)
+  // must NOT be folded into "failed" — that would misrepresent an otherwise
+  // successful run. Use a distinct "cancelled" marker so callers/consumers can
+  // distinguish "benchmark aborted" from "benchmark failed".
+  await writeRunMarker(outputPath, completedWithCancellation ? "cancelled" : "complete", {
     runId,
     taskId: task.id,
     taskTitle: task.title,
