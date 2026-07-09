@@ -46,6 +46,7 @@ export type TraceEventType =
   // Phase events
   | "setup.error"
   | "setup.finish"
+  | "setup.git_unavailable"
   | "judge.error"
   | "judge.finish"
   | "teardown.error"
@@ -220,6 +221,20 @@ export interface AgentRunResult {
   scoreExclusionReason?: string;
   /** Coarse failure bucket for user-facing diagnostics. */
   failureCategory?: "task-pack" | "environment" | "agent" | "model" | "validation" | "cancelled" | "unknown";
+
+  /**
+   * Last N combined stdout+stderr lines from the agent process, captured
+   * on failure for diagnostic purposes. Tagged with `[out]`/`[err]` prefixes.
+   * Only populated when status === "failed". Additive: existing consumers
+   * that don't read this field are unaffected.
+   */
+  failureTail?: string[];
+
+  /** Process exit code if the agent exited with a non-zero code. */
+  exitCode?: number | null;
+
+  /** Signal name if the agent was terminated by a signal (e.g. "SIGTERM"). */
+  signal?: string | null;
 
   tokenUsageBreakdown?: {
     inputTokens: number;

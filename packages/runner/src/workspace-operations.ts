@@ -75,13 +75,24 @@ export async function setupWorkspaceAndPrechecks(
     };
   }
 
-  // Initialize git in workspace so command judges using `git diff` work
+  // Initialize git in workspace so command judges relying on `git diff`
+  // (e.g. regex-match on diff output, patch-validation scope checks) work.
+  // Failure is non-fatal for most judges — but silently swallowing it makes
+  // diff-scope misreporting impossible to diagnose. Record a trace warning so
+  // the failure is visible in the run's diagnostic trail.
   try {
     await execFileAsync("git", ["init"], { cwd: workspacePath, timeout: 10_000 });
     await execFileAsync("git", ["add", "-A"], { cwd: workspacePath, timeout: 30_000 });
     await execFileAsync("git", ["commit", "-m", "baseline"], { cwd: workspacePath, timeout: 30_000 });
-  } catch {
-    // Non-fatal: workspace without git still works for most judges
+  } catch (gitError) {
+    const reason = gitError instanceof Error ? gitError.message : String(gitError);
+    await traceRecorder.record({
+      agentId: preflight.agentId,
+      timestamp: new Date().toISOString(),
+      type: "setup.git_unavailable",
+      message: `Workspace git baseline unavailable: ${reason}. Diff-scope judges may misreport changes.`,
+      metadata: { workspacePath, reason }
+    });
   }
 
   await traceRecorder.record({
