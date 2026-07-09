@@ -282,19 +282,19 @@
                 <label class="field">
                   <span id="launcher-repo-label">Repository Path</span>
                   <input id="launcher-repo-path" type="text" />
-                  <label class="checkbox" style="margin-top:6px;font-size:0.85em;">
+                  <span class="field-checkbox">
                     <input id="launcher-use-builtin" type="checkbox" />
-                    <span id="launcher-use-builtin-label" data-i18n="builtinRepoLabel">🚀 使用内置 Demo 仓库（无需本地项目）</span>
-                  </label>
+                    <span id="launcher-use-builtin-label" data-i18n="builtinRepoLabel">使用内置 Demo 仓库（无需本地项目）</span>
+                  </span>
                 </label>
                 <label class="field">
                   <span id="launcher-task-select-label">Official Task Pack</span>
-                  <select id="launcher-task-select"></select>
+                  <select id="launcher-task-select" class="launcher-select"></select>
                 </label>
                 <label class="field">
                   <span id="launcher-task-path-label">Task Pack Path</span>
-                  <div id="task-pack-summary" class="path-summary-tag" style="display:none; padding: 6px 10px; background: var(--surface, #f3f4f6); border-radius: 6px; font-size: 0.85rem;">
-                    📦 <span id="task-pack-short-name">—</span>
+                  <div id="task-pack-summary" class="path-summary-tag" style="display:none;">
+                    <span id="task-pack-short-name">—</span>
                   </div>
                   <input id="launcher-task-path" type="text" placeholder="输入自定义任务包路径..." />
                 </label>
@@ -319,7 +319,7 @@
                     <input id="launcher-concurrency" type="number" min="1" max="10" value="1" />
                   </label>
                 </div>
-                <button id="launcher-run" type="button" class="launcher-run-btn">
+                <button id="launcher-run" type="button" class="btn-primary launcher-run-btn">
                   <svg class="icon"><use href="#icon-play"/></svg>
                   <span id="launcher-run-btn-label">Run Benchmark</span>
                 </button>
