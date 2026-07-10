@@ -7943,6 +7943,37 @@ button, a, .card, .panel, select, input, .tag {
   border-color: var(--success-light) !important;
 }
 
+/* === SIDEBAR VERSION FOOTER — shows build version for verification === */
+.sidebar-version {
+  margin-top: auto;
+  padding: var(--space-3) 0 0;
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+  cursor: pointer;
+  user-select: none;
+  transition: color var(--transition-fast);
+}
+
+.sidebar-version:hover {
+  color: var(--text-muted);
+}
+
+.version-label {
+  font-family: var(--font-mono);
+  font-weight: var(--weight-medium);
+  letter-spacing: 0.02em;
+}
+
+.version-build {
+  font-family: var(--font-mono);
+  opacity: 0.7;
+  font-size: 0.7rem;
+}
+
 /* === TOAST NOTIFICATIONS — fixed position, always visible ===
    Solves the "error is at top of panel, user is at bottom" scroll problem.
    Toasts slide up from the bottom and auto-dismiss. */

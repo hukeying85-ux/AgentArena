@@ -16,9 +16,16 @@ import {
 import { jsonResponse } from "../../server/index.js";
 import { OFFICIAL_TASKPACK_ROOT } from "../shared.js";
 import type { ApiResponse } from "./types.js";
+import { readVersionInfo } from "../../server/version.js";
 
 export async function handleUiInfo(codexDefaults: unknown, host: string, port: number, isLocalhost: boolean): Promise<ApiResponse> {
   const providerProfiles = await listClaudeProviderProfiles();
+  let versionInfo = null;
+  try {
+    versionInfo = readVersionInfo();
+  } catch (e) {
+    logger.warn("server", "version.read_failed", `Failed to read version info: ${e instanceof Error ? e.message : String(e)}`);
+  }
   return jsonResponse({
     mode: "local-service",
     repoPath: process.cwd(),
@@ -37,6 +44,7 @@ export async function handleUiInfo(codexDefaults: unknown, host: string, port: n
     riskNotice: providerProfiles.some((p) => p.kind !== "official")
       ? "Provider-switched Claude Code variants use compatibility settings and may behave differently from official Claude Code."
       : null,
+    version: versionInfo ?? null,
     host,
     port,
     authRequired: !isLocalhost

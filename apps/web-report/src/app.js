@@ -215,6 +215,31 @@ function setText(id, value) {
   }
 }
 
+// Show build version in sidebar footer for build verification.
+function updateVersionDisplay(version) {
+  const buildNumberEl = document.getElementById("app-build-number");
+  const versionEl = document.getElementById("app-version");
+  if (!versionEl || !buildNumberEl) return;
+  if (!version) {
+    buildNumberEl.textContent = "dev";
+    return;
+  }
+  versionEl.textContent = version.version || "0.1.0";
+  buildNumberEl.textContent = `#${version.buildNumber ?? 0}`;
+  // Make the footer clickable to copy full version info for debugging
+  const footer = document.getElementById("sidebar-version");
+  if (footer && !footer.dataset.wired) {
+    footer.dataset.wired = "true";
+    footer.addEventListener("click", () => {
+      const info = `AgentArena v${version.version} (build #${version.buildNumber})`;
+      navigator.clipboard?.writeText(info).then(
+        () => showToast(localText("版本信息已复制", "Version info copied"), "success", 2000),
+        () => {}
+      );
+    });
+  }
+}
+
 function setTextBySelector(selector, value) {
   const element = document.querySelector(selector);
   if (element) {
@@ -918,6 +943,9 @@ function render() {
   const renderErrors = [];
 
   try { renderStaticText(); } catch(e) { console.error("[agentarena] renderStaticText error:", e); renderErrors.push(`Static text: ${e instanceof Error ? e.message : String(e)}`); }
+  // Version display is NOT gated by the language-cache inside renderStaticText,
+  // so it updates on every render (including the one triggered by detectService).
+  try { updateVersionDisplay(state.serviceInfo?.version ?? null); } catch(e) { /* ignore */ }
   if (elements.resultLoaderMessage) {
     const noticeText = state.notice ?? "";
     // Push ALL notices to a fixed-position toast so they're visible regardless

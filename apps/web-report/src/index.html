@@ -183,6 +183,12 @@
           <div id="agent-list" class="agent-list empty-state" data-i18n="agentListEmpty">运行完成后自动显示参与的 Agents</div>
           <p id="agent-list-hint" class="muted picker-help" style="padding: 0 var(--space-3) var(--space-2); font-size: var(--text-xs);">Click to filter comparison table</p>
         </section>
+
+        <!-- Build version footer — populated on startup from /api/ui-info -->
+        <div class="sidebar-version" id="sidebar-version" title="Click to copy version info">
+          <span class="version-label">v<span id="app-version">0.1.0</span></span>
+          <span class="version-build">build <span id="app-build-number">--</span></span>
+        </div>
       </aside>
 
       <main class="content">
