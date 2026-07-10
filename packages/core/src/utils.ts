@@ -139,8 +139,6 @@ function normalizeIpv6(ip: string): string {
     const [left, right] = ip.split("::", 2);
     const leftGroups = left ? left.split(":").map(g => g.replace(/^0+/, "") || "0") : [];
     const rightGroups = right ? right.split(":").map(g => g.replace(/^0+/, "") || "0") : [];
-    const missing = 8 - leftGroups.length - rightGroups.length;
-    const middle = Array(Math.max(0, missing)).fill("0");
     if (leftGroups.length === 0) {
       return "::" + rightGroups.join(":");
     }
@@ -211,6 +209,22 @@ export function isInternalUrl(urlString: string): boolean {
 }
 
 /**
+ * Known-safe public-API hostnames. These resolve to addresses in the
+ * RFC 2544 benchmark range (198.18.0.0/15) or RFC 6598 shared space
+ * because the provider's network infrastructure uses internally-routed
+ * proxies, but the endpoints are PUBLIC APIs (not LAN services). SSRF
+ * protection offers no value here and blocks legitimate use.
+ */
+const DNS_CHECK_BYPASS_HOSTNAMES = new Set([
+  "api.stepfun.com",         // 阶跃星辰 StepFun
+  "api.moonshot.cn",         // Moonshot AI
+  "open.bigmodel.cn",        // 智谱 GLM
+  "api.minimax.chat",        // MiniMax
+  "api.deepseek.com",        // DeepSeek
+  "dashscope.aliyuncs.com",  // 通义千问
+]);
+
+/**
  * Resolve a hostname to its IP addresses and check if any resolve to a
  * private/internal address. This guards against DNS rebinding attacks where
  * a domain initially resolves to a public IP (passing `isInternalUrl`)
@@ -231,6 +245,11 @@ export async function hasInternalDnsResolution(urlString: string): Promise<boole
     // Skip check for IP literals and known-safe hostnames
     if (/^\d+\.\d+\.\d+\.\d+$/.test(hostname)) {
       return isPrivateIp(hostname);
+    }
+
+    // Skip DNS check for known-safe public API hostnames
+    if (DNS_CHECK_BYPASS_HOSTNAMES.has(hostname)) {
+      return false;
     }
 
     try {

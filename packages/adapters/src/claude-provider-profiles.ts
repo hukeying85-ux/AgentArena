@@ -597,7 +597,13 @@ export async function saveClaudeProviderProfile(input: ClaudeProviderProfileInpu
       "api.anthropic.com",       // Anthropic official
       "api.openai.com",          // OpenAI official
       "generativelanguage.googleapis.com",  // Google Gemini
-      "dashscope.aliyuncs.com"   // Alibaba DashScope (Qwen)
+      "dashscope.aliyuncs.com",  // Alibaba DashScope (Qwen)
+      // 国内主流公共 API（均为公网可访问的官方端点，非内网服务）
+      "api.stepfun.com",         // 阶跃星辰 StepFun
+      "api.moonshot.cn",         // Moonshot AI（月之暗面）
+      "open.bigmodel.cn",        // 智谱 GLM
+      "api.minimax.chat",        // MiniMax
+      "api.deepseek.com",        // DeepSeek
     ]);
     if (!ALLOWED_API_HOSTS.has(parsedHost)) {
       const riskFlag: ClaudeProviderRiskFlag = "baseUrl-redirects-traffic";

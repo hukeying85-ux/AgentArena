@@ -154,8 +154,14 @@ function hideLoading() {
 function showError(message) {
   state.notice = `Warning: ${message}`;
   state.noticeKind = "error";
-  showToast(`Warning: ${message}`, "error");
+  bumpToastSeq();
   render();
+}
+
+// Increment _toastSeq so the next render() always fires a fresh toast, even if
+// the user triggers two same-kind notices in a row (e.g. two failed saves).
+function bumpToastSeq() {
+  state._toastSeq = (state._toastSeq ?? 0) + 1;
 }
 
 // ---------------------------------------------------------------------------
@@ -916,10 +922,12 @@ function render() {
     const noticeText = state.notice ?? "";
     // Push ALL notices to a fixed-position toast so they're visible regardless
     // of scroll position (fixes the "error msg is above the fold" problem).
-    // _lastNoticedKind is reset by each action (save/delete) so repeated actions
-    // with the same kind always show their feedback.
-    if (noticeText && state.noticeKind) {
+    // Track _toastSeq set by each action so repeated same-kind notices (e.g.
+    // two failed saves in a row) each produce a fresh toast.
+    const seq = state._toastSeq ?? 0;
+    if (noticeText && state.noticeKind && seq !== state._lastToastSeq) {
       showToast(noticeText, state.noticeKind);
+      state._lastToastSeq = seq;
     }
   }
   try { renderLauncher(); } catch(e) { console.error("[agentarena] renderLauncher error:", e); renderErrors.push(`Launcher: ${e instanceof Error ? e.message : String(e)}`); }
@@ -1405,27 +1413,25 @@ elements.launcherAgents.addEventListener("click", async (event) => {
         const editor = elements.launcherAgents.querySelector("[data-provider-editor='true']");
         savedName = editor?.querySelector('[data-role="provider-name"]')?.value?.trim() || "";
         await saveProviderProfileFromEditor();
-        // Always reset _lastNoticedKind so the success toast fires even if the
-        // user saves multiple providers in a row (same kind = same toast).
-        state._lastNoticedKind = null;
         state.notice = savedName
           ? localText(`Provider "${savedName}" 已保存。`, `Provider "${savedName}" saved.`)
           : localText("Claude provider saved.", "Claude provider saved.");
         state.noticeKind = "success";
         // Highlight the saved profile so the user sees where to find it
         state._highlightProviderId = state.availableProviderProfiles.at(-1)?.id ?? null;
+        bumpToastSeq();
       } catch (error) {
-        // Surface "Failed to fetch" with actionable guidance instead of a silent notice.
+        // Surface the actual server error (e.g. SSRF block) with actionable guidance.
         const msg = error instanceof Error ? error.message : String(error);
         const isFetchError = msg.toLowerCase().includes("fetch") || msg.toLowerCase().includes("network");
-        state._lastNoticedKind = null;
         state.notice = isFetchError
           ? localText(
-              "保存失败：无法连接到本地服务。请确认 AgentArena UI 服务器正在运行，且页面是通过 http://127.0.0.1:4320 访问的（不能通过其他地址访问）。",
-              "Save failed: cannot reach local service. Make sure the AgentArena UI server is running and the page was opened via http://127.0.0.1:4320 (not another address)."
+              "保存失败：无法连接到本地服务。请确认 AgentArena UI 服务器正在运行，且页面是通过 http://127.0.0.1:4320 访问的。",
+              "Save failed: cannot reach local service. Make sure the AgentArena UI server is running and the page was opened via http://127.0.0.1:4320."
             )
           : msg;
         state.noticeKind = "error";
+        bumpToastSeq();
       }
       render();
     })();
