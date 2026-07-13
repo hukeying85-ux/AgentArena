@@ -179,7 +179,7 @@ test("third-party Claude preflight and execution use isolated config without tou
       for (const capture of captures) {
         assert.notEqual(capture.cwd, sourcePath);
         assert.notEqual(capture.configDir, personalConfig);
-        assert.equal(capture.usesPersonalOauth, false);
+        assert.equal(capture.usesPersonalOauth, false, JSON.stringify(capture));
         assert.equal(capture.authSource, "isolated");
         assert.equal(capture.baseUrl, "https://api.openai.com/v1");
         assert.equal(capture.args.includes("--setting-sources"), true);

@@ -240,6 +240,45 @@ test(
   }
 );
 
+test(
+  "detached Windows Claude invocations do not inherit environment variables omitted from the requested environment",
+  { skip: process.platform !== "win32" ? "Windows-specific Claude wrapper behavior" : false },
+  async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-claude-env-isolation-"));
+    const originalLeak = process.env.AGENTARENA_SHOULD_NOT_LEAK;
+    try {
+      const scriptPath = path.join(tempDir, "print-env.js");
+      const shimPath = path.join(tempDir, "claude.cmd");
+      await writeFile(
+        scriptPath,
+        'process.stdout.write(process.env.AGENTARENA_SHOULD_NOT_LEAK ?? "missing");\n',
+        "utf8"
+      );
+      await writeFile(shimPath, `@echo off\n"${process.execPath}" "${scriptPath}" %*\n`, "utf8");
+      process.env.AGENTARENA_SHOULD_NOT_LEAK = "parent-secret";
+      const requestedEnvironment = { ...process.env };
+      delete requestedEnvironment.AGENTARENA_SHOULD_NOT_LEAK;
+
+      const result = await runProcess(
+        shimPath,
+        ["-p", "--output-format", "text"],
+        tempDir,
+        10_000,
+        requestedEnvironment,
+        undefined,
+        "READY"
+      );
+
+      assert.equal(result.exitCode, 0, result.stderr);
+      assert.equal(result.stdout, "missing");
+    } finally {
+      if (originalLeak === undefined) delete process.env.AGENTARENA_SHOULD_NOT_LEAK;
+      else process.env.AGENTARENA_SHOULD_NOT_LEAK = originalLeak;
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  }
+);
+
 // --- Output truncation (previously had NO coverage) ---
 //
 // MAX_PROCESS_OUTPUT_BYTES is 50 MB. To verify the truncation cap actually
