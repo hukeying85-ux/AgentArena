@@ -1,0 +1,297 @@
+import assert from "node:assert/strict";
+import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+import {
+  deleteClaudeProviderProfile,
+  saveClaudeProviderProfile,
+  setClaudeProviderProfileSecret
+} from "../packages/adapters/dist/claude-provider-profiles.js";
+import { getAdapter } from "../packages/adapters/dist/index.js";
+import { handleQuickPreflight } from "../packages/cli/dist/commands/api-routes.js";
+
+async function exists(targetPath) {
+  try {
+    await access(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function createClaudeShim(tempDir) {
+  const scriptPath = path.join(tempDir, "claude-shim.mjs");
+  const commandPath = process.platform === "win32"
+    ? path.join(tempDir, "claude.cmd")
+    : path.join(tempDir, "claude");
+
+  await writeFile(
+    scriptPath,
+    [
+      'import { appendFileSync } from "node:fs";',
+      "const args = process.argv.slice(2);",
+      'if (args.includes("--version")) { console.log("2.1.207"); process.exit(0); }',
+      'if (args.includes("--help")) {',
+      '  console.log("--setting-sources <sources>\\n--strict-mcp-config\\n--no-session-persistence");',
+      "  process.exit(0);",
+      "}",
+      "const capture = {",
+      "  args,",
+      "  cwd: process.cwd(),",
+      "  configDir: process.env.CLAUDE_CONFIG_DIR,",
+      "  usesPersonalOauth: process.env.CLAUDE_CODE_OAUTH_TOKEN === 'personal-oauth',",
+      "  authSource: process.env.ANTHROPIC_AUTH_TOKEN === 'isolated-secret' ? 'isolated' : (process.env.ANTHROPIC_AUTH_TOKEN ? 'other' : 'none'),",
+      "  baseUrl: process.env.ANTHROPIC_BASE_URL",
+      "};",
+      'appendFileSync(process.env.AGENTARENA_CLAUDE_CAPTURE, `${JSON.stringify(capture)}\\n`, "utf8");',
+      'if (args.includes("stream-json")) {',
+      '  console.log(JSON.stringify({ type: "result", subtype: "success", result: "READY", usage: { input_tokens: 1, output_tokens: 1 }, total_cost_usd: 0 }));',
+      "} else {",
+      '  console.log("READY");',
+      "}"
+    ].join("\n"),
+    "utf8"
+  );
+
+  if (process.platform === "win32") {
+    await writeFile(commandPath, `@echo off\n"${process.execPath}" "${scriptPath}" %*\n`, "utf8");
+  } else {
+    await writeFile(commandPath, `#!/usr/bin/env sh\nexec "${process.execPath}" "${scriptPath}" "$@"\n`, "utf8");
+    await chmod(commandPath, 0o755);
+  }
+
+  return commandPath;
+}
+
+async function withTempProvider(fn) {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-claude-adapter-isolation-"));
+  const originalRoot = process.env.AGENTARENA_CLAUDE_PROFILE_ROOT;
+  const originalFile = process.env.AGENTARENA_CLAUDE_PROFILES_FILE;
+  const originalPrefix = process.env.AGENTARENA_CLAUDE_SECRET_PREFIX;
+  const originalDnsCheck = process.env.AGENTARENA_SKIP_DNS_CHECK;
+  let profileId;
+
+  process.env.AGENTARENA_CLAUDE_PROFILE_ROOT = tempDir;
+  process.env.AGENTARENA_CLAUDE_PROFILES_FILE = path.join(tempDir, "profiles.json");
+  process.env.AGENTARENA_CLAUDE_SECRET_PREFIX = `AgentArena/test/isolation/${Date.now()}/`;
+  process.env.AGENTARENA_SKIP_DNS_CHECK = "1";
+
+  try {
+    const profile = await saveClaudeProviderProfile({
+      name: "Adapter Isolation",
+      kind: "openai-proxy",
+      apiFormat: "openai-chat-via-proxy",
+      baseUrl: "https://api.openai.com/v1",
+      primaryModel: "isolated-model"
+    });
+    profileId = profile.id;
+    await setClaudeProviderProfileSecret(profile.id, "isolated-secret");
+    await fn(tempDir, profile);
+  } finally {
+    if (profileId) {
+      await setClaudeProviderProfileSecret(profileId, "").catch(() => {});
+      await deleteClaudeProviderProfile(profileId).catch(() => {});
+    }
+    if (originalRoot === undefined) delete process.env.AGENTARENA_CLAUDE_PROFILE_ROOT;
+    else process.env.AGENTARENA_CLAUDE_PROFILE_ROOT = originalRoot;
+    if (originalFile === undefined) delete process.env.AGENTARENA_CLAUDE_PROFILES_FILE;
+    else process.env.AGENTARENA_CLAUDE_PROFILES_FILE = originalFile;
+    if (originalPrefix === undefined) delete process.env.AGENTARENA_CLAUDE_SECRET_PREFIX;
+    else process.env.AGENTARENA_CLAUDE_SECRET_PREFIX = originalPrefix;
+    if (originalDnsCheck === undefined) delete process.env.AGENTARENA_SKIP_DNS_CHECK;
+    else process.env.AGENTARENA_SKIP_DNS_CHECK = originalDnsCheck;
+    await rm(tempDir, { recursive: true, force: true });
+  }
+}
+
+function parseCapture(contents) {
+  return contents.trim().split(/\r?\n/u).filter(Boolean).map((line) => JSON.parse(line));
+}
+
+test("third-party Claude preflight and execution use isolated config without touching the source project", async () => {
+  await withTempProvider(async (tempDir, profile) => {
+    const sourcePath = path.join(tempDir, "source");
+    const workspacePath = path.join(tempDir, "workspace");
+    const personalConfig = path.join(tempDir, "personal-config");
+    const capturePath = path.join(tempDir, "capture.jsonl");
+    const settingsPath = path.join(sourcePath, ".claude", "settings.local.json");
+    const originalCwd = process.cwd();
+    const originalClaudeBin = process.env.AGENTARENA_CLAUDE_BIN;
+    const originalCapture = process.env.AGENTARENA_CLAUDE_CAPTURE;
+    const originalConfigDir = process.env.CLAUDE_CONFIG_DIR;
+    const originalOauth = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    const originalAuthToken = process.env.ANTHROPIC_AUTH_TOKEN;
+
+    await mkdir(path.dirname(settingsPath), { recursive: true });
+    await mkdir(workspacePath, { recursive: true });
+    await mkdir(personalConfig, { recursive: true });
+    await writeFile(settingsPath, '{"marker":"keep-me"}\n', "utf8");
+    const shimPath = await createClaudeShim(tempDir);
+
+    try {
+      process.env.AGENTARENA_CLAUDE_BIN = shimPath;
+      process.env.AGENTARENA_CLAUDE_CAPTURE = capturePath;
+      process.env.CLAUDE_CONFIG_DIR = personalConfig;
+      process.env.CLAUDE_CODE_OAUTH_TOKEN = "personal-oauth";
+      process.env.ANTHROPIC_AUTH_TOKEN = "personal-token";
+      process.chdir(sourcePath);
+
+      const adapter = getAdapter("claude-code");
+      const selection = {
+        baseAgentId: "claude-code",
+        variantId: "claude-isolated",
+        displayLabel: "Claude Isolated",
+        config: { providerProfileId: profile.id },
+        configSource: "test"
+      };
+      const preflight = await adapter.preflight({ probeAuth: true, selection });
+      assert.equal(preflight.status, "ready", preflight.summary);
+      assert.equal(await readFile(settingsPath, "utf8"), '{"marker":"keep-me"}\n');
+
+      const executionEnvironment = { ...process.env };
+      delete executionEnvironment.CLAUDE_CONFIG_DIR;
+      delete executionEnvironment.CLAUDE_CODE_OAUTH_TOKEN;
+      delete executionEnvironment.ANTHROPIC_AUTH_TOKEN;
+      const result = await adapter.execute({
+        agentId: "claude-code",
+        selection,
+        repoPath: sourcePath,
+        workspacePath,
+        environment: executionEnvironment,
+        task: {
+          schemaVersion: "agentarena.taskpack/v1",
+          id: "claude-isolation",
+          title: "Claude Isolation",
+          prompt: "No-op.",
+          envAllowList: [],
+          setupCommands: [],
+          judges: [],
+          teardownCommands: []
+        },
+        trace: async () => {}
+      });
+      assert.equal(result.status, "success", result.summary);
+      assert.equal(await exists(path.join(workspacePath, ".claude", "settings.local.json")), false);
+
+      const captures = parseCapture(await readFile(capturePath, "utf8"));
+      assert.equal(captures.length >= 2, true);
+      for (const capture of captures) {
+        assert.notEqual(capture.cwd, sourcePath);
+        assert.notEqual(capture.configDir, personalConfig);
+        assert.equal(capture.usesPersonalOauth, false);
+        assert.equal(capture.authSource, "isolated");
+        assert.equal(capture.baseUrl, "https://api.openai.com/v1");
+        assert.equal(capture.args.includes("--setting-sources"), true);
+        assert.equal(capture.args.includes("--strict-mcp-config"), true);
+        assert.equal(await exists(capture.configDir), false);
+      }
+    } finally {
+      process.chdir(originalCwd);
+      if (originalClaudeBin === undefined) delete process.env.AGENTARENA_CLAUDE_BIN;
+      else process.env.AGENTARENA_CLAUDE_BIN = originalClaudeBin;
+      if (originalCapture === undefined) delete process.env.AGENTARENA_CLAUDE_CAPTURE;
+      else process.env.AGENTARENA_CLAUDE_CAPTURE = originalCapture;
+      if (originalConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+      else process.env.CLAUDE_CONFIG_DIR = originalConfigDir;
+      if (originalOauth === undefined) delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+      else process.env.CLAUDE_CODE_OAUTH_TOKEN = originalOauth;
+      if (originalAuthToken === undefined) delete process.env.ANTHROPIC_AUTH_TOKEN;
+      else process.env.ANTHROPIC_AUTH_TOKEN = originalAuthToken;
+    }
+  });
+});
+
+test("official Claude execution uses the active local configuration without generating workspace settings", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-claude-official-local-"));
+  const workspacePath = path.join(tempDir, "workspace");
+  const personalConfig = path.join(tempDir, "personal-config");
+  const capturePath = path.join(tempDir, "capture.jsonl");
+  const originalClaudeBin = process.env.AGENTARENA_CLAUDE_BIN;
+  const originalCapture = process.env.AGENTARENA_CLAUDE_CAPTURE;
+  const originalConfigDir = process.env.CLAUDE_CONFIG_DIR;
+  const originalOauth = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+
+  try {
+    await mkdir(workspacePath, { recursive: true });
+    await mkdir(personalConfig, { recursive: true });
+    const shimPath = await createClaudeShim(tempDir);
+    process.env.AGENTARENA_CLAUDE_BIN = shimPath;
+    process.env.AGENTARENA_CLAUDE_CAPTURE = capturePath;
+    process.env.CLAUDE_CONFIG_DIR = personalConfig;
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "personal-oauth";
+    const executionEnvironment = { ...process.env };
+    delete executionEnvironment.CLAUDE_CONFIG_DIR;
+    delete executionEnvironment.CLAUDE_CODE_OAUTH_TOKEN;
+
+    const adapter = getAdapter("claude-code");
+    const result = await adapter.execute({
+      agentId: "claude-code",
+      selection: {
+        baseAgentId: "claude-code",
+        variantId: "claude-official",
+        displayLabel: "Claude Official",
+        config: { providerProfileId: "claude-official" },
+        configSource: "test"
+      },
+      repoPath: tempDir,
+      workspacePath,
+      environment: executionEnvironment,
+      task: {
+        schemaVersion: "agentarena.taskpack/v1",
+        id: "claude-official",
+        title: "Claude Official",
+        prompt: "No-op.",
+        envAllowList: [],
+        setupCommands: [],
+        judges: [],
+        teardownCommands: []
+      },
+      trace: async () => {}
+    });
+
+    assert.equal(result.status, "success", result.summary);
+    assert.equal(await exists(path.join(workspacePath, ".claude", "settings.local.json")), false);
+    const [capture] = parseCapture(await readFile(capturePath, "utf8"));
+    assert.equal(capture.configDir, personalConfig);
+    assert.equal(capture.usesPersonalOauth, true);
+    assert.equal(capture.args.includes("--setting-sources"), false);
+    assert.equal(capture.args.includes("--strict-mcp-config"), false);
+    assert.equal(await exists(personalConfig), true);
+  } finally {
+    if (originalClaudeBin === undefined) delete process.env.AGENTARENA_CLAUDE_BIN;
+    else process.env.AGENTARENA_CLAUDE_BIN = originalClaudeBin;
+    if (originalCapture === undefined) delete process.env.AGENTARENA_CLAUDE_CAPTURE;
+    else process.env.AGENTARENA_CLAUDE_CAPTURE = originalCapture;
+    if (originalConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = originalConfigDir;
+    if (originalOauth === undefined) delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    else process.env.CLAUDE_CODE_OAUTH_TOKEN = originalOauth;
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("third-party Claude quick preflight reports the stored Provider secret instead of host login state", async () => {
+  await withTempProvider(async (tempDir, profile) => {
+    const originalClaudeBin = process.env.AGENTARENA_CLAUDE_BIN;
+    const shimPath = await createClaudeShim(tempDir);
+
+    try {
+      process.env.AGENTARENA_CLAUDE_BIN = shimPath;
+      const response = await handleQuickPreflight(JSON.stringify({
+        baseAgentId: "claude-code",
+        displayLabel: "Claude Isolated",
+        config: { providerProfileId: profile.id }
+      }));
+      const body = JSON.parse(response.body);
+
+      assert.equal(response.statusCode, 200);
+      assert.equal(body.authConfigured, true);
+      assert.match(body.authHint, /isolated Provider secret is stored/i);
+      assert.equal(body.overallStatus, "ready");
+    } finally {
+      if (originalClaudeBin === undefined) delete process.env.AGENTARENA_CLAUDE_BIN;
+      else process.env.AGENTARENA_CLAUDE_BIN = originalClaudeBin;
+    }
+  });
+});
