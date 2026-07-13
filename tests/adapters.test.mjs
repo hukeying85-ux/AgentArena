@@ -393,6 +393,47 @@ test("resolveCodexRuntime falls back from env to ~/.codex/config.toml", async ()
   }
 });
 
+test("resolveCodexRuntime reads defaults from the active CODEX_HOME", async () => {
+  const originalCodexHome = process.env.CODEX_HOME;
+  const originalModel = process.env.AGENTARENA_CODEX_MODEL;
+  const originalReasoning = process.env.AGENTARENA_CODEX_REASONING_EFFORT;
+  const codexHome = await mkdtemp(path.join(os.tmpdir(), "agentarena-codex-config-home-"));
+
+  try {
+    delete process.env.AGENTARENA_CODEX_MODEL;
+    delete process.env.AGENTARENA_CODEX_REASONING_EFFORT;
+    process.env.CODEX_HOME = codexHome;
+    await writeFile(
+      path.join(codexHome, "config.toml"),
+      'model = "codex-home-model"\nmodel_reasoning_effort = "medium"\n',
+      "utf8"
+    );
+
+    const resolved = await __testUtils.resolveCodexRuntime({});
+
+    assert.equal(resolved.effectiveModel, "codex-home-model");
+    assert.equal(resolved.effectiveReasoningEffort, "medium");
+    assert.equal(resolved.source, "codex-config");
+  } finally {
+    if (originalCodexHome === undefined) {
+      delete process.env.CODEX_HOME;
+    } else {
+      process.env.CODEX_HOME = originalCodexHome;
+    }
+    if (originalModel === undefined) {
+      delete process.env.AGENTARENA_CODEX_MODEL;
+    } else {
+      process.env.AGENTARENA_CODEX_MODEL = originalModel;
+    }
+    if (originalReasoning === undefined) {
+      delete process.env.AGENTARENA_CODEX_REASONING_EFFORT;
+    } else {
+      process.env.AGENTARENA_CODEX_REASONING_EFFORT = originalReasoning;
+    }
+    await rm(codexHome, { recursive: true, force: true });
+  }
+});
+
 test("resolveCodexSandboxMode defaults to non-prompting mode on Windows", () => {
   const expectedDefault = process.platform === "win32" ? "danger-full-access" : "workspace-write";
 
@@ -522,6 +563,91 @@ test("Codex adapter passes configured sandbox mode to the CLI", async () => {
       delete process.env.USERPROFILE;
     } else {
       process.env.USERPROFILE = originalUserProfile;
+    }
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("Codex adapter passes the active CODEX_HOME to the CLI without changing it", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-codex-config-env-"));
+  const workspacePath = path.join(tempDir, "workspace");
+  const codexHome = path.join(tempDir, "codex-home");
+  const shimPath = path.join(tempDir, "codex.cmd");
+  const scriptPath = path.join(tempDir, "codex-shim.mjs");
+  const capturePath = path.join(tempDir, "capture.json");
+  const originalCodexBin = process.env.AGENTARENA_CODEX_BIN;
+  const originalCodexHome = process.env.CODEX_HOME;
+
+  try {
+    await mkdir(workspacePath, { recursive: true });
+    await mkdir(codexHome, { recursive: true });
+    await writeFile(
+      scriptPath,
+      [
+        'import { mkdirSync, writeFileSync } from "node:fs";',
+        'import path from "node:path";',
+        "const args = process.argv.slice(2);",
+        'if (args.includes("--version")) { console.log("codex 0.0.0"); process.exit(0); }',
+        "writeFileSync(process.env.AGENTARENA_CODEX_CAPTURE, JSON.stringify({ codexHome: process.env.CODEX_HOME }), 'utf8');",
+        'const outputIndex = args.indexOf("--output-last-message");',
+        "if (outputIndex >= 0) {",
+        "  const outputPath = args[outputIndex + 1];",
+        "  mkdirSync(path.dirname(outputPath), { recursive: true });",
+        "  writeFileSync(outputPath, 'Codex shim completed.', 'utf8');",
+        "}",
+        'console.log(JSON.stringify({ type: "thread.started", thread_id: "shim-thread" }));',
+      ].join("\n"),
+      "utf8"
+    );
+    await writeFile(shimPath, `@echo off\n"${process.execPath}" "${scriptPath}" %*\n`, "utf8");
+
+    process.env.AGENTARENA_CODEX_BIN = shimPath;
+    process.env.CODEX_HOME = codexHome;
+    const executionEnvironment = {
+      ...process.env,
+      AGENTARENA_CODEX_CAPTURE: capturePath
+    };
+    delete executionEnvironment.CODEX_HOME;
+
+    const adapter = getAdapter("codex");
+    const result = await adapter.execute({
+      agentId: "codex",
+      selection: {
+        baseAgentId: "codex",
+        variantId: "codex-local-config",
+        displayLabel: "Codex CLI",
+        config: {},
+        configSource: "test"
+      },
+      repoPath: tempDir,
+      workspacePath,
+      environment: executionEnvironment,
+      task: {
+        schemaVersion: "agentarena.taskpack/v1",
+        id: "codex-local-config",
+        title: "Codex Local Config",
+        prompt: "No-op.",
+        envAllowList: [],
+        setupCommands: [],
+        judges: [],
+        teardownCommands: []
+      },
+      trace: async () => {}
+    });
+
+    assert.equal(result.status, "success", result.summary);
+    const captured = JSON.parse(await readFile(capturePath, "utf8"));
+    assert.equal(captured.codexHome, codexHome);
+  } finally {
+    if (originalCodexBin === undefined) {
+      delete process.env.AGENTARENA_CODEX_BIN;
+    } else {
+      process.env.AGENTARENA_CODEX_BIN = originalCodexBin;
+    }
+    if (originalCodexHome === undefined) {
+      delete process.env.CODEX_HOME;
+    } else {
+      process.env.CODEX_HOME = originalCodexHome;
     }
     await rm(tempDir, { recursive: true, force: true });
   }

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { resolveTaskPackImportUrl } from "../apps/web-report/src/components/task-pack-market.js";
 import { judgeRegistry } from "../apps/web-report/src/core/judge-registry.js";
-import { isCommunityTaskPack, safeExternalHref } from "../apps/web-report/src/launcher/module.js";
+import { createLauncherModule, isCommunityTaskPack, safeExternalHref } from "../apps/web-report/src/launcher/module.js";
 import { safeTraceCategoryClass } from "../apps/web-report/src/trace-replay.js";
 import { TraceReplayer } from "../apps/web-report/src/trace-replay-bridge.js";
 import {
@@ -45,6 +45,29 @@ test("community taskpack detection follows declared source before repository hin
   assert.equal(isCommunityTaskPack({ repoSource: "user" }), true);
   assert.equal(isCommunityTaskPack({ repoSource: "builtin://nodejs-app" }), false);
   assert.equal(isCommunityTaskPack({}), false);
+});
+
+test("new Codex variants inherit the current local configuration instead of pinning detected defaults", () => {
+  const launcher = createLauncherModule({
+    state: {
+      serviceInfo: {
+        codexDefaults: {
+          effectiveModel: "detected-model",
+          effectiveReasoningEffort: "high",
+          source: "codex-config",
+          verification: "inferred"
+        }
+      }
+    },
+    clientRandomId: () => "codex-local"
+  });
+
+  const variant = launcher.defaultCodexVariant();
+
+  assert.equal(variant.model, "");
+  assert.equal(variant.reasoningEffort, "");
+  assert.equal(variant.displayLabel, "Codex CLI");
+  assert.equal(variant.source, "codex-config");
 });
 
 test("safeTraceCategoryClass preserves normal trace categories", () => {
