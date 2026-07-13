@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { resolveTaskPackImportUrl } from "../apps/web-report/src/components/task-pack-market.js";
 import { judgeRegistry } from "../apps/web-report/src/core/judge-registry.js";
-import { createLauncherModule, isCommunityTaskPack, safeExternalHref } from "../apps/web-report/src/launcher/module.js";
+import {
+  claudeRuntimeModeDescription,
+  createLauncherModule,
+  isCommunityTaskPack,
+  safeExternalHref
+} from "../apps/web-report/src/launcher/module.js";
 import { safeTraceCategoryClass } from "../apps/web-report/src/trace-replay.js";
 import { TraceReplayer } from "../apps/web-report/src/trace-replay-bridge.js";
 import {
@@ -68,6 +73,23 @@ test("new Codex variants inherit the current local configuration instead of pinn
   assert.equal(variant.reasoningEffort, "");
   assert.equal(variant.displayLabel, "Codex CLI");
   assert.equal(variant.source, "codex-config");
+});
+
+test("Claude profile descriptions explain official local use and third-party isolation", () => {
+  const localText = (_zh, en) => en;
+
+  assert.match(
+    claudeRuntimeModeDescription({ kind: "official" }, localText),
+    /current local Claude Code login and personal configuration/i
+  );
+  assert.match(
+    claudeRuntimeModeDescription({ kind: "openai-proxy" }, localText),
+    /isolated temporary configuration/i
+  );
+  assert.match(
+    claudeRuntimeModeDescription({ kind: "openai-proxy" }, localText),
+    /AGENTS\.md and CLAUDE\.md/i
+  );
 });
 
 test("safeTraceCategoryClass preserves normal trace categories", () => {
