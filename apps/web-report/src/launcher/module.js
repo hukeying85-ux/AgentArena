@@ -176,17 +176,12 @@ export function createLauncherModule(deps) {
   // Special default for Codex which reads service info
   function defaultCodexVariant() {
     const defaults = state.serviceInfo?.codexDefaults ?? {};
-    const model = defaults.effectiveModel ?? '';
-    const reasoning = defaults.effectiveReasoningEffort ?? '';
-    const labelParts = ['Codex CLI'];
-    if (model) labelParts.push(model);
-    if (reasoning) labelParts.push(reasoning);
     return {
       id: clientRandomId(),
       enabled: false,
-      displayLabel: labelParts.join(' · '),
-      model,
-      reasoningEffort: reasoning,
+      displayLabel: 'Codex CLI',
+      model: '',
+      reasoningEffort: '',
       source: defaults.source ?? 'unknown',
       verification: defaults.verification ?? 'unknown'
     };
@@ -352,6 +347,9 @@ export function createLauncherModule(deps) {
     const dataAttr = variantDataAttr(config.id);
     const rp = rolePrefix(config.id);
     const fields = [];
+    const codexDefaults = config.id === 'codex' ? (state.serviceInfo?.codexDefaults ?? {}) : {};
+    const modelPlaceholder = codexDefaults.effectiveModel ?? config.defaultModelPlaceholder;
+    const reasoningPlaceholder = codexDefaults.effectiveReasoningEffort ?? 'low / medium / high';
 
     // Display label field
     if (config.fields.includes('displayLabel')) {
@@ -367,7 +365,7 @@ export function createLauncherModule(deps) {
       fields.push(`
         <label class="field">
           <span>${escapeHtml(localText("模型", "Model"))}</span>
-          <input data-role="${rp}model" type="text" value="${escapeHtml(variant.model ?? '')}" placeholder="${escapeHtml(config.defaultModelPlaceholder)}" />
+          <input data-role="${rp}model" type="text" value="${escapeHtml(variant.model ?? '')}" placeholder="${escapeHtml(modelPlaceholder)}" />
         </label>`);
     }
 
@@ -376,7 +374,7 @@ export function createLauncherModule(deps) {
       fields.push(`
         <label class="field">
           <span>${escapeHtml(localText("推理等级", "Reasoning Effort"))}</span>
-          <input data-role="${rp}reasoning" list="reasoning-levels" type="text" value="${escapeHtml(variant.reasoningEffort ?? '')}" placeholder="low / medium / high" />
+          <input data-role="${rp}reasoning" list="reasoning-levels" type="text" value="${escapeHtml(variant.reasoningEffort ?? '')}" placeholder="${escapeHtml(reasoningPlaceholder)}" />
         </label>`);
     }
 

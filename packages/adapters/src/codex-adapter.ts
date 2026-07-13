@@ -191,6 +191,11 @@ export class CodexCliAdapter implements AgentAdapter {
     const prompt = buildAgentPrompt(context);
     await savePromptArtifact(prompt, context.workspacePath, context);
     const invocation = await resolveCodexInvocation();
+    const activeCodexHome = process.env.CODEX_HOME?.trim();
+    const executionEnvironment = {
+      ...context.environment,
+      ...(activeCodexHome ? { CODEX_HOME: activeCodexHome } : {})
+    };
     const sandboxMode = resolveCodexSandboxMode(context.environment);
     const args = [
       ...invocation.argsPrefix,
@@ -213,7 +218,7 @@ export class CodexCliAdapter implements AgentAdapter {
       requestedConfig: context.selection.config,
       configSource: context.selection.configSource
     });
-    const versionProbe = await probeInvocationVersion(invocation, context.workspacePath, context.environment);
+    const versionProbe = await probeInvocationVersion(invocation, context.workspacePath, executionEnvironment);
     const runtimeWithVersion = {
       ...resolvedRuntime,
       effectiveAgentVersion: versionProbe.version ?? resolvedRuntime.effectiveAgentVersion,
@@ -264,7 +269,7 @@ export class CodexCliAdapter implements AgentAdapter {
         args,
         context.workspacePath,
         agentTimeoutMs(),
-        context.environment,
+        executionEnvironment,
         context.signal,
         prompt,
         activityCallbacks

@@ -36,11 +36,11 @@ function normalizeReasoningEffort(effort: string | null | undefined): string | u
 }
 
 export async function readCodexConfigDefaults(): Promise<CodexConfigDefaults> {
-  const configPath = path.join(
-    process.env.USERPROFILE ?? process.env.HOME ?? os.homedir(),
-    ".codex",
-    "config.toml"
-  );
+  const configuredCodexHome = process.env.CODEX_HOME?.trim();
+  const codexHome = configuredCodexHome
+    ? path.resolve(configuredCodexHome)
+    : path.join(process.env.USERPROFILE ?? process.env.HOME ?? os.homedir(), ".codex");
+  const configPath = path.join(codexHome, "config.toml");
   try {
     const contents = await fs.readFile(configPath, "utf8");
     const model = contents.match(/^\s*model\s*=\s*"([^"]+)"/m)?.[1]?.trim();
@@ -103,7 +103,7 @@ export async function resolveCodexRuntime(context: {
       effectiveReasoningEffort: normalizedConfigEffort,
       source: "codex-config",
       verification: "inferred",
-      notes: ["Using defaults from ~/.codex/config.toml."]
+      notes: ["Using defaults from the active Codex config.toml."]
     };
   }
 
