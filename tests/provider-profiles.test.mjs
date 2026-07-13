@@ -136,6 +136,23 @@ test("saveClaudeProviderProfile rejects official kind", async () => {
   });
 });
 
+test("saveClaudeProviderProfile rejects extraEnv keys that could break runtime isolation", async () => {
+  await withTempRoot(async () => {
+    await assert.rejects(
+      () => saveClaudeProviderProfile({
+        name: "Unsafe Provider",
+        kind: "anthropic-compatible",
+        apiFormat: "anthropic-messages",
+        extraEnv: {
+          CLAUDE_CONFIG_DIR: "C:/reuse-personal-config",
+          ANTHROPIC_AUTH_TOKEN: "shadow-token"
+        }
+      }),
+      /CLAUDE_CONFIG_DIR.*ANTHROPIC_AUTH_TOKEN|ANTHROPIC_AUTH_TOKEN.*CLAUDE_CONFIG_DIR/i
+    );
+  });
+});
+
 test("saveClaudeProviderProfile rejects internal baseUrl (SSRF protection)", async () => {
   await withTempRoot(async () => {
     await assert.rejects(
