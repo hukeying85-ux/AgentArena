@@ -111,11 +111,24 @@ export async function handleQuickPreflight(rawBody: string): Promise<ApiResponse
     });
     const [preflight] = await preflightAdapters([selection], { probeAuth: false });
     const command = preflight?.command ?? body.baseAgentId;
-    const authResult = await probeAuthConfig({
-      command,
-      argsPrefix: [],
-      displayCommand: command
-    });
+    const isThirdPartyClaude =
+      body.baseAgentId === "claude-code" &&
+      preflight?.resolvedRuntime?.providerKind != null &&
+      preflight.resolvedRuntime.providerKind !== "official";
+    const thirdPartyReady =
+      preflight != null && preflight.status !== "missing" && preflight.status !== "blocked";
+    const authResult = isThirdPartyClaude
+      ? {
+          configured: thirdPartyReady,
+          hint: thirdPartyReady
+            ? "An isolated Provider secret is stored; network authentication was not probed."
+            : preflight?.summary
+        }
+      : await probeAuthConfig({
+          command,
+          argsPrefix: [],
+          displayCommand: command
+        });
 
     let overallStatus: "ready" | "warning" | "blocked" = "ready";
     if (!preflight || preflight.status === "missing") {

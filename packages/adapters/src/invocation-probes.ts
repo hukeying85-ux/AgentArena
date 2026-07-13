@@ -5,7 +5,7 @@ import type { AdapterPreflightResult, PreflightResult } from "@agentarena/core";
 import { ensureDirectory, getHealthCache } from "@agentarena/core";
 import type { InvocationSpec } from "./adapter-capabilities.js";
 import { adapterWarn } from "./adapter-diagnostics.js";
-import { writeClaudeWorkspaceSettings } from "./claude-provider-profiles.js";
+import { prepareClaudeRuntimeEnvironment } from "./claude-runtime-environment.js";
 import { parseClaudeEvents } from "./event-parsers.js";
 import type { ProcessResult } from "./process-utils.js";
 import { runProcess } from "./process-utils.js";
@@ -282,7 +282,8 @@ export async function probeClaudeLikeAuth(
   invocation: InvocationSpec,
   cwd: string,
   environment?: NodeJS.ProcessEnv,
-  timeoutMs: number = 60_000
+  timeoutMs: number = 60_000,
+  extraArgs: string[] = []
 ): Promise<{
   status: AdapterPreflightResult["status"];
   summary: string;
@@ -296,6 +297,7 @@ export async function probeClaudeLikeAuth(
       invocation.command,
       [
         ...invocation.argsPrefix,
+        ...extraArgs,
         "-p",
         "--output-format",
         "stream-json",
@@ -379,6 +381,7 @@ export async function probeClaudeLikeAuthFast(
     endpoint?: string;
     useCache?: boolean;
     forceProbe?: boolean;
+    extraArgs?: string[];
   }
 ): Promise<PreflightResult> {
   const useCache = options?.useCache !== false;
@@ -404,7 +407,7 @@ export async function probeClaudeLikeAuthFast(
   }
 
   // Run the actual probe with short timeout
-  const result = await probeClaudeLikeAuth(invocation, cwd, environment, timeoutMs);
+  const result = await probeClaudeLikeAuth(invocation, cwd, environment, timeoutMs, options?.extraArgs);
 
   // Build structured result - map unverified to unverified, keep others as-is
   const status = result.status;
@@ -477,29 +480,27 @@ export async function probeClaudeProfileAuth(
   summary: string;
   details?: string[];
 }> {
-  const probeRoot = await fs.mkdtemp(path.join(os.tmpdir(), "agentarena-claude-probe-"));
+  const prepared = await prepareClaudeRuntimeEnvironment({
+    profileId,
+    requestedModel,
+    baseEnvironment: process.env
+  });
+  const ownsProbeRoot = prepared.runtimeRoot == null;
+  const probeRoot = prepared.runtimeRoot ?? await fs.mkdtemp(path.join(os.tmpdir(), "agentarena-claude-probe-"));
   try {
     const workspacePath = path.join(probeRoot, "workspace");
     await ensureDirectory(workspacePath);
-    let providerRuntime: Awaited<ReturnType<typeof writeClaudeWorkspaceSettings>>;
-    try {
-      providerRuntime = await writeClaudeWorkspaceSettings(workspacePath, profileId, requestedModel);
-    } catch (error) {
-      return {
-        status: "blocked",
-        summary: "Failed to write workspace settings for auth probe.",
-        details: [error instanceof Error ? error.message : String(error)]
-      };
-    }
     return await probeClaudeLikeAuth(
       invocation,
       workspacePath,
-      {
-        ...process.env,
-        ...providerRuntime.environment
-      }
+      prepared.environment,
+      60_000,
+      prepared.extraArgs
     );
   } finally {
-    await fs.rm(probeRoot, { recursive: true, force: true }).catch(() => {});
+    await prepared.cleanup();
+    if (ownsProbeRoot) {
+      await fs.rm(probeRoot, { recursive: true, force: true });
+    }
   }
 }

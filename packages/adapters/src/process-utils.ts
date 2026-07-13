@@ -260,9 +260,13 @@ async function runWindowsClaudeDetached(
         return `Set-Item -LiteralPath ${quotePowerShellSingle(`Env:${key}`)} -Value ${quotePowerShellSingle(safeValue)}`;
       })
       .join("\n");
+    const resetEnvironment = environment
+      ? "Get-ChildItem Env: | ForEach-Object { Remove-Item -LiteralPath $_.PSPath -ErrorAction SilentlyContinue }"
+      : "";
     const redirectInput = stdinInput !== undefined ? ` -RedirectStandardInput ${quotePowerShellSingle(stdinPath)}` : "";
     const script = [
       "$ErrorActionPreference = 'Stop'",
+      resetEnvironment,
       envAssignments,
       `$timeoutMs = ${Math.max(1, Math.floor(timeoutMs))}`,
       "function Stop-ProcessTree([int]$ProcessId) {",

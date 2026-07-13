@@ -1,4 +1,5 @@
 import { promises as fsPromises } from "node:fs";
+import path from "node:path";
 import type {
   AdapterCapability,
   AdapterExecutionContext,
@@ -13,7 +14,11 @@ import { logger, type ToolCallRecord, writeExecutionEvidence } from "@agentarena
 import { CLAUDE_CODE_CAPABILITY, type InvocationSpec } from "./adapter-capabilities.js";
 import { formatAdapterError } from "./adapter-diagnostics.js";
 import { buildAgentPrompt, createPreflightResult, getChangedFilesFromGit, savePromptArtifact } from "./adapter-helpers.js";
-import { getClaudeProviderProfileSecret, writeClaudeWorkspaceSettings } from "./claude-provider-profiles.js";
+import { getClaudeProviderProfileSecret } from "./claude-provider-profiles.js";
+import {
+  claudeIsolationArgsSupported,
+  prepareClaudeRuntimeEnvironment
+} from "./claude-runtime-environment.js";
 import { probeClaudeLikeAuth, probeClaudeLikeAuthFast, probeHelp, probeInvocationVersion } from "./invocation-probes.js";
 import { findExecutableOnPath, preflightTimeoutMs, type RunProcessCallbacks, transportTimeoutMs } from "./process-utils.js";
 import { resolveClaudeRuntime } from "./runtime-resolution.js";
@@ -123,6 +128,7 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
     options?: {
       extraArgs?: string[];
       extraEnvironment?: NodeJS.ProcessEnv;
+      executionEnvironment?: NodeJS.ProcessEnv;
       resolvedRuntime?: AgentResolvedRuntime;
       /** Whether this is a third-party provider (enables transport fallback) */
       isThirdPartyProvider?: boolean;
@@ -131,10 +137,11 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
     const prompt = buildAgentPrompt(context);
     await savePromptArtifact(prompt, context.workspacePath, context);
     const invocation = await this.resolveInvocation();
-    const versionProbe = await probeInvocationVersion(invocation, context.workspacePath, {
+    const executionEnvironment = options?.executionEnvironment ?? {
       ...context.environment,
       ...options?.extraEnvironment
-    });
+    };
+    const versionProbe = await probeInvocationVersion(invocation, context.workspacePath, executionEnvironment);
     const resolvedRuntime = {
       ...(options?.resolvedRuntime ?? {
         source: "unknown" as const,
@@ -188,10 +195,7 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
       chainResult = await transportChain.execute(
         prompt,
         context.workspacePath,
-        {
-          ...context.environment,
-          ...options?.extraEnvironment
-        },
+        executionEnvironment,
         context.signal,
         activityCallbacks
       );
@@ -377,8 +381,10 @@ export class ClaudeCodeAdapter extends ClaudeLikeAdapter {
           : resolved.runtime.agentVersionSource
     };
 
+    let helpOutput = "";
     try {
       const help = await probeHelp(invocation, process.cwd());
+      helpOutput = `${help.stdout}\n${help.stderr}`;
       if (help.exitCode !== 0) {
         return createPreflightResult(
           options?.selection,
@@ -409,6 +415,21 @@ export class ClaudeCodeAdapter extends ClaudeLikeAdapter {
       );
     }
 
+    if (resolved.profile.kind !== "official" && !claudeIsolationArgsSupported(helpOutput)) {
+      return createPreflightResult(
+        options?.selection,
+        this.id,
+        this.title,
+        this.kind,
+        this.capability,
+        "blocked",
+        "This Claude Code version cannot guarantee isolated third-party Provider execution.",
+        resolvedRuntime,
+        invocation.displayCommand,
+        ["Upgrade Claude Code to a version that supports --setting-sources and --strict-mcp-config."]
+      );
+    }
+
     if (resolved.profile.kind !== "official" && !(await getClaudeProviderProfileSecret(resolved.profile.id))) {
       return createPreflightResult(
         options?.selection,
@@ -425,29 +446,71 @@ export class ClaudeCodeAdapter extends ClaudeLikeAdapter {
     }
 
     if (options?.probeAuth) {
-      // Use fast probe with cache for third-party providers (they are more fragile)
-      if (resolved.profile.kind !== "official") {
-        const fastResult = await probeClaudeLikeAuthFast(
-          invocation,
-          process.cwd(),
+      let prepared: Awaited<ReturnType<typeof prepareClaudeRuntimeEnvironment>>;
+      try {
+        prepared = await prepareClaudeRuntimeEnvironment({
+          profileId: resolved.profile.id,
+          requestedModel: options?.selection?.config.model ?? resolved.profile.primaryModel,
+          baseEnvironment: process.env
+        });
+      } catch (error) {
+        return createPreflightResult(
+          options?.selection,
           this.id,
-          resolved.profile.id,
-          {
-            ...process.env,
-            ...(await writeClaudeWorkspaceSettings(
-              process.cwd(),
-              resolved.profile.id,
-              options?.selection?.config.model ?? resolved.profile.primaryModel
-            ).then(r => r.environment).catch(() => ({})))
-          },
+          this.title,
+          this.kind,
+          this.capability,
+          "blocked",
+          "Failed to prepare the Claude Code runtime environment.",
+          resolvedRuntime,
+          invocation.displayCommand,
+          [error instanceof Error ? error.message : String(error)]
+        );
+      }
+
+      try {
+        const probeWorkspace = prepared.runtimeRoot
+          ? path.join(prepared.runtimeRoot, "workspace")
+          : process.cwd();
+        if (prepared.runtimeRoot) {
+          await fsPromises.mkdir(probeWorkspace, { recursive: true });
+        }
+
+        if (resolved.profile.kind !== "official") {
+          const fastResult = await probeClaudeLikeAuthFast(
+            invocation,
+            probeWorkspace,
+            this.id,
+            resolved.profile.id,
+            prepared.environment,
+            preflightTimeoutMs(),
+            {
+              endpoint: resolved.profile.baseUrl,
+              useCache: true,
+              forceProbe: false,
+              extraArgs: prepared.extraArgs
+            }
+          );
+          return createPreflightResult(
+            options?.selection,
+            this.id,
+            this.title,
+            this.kind,
+            this.capability,
+            fastResult.status,
+            fastResult.summary,
+            resolvedRuntime,
+            invocation.displayCommand,
+            fastResult.details
+          );
+        }
+
+        const authProbe = await probeClaudeLikeAuth(
+          invocation,
+          probeWorkspace,
+          prepared.environment,
           preflightTimeoutMs(),
-          {
-            // Key the health cache on the provider baseUrl so two profiles that
-            // share an id but point at different endpoints do not collide.
-            endpoint: resolved.profile.baseUrl,
-            useCache: true,
-            forceProbe: false,
-          }
+          prepared.extraArgs
         );
         return createPreflightResult(
           options?.selection,
@@ -455,28 +518,15 @@ export class ClaudeCodeAdapter extends ClaudeLikeAdapter {
           this.title,
           this.kind,
           this.capability,
-          fastResult.status,
-          fastResult.summary,
+          authProbe.status,
+          authProbe.summary,
           resolvedRuntime,
           invocation.displayCommand,
-          fastResult.details
+          authProbe.details
         );
+      } finally {
+        await prepared.cleanup();
       }
-
-      // Official provider: use standard probe
-      const authProbe = await probeClaudeLikeAuth(invocation, process.cwd(), undefined, preflightTimeoutMs());
-      return createPreflightResult(
-        options?.selection,
-        this.id,
-        this.title,
-        this.kind,
-        this.capability,
-        authProbe.status,
-        authProbe.summary,
-        resolvedRuntime,
-        invocation.displayCommand,
-        authProbe.details
-      );
     }
 
     return createPreflightResult(
@@ -496,58 +546,111 @@ export class ClaudeCodeAdapter extends ClaudeLikeAdapter {
     const { runtime: runtimeBase, profile } = await resolveClaudeRuntime({
       requestedConfig: context.selection.config
     });
-    const providerRuntime = await writeClaudeWorkspaceSettings(
-      context.workspacePath,
-      profile.id,
-      context.selection.config.model ?? profile.primaryModel
-    );
     const invocation = await this.resolveInvocation();
-    const versionProbe = await probeInvocationVersion(invocation, context.workspacePath, {
-      ...context.environment,
-      ...providerRuntime.environment
-    });
-    const runtime = {
-      ...runtimeBase,
-      effectiveAgentVersion:
-        versionProbe.version ?? runtimeBase.effectiveAgentVersion,
-      agentVersionSource:
-        versionProbe.source !== "unknown"
-          ? versionProbe.source
-          : runtimeBase.agentVersionSource
-    };
-    const extraArgs = runtime.effectiveModel ? ["--model", runtime.effectiveModel] : [];
-    const profileRiskNote =
-      profile.kind === "official"
-        ? "Using Claude Code official profile without a third-party provider override."
-        : "This result was produced through a provider-switched Claude Code configuration.";
-
-    await context.trace({
-      type: "adapter.claude.profile",
-      message: profileRiskNote,
-      metadata: {
-        providerProfileId: profile.id,
-        providerProfileName: profile.name,
-        providerKind: profile.kind,
-        settingsPath: providerRuntime.settingsPath,
-        effectiveModel: runtime.effectiveModel
+    if (profile.kind !== "official") {
+      try {
+        const help = await probeHelp(invocation, context.workspacePath);
+        if (help.exitCode !== 0 || !claudeIsolationArgsSupported(`${help.stdout}\n${help.stderr}`)) {
+          return {
+            status: "failed",
+            summary:
+              "Claude Code cannot run this third-party Provider safely. Upgrade Claude Code to a version that supports isolated settings and strict MCP configuration.",
+            tokenUsage: 0,
+            estimatedCostUsd: 0,
+            costKnown: false,
+            changedFilesHint: [],
+            resolvedRuntime: runtimeBase
+          };
+        }
+      } catch (error) {
+        return {
+          status: "failed",
+          summary: `Claude Code isolation capability check failed: ${error instanceof Error ? error.message : String(error)}`,
+          tokenUsage: 0,
+          estimatedCostUsd: 0,
+          costKnown: false,
+          changedFilesHint: [],
+          resolvedRuntime: runtimeBase
+        };
       }
-    });
+    }
 
-    const result = await this.executeClaudeLike(context, "adapter.claude.result", "Claude Code", {
-      extraArgs,
-      extraEnvironment: providerRuntime.environment,
-      resolvedRuntime: runtime,
-      isThirdPartyProvider: profile.kind !== "official"
-    });
+    let prepared: Awaited<ReturnType<typeof prepareClaudeRuntimeEnvironment>>;
+    try {
+      prepared = await prepareClaudeRuntimeEnvironment({
+        profileId: profile.id,
+        requestedModel: context.selection.config.model ?? profile.primaryModel,
+        baseEnvironment: context.environment
+      });
+    } catch (error) {
+      return {
+        status: "failed",
+        summary: `Failed to prepare Claude Code runtime: ${error instanceof Error ? error.message : String(error)}`,
+        tokenUsage: 0,
+        estimatedCostUsd: 0,
+        costKnown: false,
+        changedFilesHint: [],
+        resolvedRuntime: runtimeBase
+      };
+    }
 
-    return {
-      ...result,
-      summary:
+    try {
+      const versionProbe = await probeInvocationVersion(invocation, context.workspacePath, prepared.environment);
+      const runtime = {
+        ...runtimeBase,
+        effectiveModel: prepared.effectiveModel ?? runtimeBase.effectiveModel,
+        effectiveAgentVersion:
+          versionProbe.version ?? runtimeBase.effectiveAgentVersion,
+        agentVersionSource:
+          versionProbe.source !== "unknown"
+            ? versionProbe.source
+            : runtimeBase.agentVersionSource
+      };
+      const extraArgs = [
+        ...prepared.extraArgs,
+        ...(runtime.effectiveModel ? ["--model", runtime.effectiveModel] : [])
+      ];
+      const profileRiskNote =
         profile.kind === "official"
-          ? result.summary
-          : `${result.summary}\n\nThis result was produced through a provider-switched Claude Code configuration.`,
-      resolvedRuntime: runtime
-    };
+          ? "Using the current local Claude Code login and configuration."
+          : "Using an isolated Claude Code configuration for a third-party Provider.";
+
+      await context.trace({
+        type: "adapter.claude.profile",
+        message: profileRiskNote,
+        metadata: {
+          providerProfileId: profile.id,
+          providerProfileName: profile.name,
+          providerKind: profile.kind,
+          runtimeMode: prepared.mode,
+          configIsolated: prepared.mode === "third-party-isolated",
+          effectiveModel: runtime.effectiveModel
+        }
+      });
+
+      const result = await this.executeClaudeLike(context, "adapter.claude.result", "Claude Code", {
+        extraArgs,
+        executionEnvironment: prepared.environment,
+        resolvedRuntime: runtime,
+        isThirdPartyProvider: profile.kind !== "official"
+      });
+
+      return {
+        ...result,
+        summary:
+          profile.kind === "official"
+            ? result.summary
+            : `${result.summary}\n\nThis result was produced through an isolated third-party Provider configuration.`,
+        resolvedRuntime: runtime
+      };
+    } finally {
+      try {
+        await prepared.cleanup();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        logger.warn("adapter", "claude.runtime_cleanup_failed", `Failed to clean Claude runtime: ${message}`);
+      }
+    }
   }
 }
 

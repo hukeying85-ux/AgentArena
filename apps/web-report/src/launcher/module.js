@@ -34,6 +34,19 @@ export function isCommunityTaskPack(taskPack) {
   return typeof repoSource === "string" && !repoSource.startsWith("builtin://");
 }
 
+export function claudeRuntimeModeDescription(profile, localText) {
+  if ((profile?.kind ?? "official") === "official") {
+    return localText(
+      "使用当前本地 Claude Code 登录和个人配置。AgentArena 不主动修改这些配置，但 Claude Code 自身可能正常更新缓存、历史或登录状态。",
+      "Uses the current local Claude Code login and personal configuration. AgentArena does not modify it, although Claude Code may normally update caches, history, or login state."
+    );
+  }
+  return localText(
+    "使用独立临时配置，不读取当前官方登录、个人规则、插件或 MCP。项目中的 AGENTS.md 和 CLAUDE.md 仍会保留；连接测试与正式运行使用同一隔离规则。",
+    "Uses an isolated temporary configuration without reading the current official login, personal rules, plugins, or MCP. Project AGENTS.md and CLAUDE.md remain available, and connection tests use the same isolation policy as real runs."
+  );
+}
+
 export function createLauncherModule(deps) {
   const {
     state,
@@ -420,6 +433,10 @@ export function createLauncherModule(deps) {
         `Current default: model ${codexDefaults.effectiveModel ?? "unknown"} | reasoning ${codexDefaults.effectiveReasoningEffort ?? "default"} | ${codexDefaults.verification ?? "unknown"} / ${codexDefaults.source ?? "unknown"}`
       );
       extraHtml = `<p class="muted">${escapeHtml(codexDefaultsText)}</p>
+        <p class="muted">${escapeHtml(localText(
+          "模型和推理等级留空时，使用运行当下的本地 Codex 登录与配置；填写后只覆盖本次运行。",
+          "Leave model and reasoning blank to use the current local Codex login and configuration at run time; filled values override only this run."
+        ))}</p>
         <datalist id="reasoning-levels">
           <option value="low"></option>
           <option value="medium"></option>
@@ -474,6 +491,7 @@ export function createLauncherModule(deps) {
             </label>
           </div>
           <p class="muted">${escapeHtml(localText("Provider", "Provider"))}: ${escapeHtml(profile?.name ?? variant.providerName ?? "Official")} | ${escapeHtml(localText("类型", "Kind"))}: ${escapeHtml(profile?.kind ?? variant.providerKind ?? "official")}</p>
+          <p class="muted provider-mode-description">${escapeHtml(claudeRuntimeModeDescription(profile, localText))}</p>
           <div class="provider-status-row">
             <span class="provider-status-label">${escapeHtml(localText("密钥状态", "Secret"))}:</span>
             ${
