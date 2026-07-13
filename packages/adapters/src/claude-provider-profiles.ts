@@ -56,6 +56,51 @@ export interface ClaudeProviderProfileInput {
   riskFlags?: ClaudeProviderRiskFlag[];
 }
 
+const RESERVED_PROVIDER_EXTRA_ENV_NAMES = new Set([
+  "ANTHROPIC_API_KEY",
+  "ANTHROPIC_AUTH_TOKEN",
+  "ANTHROPIC_BASE_URL",
+  "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+  "ANTHROPIC_DEFAULT_OPUS_MODEL",
+  "ANTHROPIC_DEFAULT_SONNET_MODEL",
+  "ANTHROPIC_MODEL",
+  "CLAUDE_CODE_OAUTH_TOKEN",
+  "CLAUDE_CODE_USE_BEDROCK",
+  "CLAUDE_CODE_USE_FOUNDRY",
+  "CLAUDE_CODE_USE_VERTEX",
+  "CLAUDE_CONFIG_DIR",
+  "COMSPEC",
+  "HOME",
+  "PATH",
+  "PATHEXT",
+  "PWD",
+  "SHELL",
+  "SYSTEMROOT",
+  "TEMP",
+  "TMP",
+  "USERPROFILE",
+  "WINDIR"
+]);
+
+export function findReservedClaudeProviderEnvironmentKeys(
+  extraEnv: Record<string, string> | undefined
+): string[] {
+  return Object.keys(extraEnv ?? {})
+    .filter((key) => RESERVED_PROVIDER_EXTRA_ENV_NAMES.has(key.trim().toUpperCase()))
+    .sort((left, right) => left.localeCompare(right));
+}
+
+function assertAllowedClaudeProviderEnvironment(extraEnv: Record<string, string> | undefined): void {
+  const reservedKeys = findReservedClaudeProviderEnvironmentKeys(extraEnv);
+  if (reservedKeys.length === 0) {
+    return;
+  }
+  throw new Error(
+    `Claude provider extraEnv cannot override reserved runtime fields: ${reservedKeys.join(", ")}. ` +
+      "Use the dedicated provider fields for address, model, and secret settings."
+  );
+}
+
 const BUILT_IN_OFFICIAL_PROFILE: ClaudeProviderProfile = {
   id: "claude-official",
   name: "Official",
@@ -552,6 +597,8 @@ export async function saveClaudeProviderProfile(input: ClaudeProviderProfileInpu
     throw new Error("The built-in official Claude profile cannot be replaced.");
   }
 
+  assertAllowedClaudeProviderEnvironment(input.extraEnv);
+
   if (input.baseUrl && isInternalUrl(input.baseUrl)) {
     throw new Error("baseUrl cannot point to an internal/private address. This restriction prevents Server-Side Request Forgery (SSRF) attacks.");
   }
@@ -735,6 +782,7 @@ export async function buildClaudeProviderEnvironment(
   effectiveModel?: string;
 }> {
   const profile = await getClaudeProviderProfile(profileId);
+  assertAllowedClaudeProviderEnvironment(profile.extraEnv);
   const environment: Record<string, string> = {
     ...(profile.writeCommonConfig
       ? {

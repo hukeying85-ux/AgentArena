@@ -15,6 +15,16 @@ export {
   supportsWindowsCredentialManager,
   writeClaudeWorkspaceSettings
 } from "./claude-provider-profiles.js";
+export {
+  CLAUDE_ISOLATION_ARGS,
+  claudeIsolationArgsSupported,
+  prepareClaudeRuntimeEnvironment
+} from "./claude-runtime-environment.js";
+export type {
+  ClaudeRuntimeMode,
+  PreparedClaudeRuntimeEnvironment,
+  PrepareClaudeRuntimeEnvironmentOptions
+} from "./claude-runtime-environment.js";
 export type { InstallGuide } from "./install-guides.js";
 export { getInstallGuide, INSTALL_GUIDES, listInstallGuides } from "./install-guides.js";
 export { probeAuthConfig, probeClaudeLikeAuthFast, probeCliExists, probeQuickPreflight } from "./invocation-probes.js";
