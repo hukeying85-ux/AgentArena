@@ -251,7 +251,11 @@ export class TraceReplayer {
 
     const startTime = events[0].timestamp;
     const endTime = events[events.length - 1].timestamp;
-    const durationMs = new Date(endTime).getTime() - new Date(startTime).getTime();
+    const startMs = Date.parse(startTime);
+    const endMs = Date.parse(endTime);
+    const durationMs = Number.isFinite(startMs) && Number.isFinite(endMs) && endMs >= startMs
+      ? endMs - startMs
+      : 0;
 
     return {
       steps,
@@ -363,7 +367,11 @@ export class TraceReplayer {
 
     const startTime = events[0].timestamp;
     const endTime = events[events.length - 1].timestamp;
-    const durationMs = new Date(endTime).getTime() - new Date(startTime).getTime();
+    const startMs = Date.parse(startTime);
+    const endMs = Date.parse(endTime);
+    const durationMs = Number.isFinite(startMs) && Number.isFinite(endMs) && endMs >= startMs
+      ? endMs - startMs
+      : 0;
 
     const categories: Record<string, number> = {};
     for (const event of events) {

@@ -739,6 +739,63 @@ test("agentarena run supports JSON output", { timeout: 60_000 }, async () => {
   }
 });
 
+test("agentarena run --json-events writes valid NDJSON with a final summary", { timeout: 60_000 }, async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-cli-"));
+  try {
+    const repoPath = path.join(tempDir, "repo");
+    const outputPath = path.join(tempDir, "output-json-events");
+    const taskPath = path.join(tempDir, "task-json-events.json");
+
+    await mkdir(repoPath, { recursive: true });
+    await writeFile(path.join(repoPath, "README.md"), "# Temp Repo\n", "utf8");
+
+    await writeJson(taskPath, {
+      schemaVersion: "agentarena.taskpack/v1",
+      id: "cli-json-events",
+      title: "CLI JSON Events",
+      prompt: "Return JSON event output",
+      judges: [
+        {
+          id: "pass",
+          type: "command",
+          label: "Always pass",
+          command: "node -e \"process.exit(0)\""
+        }
+      ]
+    });
+
+    const result = await runCli(
+      [
+        "run",
+        "--repo",
+        repoPath,
+        "--task",
+        taskPath,
+        "--agents",
+        "demo-fast",
+        "--output",
+        outputPath,
+        "--json-events"
+      ],
+      path.resolve(".")
+    );
+
+    assert.equal(result.code, 0, result.stderr);
+    const lines = result.stdout.trim().split(/\r?\n/).filter(Boolean);
+    assert.ok(lines.length > 1, "expected progress events plus summary");
+
+    const payloads = lines.map((line) => JSON.parse(line));
+    assert.equal(payloads.some((payload) => payload.type === "progress"), true);
+    const summary = payloads.at(-1);
+    assert.equal(summary.type, "summary");
+    assert.equal(summary.repeat, 1);
+    assert.equal(summary.runs.length, 1);
+    assert.equal(summary.runs[0].task.id, "cli-json-events");
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("agentarena run writes a trend.md when >=2 prior comparable runs exist", { timeout: 60_000 }, async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-cli-"));
   try {

@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from "node:util";
 import type { JsonValueJudge, JudgeResult } from "@agentarena/core";
 import {
+  enforceJsonBudget,
   readTextFileSafe,
   resolveJsonPointer,
   resolveWorkspacePath,
@@ -15,6 +16,7 @@ export async function runJsonValueJudge(judge: JsonValueJudge, workspacePath: st
   try {
     const rawText = await readTextFileSafe(targetPath, `Judge "${judge.id}"`);
     const parsed = JSON.parse(rawText);
+    enforceJsonBudget(parsed);
     if (typeof parsed !== "object" || parsed === null) {
       throw new Error(`Judge "${judge.id}": expected JSON object or array, got ${typeof parsed}`);
     }

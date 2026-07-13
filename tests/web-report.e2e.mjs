@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { mkdtemp, rm } from "node:fs/promises";
 import http from "node:http";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { loadChromiumForSmoke as loadChromiumOrSkip } from "./browser-smoke-support.mjs";
 
 async function getAvailablePort() {
   return await new Promise((resolve, reject) => {
@@ -16,7 +19,7 @@ async function getAvailablePort() {
   });
 }
 
-async function startUiServer(cwd) {
+async function startUiServer(cwd, envOverrides = {}) {
   const cliPath = path.resolve(cwd, "packages/cli/dist/index.js");
   const port = await getAvailablePort();
   const child = spawn(process.execPath, [cliPath, "ui", "--host", "127.0.0.1", "--port", String(port), "--no-open"], {
@@ -24,7 +27,8 @@ async function startUiServer(cwd) {
     stdio: ["ignore", "pipe", "pipe"],
     env: {
       ...process.env,
-      BROWSER: "none"
+      BROWSER: "none",
+      ...envOverrides
     }
   });
 
@@ -62,23 +66,6 @@ async function startUiServer(cwd) {
       await new Promise((resolve) => child.once("exit", resolve));
     }
   };
-}
-
-async function loadChromiumOrSkip(t) {
-  if (process.env.AGENTARENA_RUN_BROWSER_SMOKE !== "1") {
-    t.skip("Set AGENTARENA_RUN_BROWSER_SMOKE=1 to run browser smoke tests.");
-    return null;
-  }
-
-  try {
-    const { chromium } = await import("playwright");
-    const probe = await chromium.launch({ headless: true });
-    await probe.close();
-    return chromium;
-  } catch (error) {
-    t.skip(`Playwright is unavailable: ${error instanceof Error ? error.message : String(error)}`);
-    return null;
-  }
 }
 
 async function expandLauncherIfNeeded(page) {
@@ -201,7 +188,7 @@ test("web-report browser smoke renders launcher and supports zh/en switching", {
 
   try {
     await page.goto(`http://127.0.0.1:${uiServer.port}/`, {
-      waitUntil: "networkidle",
+      waitUntil: "domcontentloaded",
       timeout: 30000
     });
 
@@ -244,7 +231,7 @@ test("mobile sidebar opens and closes via toggle and backdrop", {
 
   try {
     await page.goto(`http://127.0.0.1:${uiServer.port}/`, {
-      waitUntil: "networkidle",
+      waitUntil: "domcontentloaded",
       timeout: 30000
     });
 
@@ -281,7 +268,7 @@ test("wrong results file shows a visible error and run list items stay valid", {
 
   try {
     await page.goto(`http://127.0.0.1:${uiServer.port}/`, {
-      waitUntil: "networkidle",
+      waitUntil: "domcontentloaded",
       timeout: 30000
     });
 
@@ -298,6 +285,16 @@ test("wrong results file shows a visible error and run list items stay valid", {
 
     const notice = await page.locator("#result-loader-message").textContent();
     assert.match(notice ?? "", /summary\.json|解析|parse|无法解析/i);
+
+    await page.locator("#summary-file").setInputFiles({
+      name: "valid-summary.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(JSON.stringify(createTestRun()))
+    });
+    await page.waitForFunction(() => {
+      const el = document.getElementById("result-loader-message");
+      return Boolean(el?.hidden && !el.textContent);
+    });
 
     await injectTestRun(page);
 
@@ -333,9 +330,10 @@ test("web-report preserves selected agent and language across reload", {
 
   try {
     await page.goto(`http://127.0.0.1:${uiServer.port}/`, {
-      waitUntil: "networkidle",
+      waitUntil: "domcontentloaded",
       timeout: 30000
     });
+    await page.locator("#launcher-body").waitFor({ state: "attached", timeout: 15000 });
 
     await injectTestRun(page);
     const selectedAgentKey = await page.locator("[data-compare-agent-id]").nth(1).getAttribute("data-compare-agent-id");
@@ -348,7 +346,7 @@ test("web-report preserves selected agent and language across reload", {
     assert.match(beforeReloadUrl, /run=test-run-001/);
     assert.equal(new URL(beforeReloadUrl).searchParams.get("agent"), selectedAgentKey);
 
-    await page.reload({ waitUntil: "networkidle", timeout: 30000 });
+    await page.reload({ waitUntil: "domcontentloaded", timeout: 30000 });
     await page.waitForFunction((agentKey) => {
       const dashboard = document.getElementById("dashboard");
       const selectedAgent = document.querySelector(`[data-compare-agent-id="${CSS.escape(agentKey)}"]`);
@@ -380,7 +378,7 @@ test("clicking a comparison bar row selects the agent", {
 
   try {
     await page.goto(`http://127.0.0.1:${uiServer.port}/`, {
-      waitUntil: "networkidle",
+      waitUntil: "domcontentloaded",
       timeout: 30000
     });
 
@@ -414,7 +412,7 @@ test("clicking the selected compare table row toggles inline detail", {
 
   try {
     await page.goto(`http://127.0.0.1:${uiServer.port}/`, {
-      waitUntil: "networkidle",
+      waitUntil: "domcontentloaded",
       timeout: 30000
     });
 
@@ -660,5 +658,85 @@ test("export run as JSON file", {
   } finally {
     await browser.close();
     await uiServer.stop();
+  }
+});
+
+test("Claude provider editor preserves typed values and saves a profile", {
+  concurrency: false,
+  timeout: 90000
+}, async (t) => {
+  const chromium = await loadChromiumOrSkip(t);
+  if (!chromium) return;
+
+  const root = path.resolve(import.meta.dirname, "..");
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-web-provider-"));
+  const uiServer = await startUiServer(root, {
+    AGENTARENA_CLAUDE_PROFILE_ROOT: tempDir,
+    AGENTARENA_CLAUDE_PROFILES_FILE: path.join(tempDir, "claude-provider-profiles.json"),
+    AGENTARENA_CLAUDE_SECRET_PREFIX: `AgentArena/e2e/${Date.now()}/`,
+    AGENTARENA_SKIP_DNS_CHECK: "1"
+  });
+  const browser = await chromium.launch({ headless: true });
+
+  try {
+    const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
+    await page.goto(`http://127.0.0.1:${uiServer.port}`, {
+      waitUntil: "domcontentloaded",
+      timeout: 30000
+    });
+    await page.locator("#launcher-body").waitFor({ state: "attached", timeout: 15000 });
+    await expandLauncherIfNeeded(page);
+    const claudeSection = page.locator("details.launcher-section").filter({ hasText: "Claude Code" }).first();
+    await claudeSection.locator("summary").click();
+    await page.locator("#launcher-add-provider").waitFor({ state: "visible", timeout: 15000 });
+
+    await page.locator("#launcher-add-provider").click();
+    await page.locator("[data-provider-editor='true']").waitFor({ state: "visible", timeout: 10000 });
+
+    await page.locator("[data-role='provider-name']").fill("Persist Provider");
+    await page.locator("[data-role='provider-kind']").selectOption("openai-proxy");
+    await page.waitForFunction(() => document.querySelector("[data-provider-editor='true']"));
+    assert.equal(await page.locator("[data-role='provider-name']").inputValue(), "Persist Provider");
+
+    await page.locator("[data-role='provider-kind']").selectOption("anthropic-compatible");
+    await page.locator("[data-role='provider-base-url']").fill("https://api.anthropic.com");
+    await page.locator("[data-role='provider-primary-model']").fill("claude-test-model");
+    assert.equal(await page.locator("[data-role='provider-primary-model']").inputValue(), "claude-test-model");
+    await page.locator("[data-role='provider-secret']").fill("sk-test-provider-secret");
+    assert.equal(await page.locator("[data-role='provider-name']").inputValue(), "Persist Provider");
+    assert.equal(await page.locator("[data-role='provider-base-url']").inputValue(), "https://api.anthropic.com");
+    assert.equal(await page.locator("[data-role='provider-primary-model']").inputValue(), "claude-test-model");
+    assert.equal(await page.locator("[data-role='provider-secret']").inputValue(), "sk-test-provider-secret");
+    const saveResponsePromise = page.waitForResponse(
+      (response) => response.url().includes("/api/provider-profiles") && response.request().method() === "POST",
+      { timeout: 20000 }
+    );
+    await page.locator("[data-role='provider-save']").click();
+    const saveResponse = await saveResponsePromise;
+    assert.equal(saveResponse.status(), 200, await saveResponse.text());
+
+    await page.waitForFunction(() => {
+      const editorGone = !document.querySelector("[data-provider-editor='true']");
+      const text = document.body.textContent ?? "";
+      return editorGone && text.includes("Persist Provider");
+    }, { timeout: 20000 });
+
+    const profilesResponse = await page.evaluate(async () => {
+      const token = document.querySelector('meta[name="agentarena-auth-token"]')?.getAttribute("content") ?? "";
+      const response = await fetch("/api/provider-profiles", {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+      return {
+        ok: response.ok,
+        status: response.status,
+        body: await response.json()
+      };
+    });
+    assert.equal(profilesResponse.ok, true);
+    assert.ok(profilesResponse.body.some((profile) => profile.name === "Persist Provider"));
+  } finally {
+    await browser.close();
+    await uiServer.stop();
+    await rm(tempDir, { recursive: true, force: true });
   }
 });

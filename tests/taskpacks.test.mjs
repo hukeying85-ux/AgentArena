@@ -165,3 +165,26 @@ successCommands:
     cleanup();
   }
 });
+
+it("rejects external repository URLs while loading a local-only taskpack", async () => {
+  const yaml = `
+schemaVersion: agentarena.taskpack/v1
+id: external-repo-task
+title: External repository task
+prompt: Fix the bug
+repoSource: https://github.com/example/repo.git
+judges:
+  - type: file-exists
+    label: main.js exists
+    path: main.js
+`;
+  const filePath = createTempTaskpack(yaml);
+  try {
+    await assert.rejects(
+      () => loadTaskPack(filePath),
+      /External repository URLs are not supported in local-only mode/
+    );
+  } finally {
+    cleanup();
+  }
+});

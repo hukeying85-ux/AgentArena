@@ -92,9 +92,6 @@ repoSource: "builtin://react-dashboard"
 
 # User's repository (flexible)
 repoSource: "user"  # default
-
-# External repository (future)
-repoSource: "https://github.com/example/test-repo"
 ```
 
 ---
@@ -197,7 +194,4 @@ repoSource: "builtin://react-dashboard"
 
 # 用户仓库（灵活）
 repoSource: "user"  # 默认
-
-# 外部仓库（未来支持）
-repoSource: "https://github.com/example/test-repo"
 ```

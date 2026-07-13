@@ -10,9 +10,8 @@ import { readStorage, writeStorage } from "./result-cache.js";
  * @param {object} deps
  * @param {() => void} deps.render
  * @param {() => void} deps.renderStaticText
- * @param {(key: string, ...args: unknown[]) => string} deps.t
  */
-export function initUiPreferences({ render, renderStaticText, t }) {
+export function initUiPreferences({ render, renderStaticText }) {
   // Language select
   elements.languageSelect.addEventListener("change", (event) => {
     state.language = String(event.target.value ?? "en");

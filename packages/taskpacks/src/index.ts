@@ -7,6 +7,7 @@ import {
   type TaskJudge,
   type TaskPack,
   type TaskPackMetadata,
+  validateRepoSource,
   validateTaskPackId,
 } from "@agentarena/core";
 import { parse as parseYaml } from "yaml";
@@ -282,7 +283,7 @@ export async function loadTaskPack(taskPath: string): Promise<TaskPack> {
   }
   const setupCommandsInput = Array.isArray(parsed.setupCommands) ? parsed.setupCommands : [];
   const teardownCommandsInput = Array.isArray(parsed.teardownCommands) ? parsed.teardownCommands : [];
-  const repoSource = assertOptionalString(parsed.repoSource, "repoSource");
+  const repoSource = validateRepoSource(assertOptionalString(parsed.repoSource, "repoSource"));
 
   return {
     schemaVersion: TASK_PACK_SCHEMA_V1,

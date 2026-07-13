@@ -50,26 +50,26 @@ async function readPackageVersion(startPath: string): Promise<string | undefined
   return undefined;
 }
 
-let adaptersPackageVersionCache: { value: Promise<string | undefined> } | null = null;
+let adaptersPackageVersionCache: Promise<string | undefined> | null = null;
 
 export async function getAdaptersPackageVersion(): Promise<string | undefined> {
   if (!adaptersPackageVersionCache) {
-    const promise = readPackageVersion(path.join(import.meta.dirname, ".."))
-      .then((version) => {
-        // Cache successful result
-        return version;
-      })
-      .catch((error) => {
-        // Don't cache failures — next call will retry
+    const promise = readPackageVersion(path.join(import.meta.dirname, ".."));
+    adaptersPackageVersionCache = promise;
+    // Only clear the cache if THIS promise is still the cached one. This
+    // prevents a failure from cancelling a newer, in-flight resolution that a
+    // concurrent caller may have already started (the original null-reset path
+    // had a race where a rejected promise could null out a newer good one).
+    promise.catch((error) => {
+      if (adaptersPackageVersionCache === promise) {
         adaptersPackageVersionCache = null;
-        // biome-ignore lint/suspicious/noConsole: startup diagnostic before logger is available
-        console.warn(`Warning: Failed to read adapters package version: ${error instanceof Error ? error.message : String(error)}`);
-        return undefined;
-      });
-    adaptersPackageVersionCache = { value: promise };
+      }
+      // biome-ignore lint/suspicious/noConsole: startup diagnostic before logger is available
+      console.warn(`Warning: Failed to read adapters package version: ${error instanceof Error ? error.message : String(error)}`);
+    });
   }
 
-  return await adaptersPackageVersionCache.value;
+  return await adaptersPackageVersionCache;
 }
 
 export async function probeInvocationVersion(

@@ -43,7 +43,25 @@ export async function readRunFromFile(file, { localText }) {
   }
 }
 
-export function createResultLoaders({ state, localText, render, renderMarkdownPanel, applySingleRun, applyRuns, showLoading, hideLoading, showError }) {
+export function createResultLoaders({
+  state,
+  localText,
+  render,
+  renderMarkdownPanel,
+  applySingleRun,
+  applyRuns,
+  showLoading,
+  hideLoading,
+  showError,
+  showResultLoaderError,
+  clearResultLoaderError
+}) {
+  const reportLoadError = (error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    showResultLoaderError?.(message);
+    showError?.(message);
+  };
+
   async function handleFileSelection(event) {
     const file = event.target.files?.[0];
     if (!file) {
@@ -53,13 +71,14 @@ export function createResultLoaders({ state, localText, render, renderMarkdownPa
     try {
       showLoading?.(localText("正在加载结果...", "Loading results..."));
       const run = await readRunFromFile(file, { localText });
+      clearResultLoaderError?.();
       state.notice = localText(
         "已加载单个 summary.json。现在可以直接查看结果，或者继续加载 summary.md。",
         "Loaded one summary.json file. You can inspect the run now or optionally load summary.md."
       );
       applySingleRun(run);
     } catch (error) {
-      showError?.(error instanceof Error ? error.message : String(error));
+      reportLoadError(error);
     } finally {
       hideLoading?.();
     }
@@ -94,7 +113,7 @@ export function createResultLoaders({ state, localText, render, renderMarkdownPa
     );
     const summaryFiles = files.filter((file) => file.name.toLowerCase() === "summary.json");
     if (summaryFiles.length === 0) {
-      showError?.(localText(
+      reportLoadError(localText(
         "所选目录里没有 summary.json。请选择一个 AgentArena 结果目录。",
         "No summary.json file was found in the selected folder. Choose a AgentArena results folder."
       ));
@@ -137,11 +156,12 @@ export function createResultLoaders({ state, localText, render, renderMarkdownPa
       }
 
       if (runs.length === 0) {
-        showError?.(localText(
+        reportLoadError(localText(
           "所有 summary.json 文件都解析失败。请确认这是有效的结果目录。",
           "All summary.json files failed to parse. Make sure this is a valid results folder."
         ));
       } else {
+        clearResultLoaderError?.();
         state.notice = localText(
           `已从所选目录中识别到 ${runs.length} 个 run。`,
           `Loaded ${runs.length} run(s) from the selected folder.`
@@ -149,7 +169,7 @@ export function createResultLoaders({ state, localText, render, renderMarkdownPa
         applyRuns(runs, markdownByRunId);
       }
     } catch (error) {
-      showError?.(error instanceof Error ? error.message : String(error));
+      reportLoadError(error);
     } finally {
       hideLoading?.();
     }

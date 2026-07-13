@@ -53,6 +53,30 @@ describe("run-state", () => {
     });
   });
 
+  it("propagates atomic persistence failures", async () => {
+    const originalRename = fs.rename;
+    fs.rename = async (source, destination) => {
+      if (path.basename(String(destination)) === "run-state.json") {
+        throw new Error("simulated run-state replacement failure");
+      }
+      return originalRename(source, destination);
+    };
+
+    try {
+      await assert.rejects(
+        () => saveRunState(tempDir, {
+          state: "running",
+          phase: "benchmark",
+          logs: [],
+          updatedAt: "2024-01-01T00:00:00Z"
+        }),
+        /simulated run-state replacement failure/
+      );
+    } finally {
+      fs.rename = originalRename;
+    }
+  });
+
   describe("loadRunState", () => {
     it("loads state from disk", async () => {
       const state = {

@@ -1,9 +1,10 @@
-import { type AdapterPreflightResult, type BenchmarkRun, formatDuration } from "@agentarena/core";
+import { type BenchmarkRun, formatDuration } from "@agentarena/core";
 import type { LeaderboardData } from "./leaderboard.js";
 import {
   diagnoseResultFailure,
   escapeMdCell,
   formatCompositeScoreValue,
+  formatCostUsd,
   formatDiffPrecisionMetric,
   formatLintMetric,
   formatRuntimeIdentity,
@@ -16,20 +17,28 @@ import {
   summarizeRun
 } from "./report-helpers.js";
 
-function formatSupportTier(value: AdapterPreflightResult["capability"]["supportTier"]): string {
-  return value;
-}
-
-function formatAvailability(value: AdapterPreflightResult["capability"]["tokenAvailability"]): string {
-  return value;
-}
-
-function formatTraceRichness(value: AdapterPreflightResult["capability"]["traceRichness"]): string {
-  return value;
+/**
+ * Escape a Markdown heading's text. Headings are dangerous because a leading
+ * `#` would deepen the heading and `[text](url)` can fabricate links, so we
+ * strip heading/link punctuation and normalize whitespace (mirroring
+ * `escapeMdCell` for pipes and backslashes). This keeps task/agent-controlled
+ * labels from corrupting the document structure.
+ */
+export function escapeMdHeading(value: string): string {
+  return escapeMdCell(value)
+    .replaceAll("\r", "")
+    .replaceAll("#", "\\#")
+    .replaceAll("[", "\\[")
+    .replaceAll("]", "\\]")
+    .replaceAll("(", "\\(")
+    .replaceAll(")", "\\)")
+    .trim();
 }
 
 function escapeMdInline(value: string): string {
-  return value.replaceAll("`", "\\`");
+  // Reuse cell escaping (backslash, pipe, newline) so inline values cannot
+  // break out of a table cell or code span, then escape backticks.
+  return escapeMdCell(value).replaceAll("`", "\\`");
 }
 
 export function renderMarkdown(run: BenchmarkRun, locale: Locale, leaderboard?: LeaderboardData): string {
@@ -37,7 +46,7 @@ export function renderMarkdown(run: BenchmarkRun, locale: Locale, leaderboard?: 
   const summary = summarizeRun(run);
   const failedResults = run.results.filter((result) => result.status !== "success");
   const lines: string[] = [
-    `# ${copy.summaryTitle}`,
+    `# ${escapeMdHeading(copy.summaryTitle)}`,
     "",
     `- ${copy.runIdLabel}: \`${run.runId}\``,
     `- ${copy.generatedAtLabel}: \`${run.createdAt}\``,
@@ -129,7 +138,7 @@ export function renderMarkdown(run: BenchmarkRun, locale: Locale, leaderboard?: 
   lines.push("| --- | --- | --- | --- | --- | --- | --- |");
   for (const preflight of run.preflights) {
     lines.push(
-      `| ${escapeMdCell(preflight.displayLabel)} | ${escapeMdCell(preflight.baseAgentId)} | ${formatSupportTier(preflight.capability.supportTier)} | ${escapeMdCell(preflight.capability.invocationMethod)} | ${formatAvailability(preflight.capability.tokenAvailability)} | ${formatAvailability(preflight.capability.costAvailability)} | ${formatTraceRichness(preflight.capability.traceRichness)} |`
+      `| ${escapeMdCell(preflight.displayLabel)} | ${escapeMdCell(preflight.baseAgentId)} | ${escapeMdCell(preflight.capability.supportTier)} | ${escapeMdCell(preflight.capability.invocationMethod)} | ${escapeMdCell(preflight.capability.tokenAvailability)} | ${escapeMdCell(preflight.capability.costAvailability)} | ${escapeMdCell(preflight.capability.traceRichness)} |`
     );
     if (preflight.capability.knownLimitations.length > 0) {
       lines.push(
@@ -179,7 +188,7 @@ export function renderMarkdown(run: BenchmarkRun, locale: Locale, leaderboard?: 
 
   for (const result of scoredResults) {
     const runtime = formatRuntimeIdentity(result);
-    lines.push("", `### ${escapeMdCell(result.displayLabel ?? result.agentId)} (${escapeMdInline(result.variantId)})`, "");
+    lines.push("", `### ${escapeMdHeading(result.displayLabel ?? result.agentId)} (${escapeMdInline(result.variantId)})`, "");
     lines.push(`- Summary: ${escapeMdCell(result.summary)}`);
     lines.push(`- Preflight: ${escapeMdCell(result.preflight.status)} - ${escapeMdCell(result.preflight.summary)}`);
     lines.push(
@@ -302,8 +311,8 @@ export function renderPrComment(run: BenchmarkRun, locale: Locale, leaderboard?:
             ? result.preflight.summary
             : "ready";
     table.push(
-      `| ${attention} | ${escapeMdCell(result.displayLabel ?? result.agentId)} | ${escapeMdCell(result.baseAgentId)} | ${escapeMdCell(runtime.provider)} | ${escapeMdCell(runtime.providerKind)} | ${escapeMdCell(runtime.model)} | ${escapeMdCell(runtime.reasoning)} | ${escapeMdCell(runtime.version)} | ${escapeMdCell(runtime.verification)}/${escapeMdCell(runtime.source)} | ${formatSupportTier(result.preflight.capability.supportTier)} | ${escapeMdCell(result.preflight.status)} | ${escapeMdCell(result.status)} | ${formatCompositeScoreValue(result)} | ${formatDuration(result.durationMs)} | ${result.tokenUsage} | ${
-        result.costKnown ? `$${result.estimatedCostUsd.toFixed(2)}` : "n/a"
+      `| ${attention} | ${escapeMdCell(result.displayLabel ?? result.agentId)} | ${escapeMdCell(result.baseAgentId)} | ${escapeMdCell(runtime.provider)} | ${escapeMdCell(runtime.providerKind)} | ${escapeMdCell(runtime.model)} | ${escapeMdCell(runtime.reasoning)} | ${escapeMdCell(runtime.version)} | ${escapeMdCell(runtime.verification)}/${escapeMdCell(runtime.source)} | ${escapeMdCell(result.preflight.capability.supportTier)} | ${escapeMdCell(result.preflight.status)} | ${escapeMdCell(result.status)} | ${formatCompositeScoreValue(result)} | ${formatDuration(result.durationMs)} | ${result.tokenUsage} | ${
+        formatCostUsd(result.estimatedCostUsd, result.costKnown)
       } | ${passedJudgeCount}/${result.judgeResults.length} | ${escapeMdCell(formatTestMetric(result))} | ${escapeMdCell(formatLintMetric(result))} | ${escapeMdCell(formatDiffPrecisionMetric(result))} | ${result.changedFiles.length} | ${escapeMdCell(note)} |`
     );
   }
@@ -314,7 +323,7 @@ export function renderPrComment(run: BenchmarkRun, locale: Locale, leaderboard?:
   } else {
     for (const preflight of attentionPreflights) {
       reviewFocus.push(
-        `- preflight \`${escapeMdInline(preflight.agentId)}\` (${formatSupportTier(preflight.capability.supportTier)}): ${escapeMdCell(preflight.status)} - ${escapeMdCell(preflight.summary)}`
+        `- preflight \`${escapeMdInline(preflight.agentId)}\` (${escapeMdCell(preflight.capability.supportTier)}): ${escapeMdCell(preflight.status)} - ${escapeMdCell(preflight.summary)}`
       );
     }
 

@@ -115,7 +115,8 @@ export async function createBeforeSnapshot(
 export async function executeAgent(
   preflight: AdapterPreflightResult,
   repoPath: string,
-  context: AgentRunContext
+  context: AgentRunContext,
+  options: { enableActivity?: boolean; onActivity?: (line: string, stream: "stdout" | "stderr", seq: number) => void } = {}
 ): Promise<{ adapterResult: Awaited<ReturnType<typeof context.adapter.execute>> | undefined; adapterError: unknown; startedAt: number }> {
   const { adapter, workspacePath, executionEnvironment, traceRecorder, cancellation, task, debug } = context;
   const startedAt = Date.now();
@@ -167,12 +168,20 @@ export async function executeAgent(
       environment: executionEnvironment,
       task,
       signal: adapterAbortController.signal,
+      // Pass activity callback so real CLI adapters can stream stdout/stderr
+      ...(options.enableActivity && options.onActivity ? { onActivity: options.onActivity } : {}),
       trace: async (event: Omit<TraceEvent, "agentId" | "timestamp">) => {
         await traceRecorder.record({
           ...event,
           agentId: preflight.agentId,
           timestamp: new Date().toISOString()
         });
+        // Also emit as activity for live display (trace messages are the
+        // demo adapter's "stdout equivalent")
+        if (options.enableActivity && options.onActivity) {
+          const text = event.message ?? JSON.stringify(event.metadata ?? {});
+          if (text) options.onActivity(text, "stdout", 0);
+        }
       },
       sandbox: createWorkspaceSandbox(workspacePath, async (event) => {
         await traceRecorder.record({
@@ -393,7 +402,19 @@ export async function runAgent(
   workspaceRootPath: string,
   task: Awaited<ReturnType<typeof loadTaskPack>>,
   preflight: AdapterPreflightResult,
-  options: { updateSnapshots?: boolean; cancellation?: BenchmarkCancellation; debug?: boolean }
+  options: {
+    updateSnapshots?: boolean;
+    cancellation?: BenchmarkCancellation;
+    debug?: boolean;
+    /** When true, capture stdout/stderr and emit activity events. */
+    enableActivityEvents?: boolean;
+    /** Per-agent log store for capturing output lines. */
+    agentLogStore?: import("@agentarena/core").AgentLogStore;
+    /** Callback invoked (post-debounce) for each captured stdout/stderr line. */
+    onActivity?: (line: string, stream: "stdout" | "stderr", seq: number) => void;
+    /** External monotonic seq provider (from runner). Falls back to local counter. */
+    nextActivitySeq?: () => number;
+  }
 ): Promise<AgentRunResult> {
   const context = await createAgentRunContext(outputPath, workspaceRootPath, task, preflight, options);
   debugLog(context.debug, `Starting agent ${preflight.displayLabel} (${preflight.variantId})`);
@@ -401,9 +422,74 @@ export async function runAgent(
   debugLog(context.debug, `  trace: ${context.tracePath}`);
   debugLog(context.debug, `  timeout: ${agentExecuteTimeoutMs()}ms`);
 
+  // ── Per-agent activity capture (opt-in) ──
+  // RingBuffer for last 30 lines (failureTail). Shared with AgentLogStore
+  // when provided — the store gets ALL lines, the buffer only keeps 30 for
+  // failure diagnostics.
+  const enableActivity = options.enableActivityEvents === true;
+  const pendingLines: string[] = [];     // sliding window of last 30 lines
+  const MAX_FAILURE_TAIL = 30;
+  // Use external monotonic seq provider (per-run) or fall back to local counter
+  let localSeqCounter = 0;
+  const getNextSeq = options.nextActivitySeq ?? (() => localSeqCounter++);
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  const debouncedLines: Array<{ line: string; stream: "stdout" | "stderr"; seq: number }> = [];
+  const DEBOUNCE_MS = 120;
+
+  /** Extract all pending debounced lines (mutates the array). */
+  const spliceDebouncedLines = (
+    arr: Array<{ line: string; stream: "stdout" | "stderr"; seq: number }>
+  ): Array<{ line: string; stream: "stdout" | "stderr"; seq: number }> => {
+    if (arr.length === 0) return [];
+    return arr.splice(0, arr.length);
+  };
+
+  const pushActivityLine = (line: string, stream: "stdout" | "stderr") => {
+    const seq = getNextSeq();
+    // Always store in AgentLogStore if provided (full fidelity)
+    options.agentLogStore?.append(preflight.variantId, {
+      seq,
+      ts: Date.now(),
+      stream,
+      text: line
+    });
+    // Keep last 30 lines for failureTail (sliding window)
+    pendingLines.push(`[${stream}] ${line}`);
+    if (pendingLines.length > MAX_FAILURE_TAIL) pendingLines.shift();
+    // Debounce the emitted event (high-frequency output shouldn't flood the bus).
+    // Capture seq at push time so the streamed SSE order exactly matches the
+    // AgentLogStore order (critical for Last-Event-ID reconnect resync).
+    debouncedLines.push({ line, stream, seq });
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      const batch = spliceDebouncedLines(debouncedLines);
+      for (const { line: ln, stream: st, seq: sq } of batch) {
+        options.onActivity?.(ln, st, sq);
+      }
+    }, DEBOUNCE_MS);
+  };
+
+  /** Flush any pending debounced lines immediately. */
+  const flushActivity = () => {
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+      debounceTimer = null;
+    }
+    const batch = spliceDebouncedLines(debouncedLines);
+    for (const { line: ln, stream: st, seq: sq } of batch) {
+      options.onActivity?.(ln, st, sq);
+    }
+  };
+
+  // Tracks the final status so the finally block can decide whether to purge
+  // intermediate evidence. We only delete trace/snapshots when the run was
+  // genuinely cancelled (never when it succeeded or failed), so a late-arriving
+  // cancel signal cannot destroy evidence for an already-completed run.
+  let runStatus: string | undefined;
   try {
   const earlyResult1 = await setupWorkspaceAndPrechecks(repoPath, preflight, context);
   if (earlyResult1) {
+    runStatus = earlyResult1.status;
     return earlyResult1;
   }
 
@@ -427,17 +513,22 @@ export async function runAgent(
           context,
           setupCancelTeardownController.signal
         );
+        runStatus = earlyResult2.status;
         return { ...earlyResult2, teardownResults: cancelTeardownResults };
       } finally {
         clearTimeout(setupCancelTeardownHandle);
       }
     }
+    runStatus = earlyResult2.status;
     return earlyResult2;
   }
 
   const beforeSnapshotResult = await createBeforeSnapshot(preflight, context);
 
-  const { adapterResult, adapterError, startedAt } = await executeAgent(preflight, repoPath, context);
+  const { adapterResult, adapterError, startedAt } = await executeAgent(preflight, repoPath, context, {
+    enableActivity,
+    onActivity: enableActivity ? pushActivityLine : undefined
+  });
 
     const { judgeResults, judgeError, diff, changedFiles, diffPrecision } = await runJudgesAndAfterSnapshot(
     preflight,
@@ -533,7 +624,7 @@ export async function runAgent(
     }
   }
 
-  return buildFinalResult(
+  const runResult = buildFinalResult(
     preflight,
     context,
     adapterResult,
@@ -549,9 +640,21 @@ export async function runAgent(
     success,
     assembledPrompt
   );
+
+  // Attach failureTail when the run failed (opt-in: only when activity capture was enabled)
+  if (enableActivity && (runResult.status === "failed") && pendingLines.length > 0) {
+    runResult.failureTail = [...pendingLines];
+  }
+
+  runStatus = runResult.status;
+  return runResult;
   } finally {
-    // Clean up intermediate files on cancellation
-    if (context.cancellation?.signal?.aborted) {
+    // Flush any pending debounced activity lines before exiting
+    flushActivity();
+    // Clean up intermediate files only when the run was genuinely cancelled.
+    // A succeeded/failed run keeps its trace and snapshots as evidence; a
+    // late-arriving cancel signal on a finished run must not purge them.
+    if (runStatus === "cancelled") {
       try {
         const intermediateFiles = [
           context.tracePath,

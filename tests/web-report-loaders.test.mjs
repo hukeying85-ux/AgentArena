@@ -96,6 +96,45 @@ test("folder loader attaches trace file handles to run results", async () => {
   assert.equal(loadedRun.results[0].traceFile, traceFile);
 });
 
+test("folder loader surfaces missing and corrupt summary errors in the loader area", async () => {
+  const inlineErrors = [];
+  const globalErrors = [];
+  const loaders = createResultLoaders({
+    state: {},
+    localText: (_zh, en) => en,
+    render: () => {},
+    renderMarkdownPanel: () => {},
+    applySingleRun: () => {},
+    applyRuns: () => {
+      throw new Error("invalid folders must not produce runs");
+    },
+    showLoading: () => {},
+    hideLoading: () => {},
+    showError: (message) => globalErrors.push(message),
+    showResultLoaderError: (message) => inlineErrors.push(message),
+    clearResultLoaderError: () => {}
+  });
+
+  await loaders.handleFolderSelection({ target: { files: [] } });
+  await loaders.handleFolderSelection({
+    target: {
+      files: [
+        createVirtualFile({
+          name: "summary.json",
+          webkitRelativePath: "broken/summary.json",
+          text: "{partial"
+        })
+      ]
+    }
+  });
+
+  assert.equal(inlineErrors.length, 2);
+  assert.equal(globalErrors.length, 2);
+  assert.match(inlineErrors[0], /No summary\.json file/i);
+  assert.match(inlineErrors[1], /failed to parse/i);
+  assert.deepEqual(inlineErrors, globalErrors);
+});
+
 test("trace replay bridge supports Blob/File sources", async () => {
   const ndjson = [
     JSON.stringify({

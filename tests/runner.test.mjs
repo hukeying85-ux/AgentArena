@@ -3,101 +3,22 @@
 process.env.AGENTARENA_ALLOW_EVAL_IN_JUDGES = "1";
 
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { AgentLogStore } from "../packages/core/dist/index.js";
 import { checkTaskCompatibility, runAgent, runBenchmark } from "../packages/runner/dist/index.js";
-import { assertWindowsGitAskpassSafeUrl, createAskpassScript } from "../packages/runner/dist/repo-resolution.js";
 import { loadTaskPack } from "../packages/taskpacks/dist/index.js";
+
+const require = createRequire(import.meta.url);
+const nodeFs = require("node:fs").promises;
 
 async function writeJson(filePath, value) {
   await writeFile(filePath, JSON.stringify(value, null, 2), "utf8");
 }
 
-async function fileExists(filePath) {
-  try {
-    await access(filePath);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function quoteWindowsCmdArgument(value) {
-  if (/["\r\n]/.test(value)) {
-    throw new Error("Test helper cannot quote values containing double quotes or newlines.");
-  }
-  return `"${value.replace(/\\+$/u, (slashes) => `${slashes}${slashes}`)}"`;
-}
-
-async function runWindowsCmd(commandLine, env) {
-  return await new Promise((resolve, reject) => {
-    const child = spawn(process.env.ComSpec ?? process.env.COMSPEC ?? "cmd.exe", ["/d", "/s", "/v:off", "/c", `"${commandLine}"`], {
-      env,
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true,
-      windowsVerbatimArguments: true
-    });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
-    child.on("error", reject);
-    child.on("close", (code) => resolve({ code, stdout, stderr }));
-  });
-}
-
-test(
-  "Windows git askpass wrapper treats cmd metacharacters as prompt text",
-  { skip: process.platform !== "win32" ? "Windows-specific askpass wrapper behavior" : false },
-  async () => {
-    const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-askpass-test-"));
-    const markerPath = path.join(tempDir, "injected.txt");
-    const askpass = await createAskpassScript();
-
-    try {
-      const markerArgPath = markerPath.replace(/\\/g, "/");
-      const prompt = `Username for https://example.com/repo&echo injected>${markerArgPath}.git`;
-      const result = await runWindowsCmd(
-        `${quoteWindowsCmdArgument(askpass.scriptPath)} ${quoteWindowsCmdArgument(prompt)}`,
-        {
-          ...process.env,
-          GIT_ASKPASS_USER: "git-user",
-          GIT_ASKPASS_PASS: "git-pass"
-        }
-      );
-
-      assert.equal(result.code, 0, result.stderr);
-      assert.equal(result.stdout, "git-user");
-      assert.equal(await fileExists(markerPath), false);
-    } finally {
-      await askpass.cleanup();
-      await rm(tempDir, { recursive: true, force: true });
-    }
-  }
-);
-
-test(
-  "Windows authenticated URL repoSource rejects cmd expansion characters",
-  { skip: process.platform !== "win32" ? "Windows-specific askpass wrapper behavior" : false },
-  () => {
-    assert.doesNotThrow(() => assertWindowsGitAskpassSafeUrl("https://example.com/repo&branch=main.git"));
-    assert.throws(
-      () => assertWindowsGitAskpassSafeUrl("https://example.com/repo%25PATH%25.git"),
-      /Authenticated URL repoSource/
-    );
-    assert.throws(
-      () => assertWindowsGitAskpassSafeUrl('https://example.com/repo"x.git'),
-      /Authenticated URL repoSource/
-    );
-  }
-);
 
 test("runBenchmark passes only allowlisted env vars to setup, judges, teardown, and agents", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-runner-"));
@@ -862,7 +783,102 @@ test("runBenchmark resumes completed agent results from a run directory", async 
   await rm(tempDir, { recursive: true, force: true });
 });
 
+
+test("runBenchmark stops and preserves the previous result when persistence fails", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-runner-"));
+  const repoPath = path.join(tempDir, "repo");
+  const outputPath = path.join(tempDir, "output");
+  const taskPath = path.join(tempDir, "task.json");
+  const runId = "atomic-agent-result";
+  const resultPath = path.join(outputPath, runId, "agents", "demo-fast", "result.json");
+
+  await mkdir(repoPath, { recursive: true });
+  await writeFile(path.join(repoPath, "README.md"), "# Temp Repo\n", "utf8");
+  await writeJson(taskPath, { schemaVersion: "agentarena.taskpack/v1", id: "atomic-result-demo", title: "Atomic Result Demo", prompt: "Create a benchmark note.", judges: [{ id: "pass", type: "command", label: "Always pass", command: "node -e \"process.exit(0)\"" }] });
+  await mkdir(path.dirname(resultPath), { recursive: true });
+  await writeFile(resultPath, JSON.stringify({ previous: true }), "utf8");
+
+  const originalOpen = nodeFs.open;
+  nodeFs.open = async (filePath, ...args) => {
+    const handle = await originalOpen(filePath, ...args);
+    if (
+      path.dirname(path.resolve(String(filePath))) === path.dirname(path.resolve(resultPath)) &&
+      path.basename(String(filePath)).startsWith(".result.json.tmp.")
+    ) {
+      return {
+        async write() {
+          await handle.write("{partial", null, "utf8");
+          throw new Error("simulated interrupted result write");
+        },
+        sync: () => handle.sync(),
+        close: () => handle.close()
+      };
+    }
+    return handle;
+  };
+
+  try {
+    await assert.rejects(
+      () => runBenchmark({
+        repoPath,
+        taskPath,
+        agentIds: ["demo-fast", "demo-budget"],
+        outputPath,
+        runId,
+        maxConcurrency: 1,
+        cleanupWorkspaces: true
+      }),
+      /Failed to persist resumable result for Demo Fast.*simulated interrupted result write/i
+    );
+  } finally {
+    nodeFs.open = originalOpen;
+  }
+
+  try {
+    const persisted = JSON.parse(await readFile(resultPath, "utf8"));
+    assert.deepEqual(persisted, { previous: true });
+    const files = await nodeFs.readdir(path.dirname(resultPath));
+    assert.deepEqual(files.filter((name) => name.includes(".tmp.") || name.endsWith(".bak")), []);
+    await assert.rejects(() => readFile(path.join(outputPath, runId, "agents", "demo-budget", "result.json")), /ENOENT/);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("runBenchmark refuses to resume a corrupt per-agent result instead of rerunning it", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-runner-"));
+  const repoPath = path.join(tempDir, "repo");
+  const outputPath = path.join(tempDir, "output");
+  const resumePath = path.join(outputPath, "corrupt-resume");
+  const taskPath = path.join(tempDir, "task.json");
+
+  await mkdir(repoPath, { recursive: true });
+  await writeFile(path.join(repoPath, "README.md"), "# Temp Repo\n", "utf8");
+  await writeJson(taskPath, { schemaVersion: "agentarena.taskpack/v1", id: "corrupt-resume-demo", title: "Corrupt Resume Demo", prompt: "Create a benchmark note.", judges: [] });
+  await mkdir(path.join(resumePath, "agents", "demo-fast"), { recursive: true });
+  await writeJson(path.join(resumePath, "run-state.json"), { taskId: "corrupt-resume-demo" });
+  await writeFile(path.join(resumePath, "agents", "demo-fast", "result.json"), "{partial", "utf8");
+
+  try {
+    await assert.rejects(
+      () => runBenchmark({
+        repoPath,
+        taskPath,
+        agentIds: ["demo-fast"],
+        outputPath,
+        runId: "new-run",
+        resumeFrom: resumePath,
+        cleanupWorkspaces: true
+      }),
+      /Cannot resume.*demo-fast.*corrupt|malformed/i
+    );
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("runBenchmark aborts adapter execution when agent timeout elapses", async () => {
+
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-runner-"));
   const repoPath = path.join(tempDir, "repo");
   const outputPath = path.join(tempDir, "output");
@@ -995,6 +1011,77 @@ test("runBenchmark uses builtin repo when task has repoSource", async () => {
   await rm(tempDir, { recursive: true, force: true });
 });
 
+test("runBenchmark rejects a user repository link outside the allowed root", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-runner-root-"));
+  const workspace = path.join(tempDir, "workspace");
+  const outsideRepo = path.join(tempDir, "outside-repo");
+  const repoLink = path.join(workspace, "repo-link");
+  const taskPath = path.join(workspace, "task.json");
+  const linkType = process.platform === "win32" ? "junction" : "dir";
+  try {
+    await mkdir(workspace, { recursive: true });
+    await mkdir(outsideRepo, { recursive: true });
+    await writeFile(path.join(outsideRepo, "README.md"), "# Outside Repo\n", "utf8");
+    await symlink(outsideRepo, repoLink, linkType);
+    await writeJson(taskPath, {
+      schemaVersion: "agentarena.taskpack/v1",
+      id: "user-repo-root-escape",
+      title: "User Repo Root Escape",
+      prompt: "Do not run outside the allowed root.",
+      judges: []
+    });
+
+    await assert.rejects(
+      () => runBenchmark({
+        repoPath: repoLink,
+        userRepoRoot: workspace,
+        taskPath,
+        agentIds: ["demo-fast"],
+        outputPath: path.join(workspace, "output")
+      }),
+      /outside the allowed user repository root/i
+    );
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("runBenchmark rejects a builtin repository link outside the configured builtin root", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-runner-root-"));
+  const workspace = path.join(tempDir, "workspace");
+  const builtinRoot = path.join(workspace, "builtin-repos");
+  const outsideRepo = path.join(tempDir, "outside-builtin");
+  const taskPath = path.join(workspace, "task.json");
+  const linkType = process.platform === "win32" ? "junction" : "dir";
+  try {
+    await mkdir(builtinRoot, { recursive: true });
+    await mkdir(outsideRepo, { recursive: true });
+    await writeFile(path.join(outsideRepo, "README.md"), "# Outside Builtin\n", "utf8");
+    await symlink(outsideRepo, path.join(builtinRoot, "escape"), linkType);
+    await writeJson(taskPath, {
+      schemaVersion: "agentarena.taskpack/v1",
+      id: "builtin-repo-root-escape",
+      title: "Builtin Repo Root Escape",
+      prompt: "Do not run outside the builtin root.",
+      repoSource: "builtin://escape",
+      judges: []
+    });
+
+    await assert.rejects(
+      () => runBenchmark({
+        repoPath: workspace,
+        taskPath,
+        agentIds: ["demo-fast"],
+        outputPath: path.join(workspace, "output"),
+        builtinReposRoot: builtinRoot
+      }),
+      /outside the configured builtin repository root/i
+    );
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("runBenchmark emits onProgress events", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-runner-"));
   const repoPath = path.join(tempDir, "repo");
@@ -1039,6 +1126,48 @@ test("runBenchmark emits onProgress events", async () => {
   assert.ok(phases.includes("complete"), "Should have complete event");
 
   await rm(tempDir, { recursive: true, force: true });
+});
+
+test("runBenchmark emits agent activity events when enabled", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-runner-"));
+  const repoPath = path.join(tempDir, "repo");
+  const outputPath = path.join(tempDir, "output");
+  const taskPath = path.join(tempDir, "task.json");
+
+  try {
+    await mkdir(repoPath, { recursive: true });
+    await writeFile(path.join(repoPath, "README.md"), "# Activity Events\n", "utf8");
+    await writeJson(path.join(repoPath, "package.json"), { name: "temp-repo", version: "0.0.0" });
+
+    await writeJson(taskPath, {
+      schemaVersion: "agentarena.taskpack/v1",
+      id: "activity-progress-demo",
+      title: "Activity Progress Demo",
+      prompt: "Emit progress activity.",
+      judges: []
+    });
+
+    const events = [];
+    await runBenchmark({
+      repoPath,
+      taskPath,
+      agentIds: ["demo-fast"],
+      outputPath,
+      enableActivityEvents: true,
+      onProgress: (event) => {
+        events.push(event);
+      }
+    });
+
+    const activityEvents = events.filter((event) => event.phase === "agent-activity");
+    assert.ok(activityEvents.length > 0, "Should emit at least one agent activity event");
+    assert.equal(activityEvents[0].variantId, "demo-fast");
+    assert.equal(activityEvents[0].stream, "stdout");
+    assert.equal(typeof activityEvents[0].seq, "number");
+    assert.equal(typeof activityEvents[0].line, "string");
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
 });
 
 test("runBenchmark returns cancelled results and still runs teardown after abort", async () => {
@@ -1609,6 +1738,105 @@ test("runAgent falls back to prompt.txt when adapter.prompt trace omits the full
 
     assert.equal(result.status, "success");
     assert.equal(result.assembledPrompt, fullPrompt);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("runAgent captures activity lines in the log store and failure tail", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-activity-"));
+  const repoPath = path.join(tempDir, "repo");
+  const outputPath = path.join(tempDir, "output");
+  const workspaceRootPath = path.join(tempDir, "workspaces");
+
+  try {
+    await mkdir(repoPath, { recursive: true });
+    await writeFile(path.join(repoPath, "README.md"), "# Activity Capture\n", "utf8");
+
+    const task = {
+      schemaVersion: "agentarena.taskpack/v1",
+      id: "activity-capture",
+      title: "Activity Capture",
+      prompt: "Emit live activity.",
+      envAllowList: [],
+      setupCommands: [],
+      judges: [],
+      teardownCommands: []
+    };
+    const capability = {
+      supportTier: "supported",
+      invocationMethod: "test",
+      authPrerequisites: [],
+      tokenAvailability: "available",
+      costAvailability: "available",
+      traceRichness: "partial",
+      knownLimitations: []
+    };
+    const adapter = {
+      id: "activity-test",
+      title: "Activity Test",
+      kind: "external",
+      capability,
+      async preflight() {
+        throw new Error("not used");
+      },
+      async execute(context) {
+        context.onActivity?.("stdout line", "stdout", 0);
+        context.onActivity?.("stderr line", "stderr", 0);
+        return {
+          status: "failed",
+          summary: "failed intentionally",
+          tokenUsage: 1,
+          estimatedCostUsd: 0,
+          costKnown: true,
+          changedFilesHint: []
+        };
+      }
+    };
+    const preflight = {
+      agentId: "activity-test",
+      baseAgentId: "activity-test",
+      variantId: "activity-test",
+      displayLabel: "Activity Test",
+      requestedConfig: {},
+      agentTitle: "Activity Test",
+      adapterKind: "external",
+      status: "ready",
+      summary: "ready",
+      capability,
+      adapter
+    };
+    const agentLogStore = new AgentLogStore(10);
+    const events = [];
+
+    const result = await runAgent(repoPath, outputPath, workspaceRootPath, task, preflight, {
+      enableActivityEvents: true,
+      agentLogStore,
+      nextActivitySeq: (() => {
+        let seq = 0;
+        return () => seq++;
+      })(),
+      onActivity: (line, stream, seq) => {
+        events.push({ line, stream, seq });
+      }
+    });
+
+    assert.equal(result.status, "failed");
+    assert.deepEqual(
+      agentLogStore.get("activity-test").map((line) => [line.seq, line.stream, line.text]),
+      [
+        [0, "stdout", "stdout line"],
+        [1, "stderr", "stderr line"]
+      ]
+    );
+    assert.deepEqual(events.map((event) => [event.seq, event.stream, event.line]), [
+      [0, "stdout", "stdout line"],
+      [1, "stderr", "stderr line"]
+    ]);
+    assert.deepEqual(result.failureTail, [
+      "[stdout] stdout line",
+      "[stderr] stderr line"
+    ]);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }

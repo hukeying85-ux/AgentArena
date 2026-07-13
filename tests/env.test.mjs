@@ -43,3 +43,45 @@ test("buildExecutionEnvironment skips undefined env vars", () => {
   const env = buildExecutionEnvironment(["TOTALLY_NONEXISTENT_VAR_12345"]);
   assert.equal(env.TOTALLY_NONEXISTENT_VAR_12345, undefined);
 });
+
+test("taskpack allowlists cannot implicitly inherit Git credential helpers", () => {
+  const sensitiveNames = ["GIT_ASKPASS", "GIT_SSH_COMMAND", "GCM_INTERACTIVE"];
+  const previous = Object.fromEntries(sensitiveNames.map((name) => [name, process.env[name]]));
+
+  try {
+    process.env.GIT_ASKPASS = "credential-helper";
+    process.env.GIT_SSH_COMMAND = "ssh -i private-key";
+    process.env.GCM_INTERACTIVE = "always";
+
+    const env = buildExecutionEnvironment(sensitiveNames);
+
+    assert.equal(env.GIT_ASKPASS, undefined);
+    assert.equal(env.GIT_SSH_COMMAND, undefined);
+    assert.equal(env.GCM_INTERACTIVE, undefined);
+  } finally {
+    for (const name of sensitiveNames) {
+      const value = previous[name];
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+});
+
+test("operators can explicitly pass a Git credential helper", () => {
+  const previousExtraEnv = process.env.AGENTARENA_EXTRA_ENV;
+  const previousAskpass = process.env.GIT_ASKPASS;
+
+  try {
+    process.env.AGENTARENA_EXTRA_ENV = "GIT_ASKPASS";
+    process.env.GIT_ASKPASS = "operator-approved-helper";
+
+    const env = buildExecutionEnvironment(["GIT_ASKPASS"]);
+
+    assert.equal(env.GIT_ASKPASS, "operator-approved-helper");
+  } finally {
+    if (previousExtraEnv === undefined) delete process.env.AGENTARENA_EXTRA_ENV;
+    else process.env.AGENTARENA_EXTRA_ENV = previousExtraEnv;
+    if (previousAskpass === undefined) delete process.env.GIT_ASKPASS;
+    else process.env.GIT_ASKPASS = previousAskpass;
+  }
+});

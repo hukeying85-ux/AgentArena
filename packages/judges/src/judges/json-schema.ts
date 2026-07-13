@@ -1,6 +1,7 @@
 import type { JsonSchemaJudge, JudgeResult } from "@agentarena/core";
 import {
   createAjv,
+  enforceJsonBudget,
   readTextFileSafe,
   resolveWorkspacePath,
 } from "../shared.js";
@@ -35,6 +36,7 @@ export async function runJsonSchemaJudge(judge: JsonSchemaJudge, workspacePath: 
         `Judge "${judge.id}" schemaPath`
       );
       const parsedSchema = JSON.parse(schemaText);
+      enforceJsonBudget(parsedSchema);
       if (typeof parsedSchema !== "object" || parsedSchema === null) {
         throw new Error(`Judge "${judge.id}" schemaPath: expected JSON object, got ${typeof parsedSchema}`);
       }
@@ -44,6 +46,7 @@ export async function runJsonSchemaJudge(judge: JsonSchemaJudge, workspacePath: 
     }
     const rawPayload = await readTextFileSafe(targetPath, `Judge "${judge.id}"`);
     const parsedPayload = JSON.parse(rawPayload);
+    enforceJsonBudget(parsedPayload);
     if (typeof parsedPayload !== "object" || parsedPayload === null) {
       throw new Error(`Judge "${judge.id}": expected JSON object or array, got ${typeof parsedPayload}`);
     }

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { resolveTaskPackImportUrl } from "../apps/web-report/src/components/task-pack-market.js";
 import { judgeRegistry } from "../apps/web-report/src/core/judge-registry.js";
-import { safeExternalHref } from "../apps/web-report/src/launcher/module.js";
+import { isCommunityTaskPack, safeExternalHref } from "../apps/web-report/src/launcher/module.js";
 import { safeTraceCategoryClass } from "../apps/web-report/src/trace-replay.js";
 import { TraceReplayer } from "../apps/web-report/src/trace-replay-bridge.js";
 import {
@@ -36,6 +36,15 @@ test("safeExternalHref only allows absolute http and https URLs", () => {
   assert.equal(safeExternalHref("javascript:alert(1)"), "");
   assert.equal(safeExternalHref("data:text/html,<script>alert(1)</script>"), "");
   assert.equal(safeExternalHref("/relative/path"), "");
+});
+
+test("community taskpack detection follows declared source before repository hints", () => {
+  assert.equal(isCommunityTaskPack({ source: "community" }), true);
+  assert.equal(isCommunityTaskPack({ metadata: { source: "community" } }), true);
+  assert.equal(isCommunityTaskPack({ source: "official", repoSource: "user" }), false);
+  assert.equal(isCommunityTaskPack({ repoSource: "user" }), true);
+  assert.equal(isCommunityTaskPack({ repoSource: "builtin://nodejs-app" }), false);
+  assert.equal(isCommunityTaskPack({}), false);
 });
 
 test("safeTraceCategoryClass preserves normal trace categories", () => {

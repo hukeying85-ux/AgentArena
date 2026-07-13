@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { runRegexMatchJudge } from "../packages/judges/dist/judges/regex-match.js";
-import { hasReDoSRisk } from "../packages/judges/dist/shared.js";
+import { hasReDoSRisk, runRegexTestWithTimeout } from "../packages/judges/dist/shared.js";
 
 /**
  * Coverage for regex-match judge + the hasReDoSRisk heuristic.
@@ -68,6 +68,13 @@ test("hasReDoSRisk allows character class with quantifier", () => {
 
 test("hasReDoSRisk allows non-nested grouping", () => {
   assert.equal(hasReDoSRisk("(abc)def"), false);
+});
+
+test("runRegexTestWithTimeout terminates a stuck regex in a worker", { timeout: 2_000 }, async () => {
+  await assert.rejects(
+    () => runRegexTestWithTimeout("(a+)+$", "", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!", 50),
+    /timed out/i
+  );
 });
 
 // --- runRegexMatchJudge: positive matches ---

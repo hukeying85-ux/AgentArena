@@ -6,14 +6,14 @@ import {
   type AdapterPreflightOptions,
   type AdapterPreflightResult,
   type AgentAdapter,
-  ensureDirectory
+  ensureDirectory,
 } from "@agentarena/core";
 import { CODEX_CAPABILITY, type InvocationSpec } from "./adapter-capabilities.js";
 import { formatAdapterError } from "./adapter-diagnostics.js";
 import { buildAgentPrompt, createPreflightResult, savePromptArtifact } from "./adapter-helpers.js";
 import { parseCodexEvents } from "./event-parsers.js";
 import { probeHelp, probeInvocationVersion } from "./invocation-probes.js";
-import { agentTimeoutMs, runProcess } from "./process-utils.js";
+import { agentTimeoutMs, type RunProcessCallbacks, runProcess } from "./process-utils.js";
 import { resolveCodexRuntime } from "./runtime-resolution.js";
 
 async function resolveCodexInvocation(): Promise<InvocationSpec> {
@@ -191,13 +191,18 @@ export class CodexCliAdapter implements AgentAdapter {
     const prompt = buildAgentPrompt(context);
     await savePromptArtifact(prompt, context.workspacePath, context);
     const invocation = await resolveCodexInvocation();
-    const sandboxMode = resolveCodexSandboxMode(context.environment); // Still resolved for trace metadata
+    const sandboxMode = resolveCodexSandboxMode(context.environment);
     const args = [
       ...invocation.argsPrefix,
       "exec",
       "--skip-git-repo-check",
       "--ephemeral",
-      "--dangerously-bypass-approvals-and-sandbox", // Yolo mode: skip all approval prompts and sandbox restrictions
+      // Respect the resolved sandbox mode instead of always running yolo.
+      // Only `danger-full-access` bypasses the seatbelt sandbox and approval
+      // prompts; every other mode keeps the sandbox enabled for safer runs.
+      ...(sandboxMode === "danger-full-access"
+        ? ["--dangerously-bypass-approvals-and-sandbox"]
+        : ["--sandbox", sandboxMode]),
       "--cd",
       context.workspacePath,
       "--output-last-message",
@@ -237,6 +242,21 @@ export class CodexCliAdapter implements AgentAdapter {
       }
     });
 
+    const activityCallbacks: RunProcessCallbacks | undefined = context.onActivity
+      ? {
+          onStdout: (chunk: string) => {
+            for (const line of chunk.split(/\r?\n/).filter((value) => value.trim())) {
+              context.onActivity?.(line, "stdout", 0);
+            }
+          },
+          onStderr: (chunk: string) => {
+            for (const line of chunk.split(/\r?\n/).filter((value) => value.trim())) {
+              context.onActivity?.(line, "stderr", 0);
+            }
+          }
+        }
+      : undefined;
+
     let execution: Awaited<ReturnType<typeof runProcess>>;
     try {
       execution = await runProcess(
@@ -246,7 +266,8 @@ export class CodexCliAdapter implements AgentAdapter {
         agentTimeoutMs(),
         context.environment,
         context.signal,
-        prompt
+        prompt,
+        activityCallbacks
       );
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);

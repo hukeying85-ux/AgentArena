@@ -57,7 +57,12 @@ export async function mapWithConcurrency<T, R>(
       nextIndex += 1;
 
       try {
-        results[currentIndex] = await mapper(items[currentIndex], currentIndex);
+        // Wrap in an async IIFE so a synchronous throw from `mapper` (before its
+        // first await) is also converted to a rejected promise and caught here,
+        // rather than propagating out of `Promise.all` and aborting the whole
+        // benchmark for a single bad item.
+        const result = await (async () => mapper(items[currentIndex], currentIndex))();
+        results[currentIndex] = result;
       } catch (error) {
         if (isAbortError(error)) {
           aborted = true;

@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { Worker } from "node:worker_threads";
 import {
   buildExecutionEnvironment,
   type CommandExecutionSpec,
@@ -20,23 +21,152 @@ export const COMMAND_JUDGE_FIELDS = new Set([...COMMON_JUDGE_FIELDS, "command", 
 export const DEFAULT_JUDGE_TIMEOUT_MS = 5 * 60 * 1_000;
 
 export function hasReDoSRisk(pattern: string): boolean {
-  // Nested quantifiers: (a+)+ or (a*)*
-  if (/\([^)]*[+*][^)]*\)[+*?]/.test(pattern)) return true;
-  // Alternation with quantifier: (a|b)+
-  if (/\([^)]*\|[^)]*\)[+*]/.test(pattern)) return true;
-  // Adjacent quantified groups: (a+)(b+)
-  if (/\([^)]*[+*]\)[^(]*\([^)]*[+*]\)/.test(pattern)) return true;
-  // Backreference-like overlapping: (a|aa)+ or ([a-z]|a)+
-  if (/\(\w+\|(\w+)[^)]*\)[+*]/.test(pattern)) return true;
+  // Collapse lazy quantifiers (a+? -> a+) and remove escapes / character
+  // classes so quantifiers inside a class (e.g. [a-z]*) are not misread as
+  // dangerous. We keep the structural scan conservative to avoid rejecting
+  // legitimate patterns (false positives would break valid task packs).
+  const stripped = pattern
+    .replace(/\\./g, "") // drop escaped chars
+    .replace(/\[[^\]]*\]/g, "[]") // collapse char classes
+    .replace(/([+*?])\?/g, "$1"); // collapse lazy quantifiers to greedy
+
+  // Group (capturing / non-capturing / named) containing a quantifier, itself
+  // followed by a quantifier: (a+)+, (?:a*)*, (?<x>a+)+, (a+){2,}
+  if (/\((?:<\w+>:|\?:)?[^()]*[+*?{][^()]*\)[+*?{]/.test(stripped)) return true;
+  // Group containing an alternation, followed by a quantifier (overlapping
+  // alternatives enable exponential backtracking): (a|a?)+, (?:b|a)*, (a|b)+
+  if (/\((?:<\w+>:|\?:)?[^()]*\|[^()]*\)[+*?{]/.test(stripped)) return true;
+  // Two adjacent quantified groups / atoms: (a+)(b+), (a+)(a+)
+  if (/\)[^()]*\([^()]*[+*?{][^()]*\)[+*?{]/.test(stripped)) return true;
   return false;
 }
 
+/** Wall-clock budget for a single regex test, guarding against ReDoS hangs. */
+export const REGEX_TEST_TIMEOUT_MS = 5_000;
+const MAX_MATCH_COUNT = 100_000;
+
+const REGEX_WORKER_SOURCE = `
+const { parentPort, workerData } = require("node:worker_threads");
+try {
+  const regex = new RegExp(workerData.pattern, workerData.flags);
+  let count = 0;
+  if (regex.global) {
+    for (const _match of workerData.content.matchAll(regex)) {
+      count++;
+      if (count >= workerData.maxMatches) break;
+    }
+  } else {
+    count = regex.test(workerData.content) ? 1 : 0;
+  }
+  parentPort.postMessage({ ok: true, count });
+} catch (error) {
+  parentPort.postMessage({ ok: false, error: error instanceof Error ? error.message : String(error) });
+}
+`;
+
+type RegexWorkerMessage =
+  | { ok: true; count: number }
+  | { ok: false; error: string };
+
+/** Run a regex count in an isolated worker so timeout can terminate execution. */
+export async function runRegexCountWithTimeout(
+  pattern: string,
+  flags: string,
+  content: string,
+  timeoutMs = REGEX_TEST_TIMEOUT_MS
+): Promise<number> {
+  return await new Promise<number>((resolve, reject) => {
+    let settled = false;
+    const worker = new Worker(REGEX_WORKER_SOURCE, {
+      eval: true,
+      workerData: { pattern, flags, content, maxMatches: MAX_MATCH_COUNT }
+    });
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      worker.removeAllListeners();
+      fn();
+    };
+
+    timer = setTimeout(() => {
+      finish(() => {
+        void worker.terminate();
+        reject(new Error(`Regex test timed out after ${timeoutMs}ms - possible ReDoS pattern: /${pattern}/`));
+      });
+    }, timeoutMs);
+
+    worker.once("message", (message: RegexWorkerMessage) => {
+      finish(() => {
+        if (message.ok) {
+          resolve(message.count);
+        } else {
+          reject(new Error(message.error));
+        }
+      });
+    });
+    worker.once("error", (error) => {
+      finish(() => reject(error));
+    });
+    worker.once("exit", (code) => {
+      if (code !== 0) {
+        finish(() => reject(new Error(`Regex worker exited with code ${code}`)));
+      }
+    });
+  });
+}
+
+/** Run a regex `.test()` equivalent against `content` with a hard timeout. */
+export async function runRegexTestWithTimeout(
+  pattern: string,
+  flags: string,
+  content: string,
+  timeoutMs = REGEX_TEST_TIMEOUT_MS
+): Promise<boolean> {
+  return (await runRegexCountWithTimeout(pattern, flags, content, timeoutMs)) > 0;
+}
 export async function readTextFileSafe(filePath: string, label: string, maxSize = 50 * 1024 * 1024): Promise<string> {
   const stat = await fs.stat(filePath);
   if (stat.size > maxSize) {
     throw new Error(`${label}: file too large (${stat.size} bytes, max ${maxSize})`);
   }
   return fs.readFile(filePath, "utf8");
+}
+
+const MAX_JSON_DEPTH = 100;
+const MAX_JSON_NODES = 1_000_000;
+
+/**
+ * Guard against abusive/malformed JSON (decompression-bomb style DoS) by
+ * enforcing a nesting-depth and total-node-count budget AFTER parsing.
+ * `readTextFileSafe` already caps raw bytes; this caps the in-memory AST so a
+ * 50MB file full of nested arrays cannot blow up memory or hang traversal.
+ * Throws if either budget is exceeded.
+ */
+export function enforceJsonBudget(value: unknown, depth = 0, nodes: { count: number } = { count: 0 }): void {
+  if (depth > MAX_JSON_DEPTH) {
+    throw new Error(`JSON nesting too deep (> ${MAX_JSON_DEPTH} levels) - possible abuse.`);
+  }
+  if (Array.isArray(value)) {
+    nodes.count += value.length;
+    if (nodes.count > MAX_JSON_NODES) {
+      throw new Error(`JSON document too large (> ${MAX_JSON_NODES} nodes) - possible abuse.`);
+    }
+    for (const item of value) {
+      if (typeof item === "object" && item !== null) enforceJsonBudget(item, depth + 1, nodes);
+    }
+  } else if (value !== null && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>);
+    nodes.count += entries.length;
+    if (nodes.count > MAX_JSON_NODES) {
+      throw new Error(`JSON document too large (> ${MAX_JSON_NODES} nodes) - possible abuse.`);
+    }
+    for (const [, v] of entries) {
+      if (typeof v === "object" && v !== null) enforceJsonBudget(v, depth + 1, nodes);
+    }
+  }
 }
 
 export function createAjv(): InstanceType<typeof Ajv> {
@@ -439,7 +569,7 @@ export function parseBiomeSummary(payload: unknown): ParsedLintSummary | null {
     return null;
   }
 
-  // Mutation inside reduce is intentional here — biome's noAccumulatingSpread
+  // Mutation inside reduce is intentional here; biome's noAccumulatingSpread
   // rule flags spread in accumulators as O(n²). Direct mutation is O(1) per step.
   const totals = payload.diagnostics.reduce(
     (summary, entry) => {
@@ -488,7 +618,7 @@ export function parseLintSummary(payload: unknown, format: string | undefined): 
  * Validate that a value is a valid JudgeResult structure.
  * Returns true if valid, false otherwise.
  *
- * This prevents garbage-in → garbage-out in scoring by ensuring
+ * This prevents garbage-in / garbage-out in scoring by ensuring
  * judge results have the required fields with correct types.
  */
 export function validateJudgeResult(result: unknown): result is {

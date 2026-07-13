@@ -1,6 +1,12 @@
 import type { AgentRunResult, BenchmarkRun } from "@agentarena/core";
 import { escapeMdCell } from "./report-helpers.js";
 
+// Sentinel for an unstable distribution whose coefficient of variation cannot
+// be expressed as a finite number (mean 0 with non-zero spread). JSON would
+// serialize Infinity as null, silently corrupting reports, so we cap it and
+// render it as "∞ (unstable)".
+const CV_UNSTABLE = Number.MAX_SAFE_INTEGER;
+
 export interface AgentVarianceStats {
   agentId: string;
   displayLabel: string;
@@ -111,15 +117,14 @@ function computeStdDev(values: number[]): number {
 
 function computeCV(values: number[]): number {
   const mean = computeMean(values);
-  if (mean === 0) {
-    const stdDev = computeStdDev(values);
-    // When mean is 0: if all values are 0, CV is 0 (truly stable).
-    // If stdDev > 0, use MAX_SAFE_INTEGER to flag as unstable.
-    // Infinity is avoided because JSON serializes it as null, silently corrupting reports.
-    return stdDev > 0 ? Number.MAX_SAFE_INTEGER : 0;
-  }
   const stdDev = computeStdDev(values);
-  return stdDev / mean;
+  if (!Number.isFinite(mean) || mean === 0) {
+    // When mean is 0 (or unknown): if all values are 0, CV is 0 (truly stable).
+    // If stdDev > 0, flag as unstable rather than emitting Infinity.
+    return stdDev > 0 ? CV_UNSTABLE : 0;
+  }
+  const cv = stdDev / mean;
+  return Number.isFinite(cv) ? cv : CV_UNSTABLE;
 }
 
 /**
@@ -165,8 +170,10 @@ export function formatVarianceReport(report: VarianceReport): string {
 
   for (const agent of report.agents) {
     const stability = agent.isStable ? "stable" : "volatile";
+    const scoreCVText =
+      !Number.isFinite(agent.scoreCV) || agent.scoreCV >= CV_UNSTABLE ? "∞ (unstable)" : `${(agent.scoreCV * 100).toFixed(1)}%`;
     lines.push(
-      `| ${escapeMdCell(agent.displayLabel)} | ${agent.runCount} | ${agent.scoreMean.toFixed(1)} | ${agent.scoreStdDev.toFixed(1)} | ${(agent.scoreCV * 100).toFixed(1)}% | ${stability} |`
+      `| ${escapeMdCell(agent.displayLabel)} | ${agent.runCount} | ${agent.scoreMean.toFixed(1)} | ${agent.scoreStdDev.toFixed(1)} | ${scoreCVText} | ${stability} |`
     );
   }
 

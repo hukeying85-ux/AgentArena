@@ -193,6 +193,7 @@ interface FileToHash {
   relativePath: string;
   size: number;
   mtimeMs: number;
+  ino: number;
 }
 
 /**
@@ -205,20 +206,24 @@ interface FileToHash {
 interface CachedHash {
   size: number;
   mtimeMs: number;
+  ino: number;
   hash: string;
 }
 const hashCache = new Map<string, CachedHash>();
 const HASH_CACHE_MAX_SIZE = 50_000;
 
-function getCachedHash(absolutePath: string, size: number, mtimeMs: number): string | undefined {
+function getCachedHash(absolutePath: string, size: number, mtimeMs: number, ino: number): string | undefined {
   const cached = hashCache.get(absolutePath);
-  if (cached && cached.size === size && cached.mtimeMs === mtimeMs) {
+  // Include the inode in the key: a file that is replaced (e.g. write+rename)
+  // keeps the same path but gets a new inode, so even an identical size+mtime
+  // must be re-hashed to avoid reusing a stale hash for different content.
+  if (cached && cached.size === size && cached.mtimeMs === mtimeMs && cached.ino === ino) {
     return cached.hash;
   }
   return undefined;
 }
 
-function setCachedHash(absolutePath: string, size: number, mtimeMs: number, hash: string): void {
+function setCachedHash(absolutePath: string, size: number, mtimeMs: number, ino: number, hash: string): void {
   if (hashCache.size >= HASH_CACHE_MAX_SIZE) {
     // Evict oldest entry (first inserted) — Map preserves insertion order
     const firstKey = hashCache.keys().next().value;
@@ -226,7 +231,7 @@ function setCachedHash(absolutePath: string, size: number, mtimeMs: number, hash
       hashCache.delete(firstKey);
     }
   }
-  hashCache.set(absolutePath, { size, mtimeMs, hash });
+  hashCache.set(absolutePath, { size, mtimeMs, ino, hash });
 }
 
 /**
@@ -328,7 +333,7 @@ export async function snapshotDirectory(rootPath: string): Promise<Map<string, F
           snapshots.set(relativePath, { relativePath, hash });
           continue;
         }
-        filesToHash.push({ absolutePath, relativePath, size: stat.size, mtimeMs: stat.mtimeMs });
+        filesToHash.push({ absolutePath, relativePath, size: stat.size, mtimeMs: stat.mtimeMs, ino: stat.ino });
       } catch (_error) {
         logger.warn("core", "snapshot.skip_file", `Snapshot: skipped file due to error: ${relativePath}`, { error: _error });
       }
@@ -355,13 +360,13 @@ export async function snapshotDirectory(rootPath: string): Promise<Map<string, F
   let cacheHits = 0;
   const hashes = await mapWithConcurrency(filesToHash, concurrency, async (file) => {
     try {
-      const cached = getCachedHash(file.absolutePath, file.size, file.mtimeMs);
+      const cached = getCachedHash(file.absolutePath, file.size, file.mtimeMs, file.ino);
       if (cached) {
         cacheHits += 1;
         return { relativePath: file.relativePath, hash: cached };
       }
       const hash = await hashFileStream(file.absolutePath);
-      setCachedHash(file.absolutePath, file.size, file.mtimeMs, hash);
+      setCachedHash(file.absolutePath, file.size, file.mtimeMs, file.ino, hash);
       return { relativePath: file.relativePath, hash };
     } catch (_error) {
       logger.warn("core", "snapshot.skip_file", `Snapshot: skipped file due to error: ${file.relativePath}`, { error: _error });

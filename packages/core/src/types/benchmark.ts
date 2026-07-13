@@ -289,6 +289,6 @@ export interface FileSnapshotEntry {
 }
 
 export interface RepoSourceResolution {
-  kind: "user" | "builtin" | "url";
+  kind: "user" | "builtin";
   repoPath: string;
 }

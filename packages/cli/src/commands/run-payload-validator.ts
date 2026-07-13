@@ -7,6 +7,7 @@
  */
 
 import path from "node:path";
+import { isPathInsideWorkspace } from "@agentarena/core";
 import type { UiRunPayload } from "./shared.js";
 
 function isPathInsideSync(basePath: string, targetPath: string): boolean {
@@ -24,7 +25,11 @@ function isPathInsideSync(basePath: string, targetPath: string): boolean {
  * directly, so unit tests can exercise the function deterministically and so the
  * same code path can be used from contexts that switch working directories.
  */
-export function validateRunPayload(runPayload: UiRunPayload, cwd: string = process.cwd()): string | null {
+export function validateRunPayload(
+  runPayload: UiRunPayload,
+  cwd: string = process.cwd(),
+  taskRoots: string[] = [cwd]
+): string | null {
   if (!runPayload.repoPath || typeof runPayload.repoPath !== "string") {
     return "repoPath is required and must be a string.";
   }
@@ -34,8 +39,16 @@ export function validateRunPayload(runPayload: UiRunPayload, cwd: string = proce
   if (!isPathInsideSync(cwd, runPayload.repoPath)) {
     return "repoPath must be within the current working directory.";
   }
-  if (!isPathInsideSync(cwd, runPayload.taskPath)) {
-    return "taskPath must be within the current working directory.";
+  if (!taskRoots.some((root) => isPathInsideSync(root, runPayload.taskPath))) {
+    return "taskPath must be within an allowed task directory.";
+  }
+  if (runPayload.outputPath !== undefined) {
+    if (typeof runPayload.outputPath !== "string" || !runPayload.outputPath.trim()) {
+      return "outputPath must be a non-empty string when provided.";
+    }
+    if (!isPathInsideSync(cwd, runPayload.outputPath)) {
+      return "outputPath must be within the current working directory.";
+    }
   }
   if (runPayload.maxConcurrency !== undefined) {
     const parsed = Number(runPayload.maxConcurrency);
@@ -49,5 +62,44 @@ export function validateRunPayload(runPayload: UiRunPayload, cwd: string = proce
       return "tokenBudget must be a positive number.";
     }
   }
+  return null;
+}
+
+
+export interface RunPayloadPathOptions {
+  cwd?: string;
+  taskRoots?: string[];
+}
+
+/** Resolve existing path components so directory links cannot escape local UI roots. */
+export async function validateRunPayloadPaths(
+  runPayload: UiRunPayload,
+  options: RunPayloadPathOptions = {}
+): Promise<string | null> {
+  const cwd = options.cwd ?? process.cwd();
+  const taskRoots = options.taskRoots?.length ? options.taskRoots : [cwd];
+
+  if (!(await isPathInsideWorkspace(cwd, runPayload.repoPath))) {
+    return "repoPath resolves outside the current working directory through a symbolic link.";
+  }
+
+  let taskPathAllowed = false;
+  for (const taskRoot of taskRoots) {
+    if (await isPathInsideWorkspace(taskRoot, runPayload.taskPath)) {
+      taskPathAllowed = true;
+      break;
+    }
+  }
+  if (!taskPathAllowed) {
+    return "taskPath resolves outside every allowed task directory.";
+  }
+
+  if (
+    runPayload.outputPath !== undefined &&
+    !(await isPathInsideWorkspace(cwd, runPayload.outputPath))
+  ) {
+    return "outputPath resolves outside the current working directory through a symbolic link.";
+  }
+
   return null;
 }

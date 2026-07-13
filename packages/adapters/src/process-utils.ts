@@ -174,7 +174,7 @@ function decodeProcessOutput(buffer: Buffer): string {
     // Only use the fallback if it doesn't contain replacement characters
     if (!decoded.includes("\uFFFD")) return decoded;
   } catch {
-    // TextDecoder doesn't support this label — fall through
+    // TextDecoder does not support this label; fall through.
   }
 
   return utf8;
@@ -183,9 +183,12 @@ function decodeProcessOutput(buffer: Buffer): string {
 const WINDOWS_BATCH_COMMAND = /\.(?:cmd|bat)$/i;
 
 function quoteWindowsCmdArgument(value: string): string {
-  if (/[%"\r\n]/.test(value)) {
+  // Percent expansion happens even inside cmd.exe quotes, and quotes/newlines
+  // can break the generated command line. Other characters are passed inside
+  // double quotes as literal argument text.
+  if (/[%;"\r\n]/.test(value)) {
     throw new Error(
-      "Unsupported Windows cmd.exe argument: values passed through .cmd/.bat shims cannot contain %, double quotes, or newlines."
+      "Unsupported Windows cmd.exe argument: values passed through .cmd/.bat shims cannot contain %, ;, double quotes, or newlines."
     );
   }
   return `"${value.replace(/\\+$/u, (slashes) => `${slashes}${slashes}`)}"`;
@@ -232,7 +235,9 @@ async function runWindowsClaudeDetached(
   cwd: string,
   timeoutMs: number,
   environment?: NodeJS.ProcessEnv,
-  stdinInput?: string
+  stdinInput?: string,
+  signal?: AbortSignal,
+  callbacks?: RunProcessCallbacks
 ): Promise<ProcessResult> {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-claude-run-"));
   const scriptPath = path.join(tempDir, "run.ps1");
@@ -283,7 +288,8 @@ async function runWindowsClaudeDetached(
       ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath],
       cwd,
       timeoutMs + 30_000,
-      process.env
+      process.env,
+      signal
     );
 
     const [stdoutBuf, stderrBuf, exitText] = await Promise.all([
@@ -293,6 +299,12 @@ async function runWindowsClaudeDetached(
     ]);
     const stdout = decodeProcessOutput(stdoutBuf);
     const stderr = decodeProcessOutput(stderrBuf);
+    if (stdout && callbacks?.onStdout) {
+      try { callbacks.onStdout(stdout); } catch { /* ignore callback errors */ }
+    }
+    if (stderr && callbacks?.onStderr) {
+      try { callbacks.onStderr(stderr); } catch { /* ignore callback errors */ }
+    }
     const timedOut = wrapperResult.timedOut || exitText.trim() === "TIMEOUT" || wrapperResult.exitCode === 124;
     const exitCode = Number.parseInt(exitText.trim(), 10);
 
@@ -362,7 +374,7 @@ export async function findExecutableOnPath(names: string[]): Promise<string | un
         await accessAsync(candidate, fsConstants.X_OK);
         return candidate;
       } catch {
-        // Not found or not executable — continue searching
+        // Not found or not executable; continue searching.
       }
     }
   }
@@ -377,14 +389,21 @@ export async function findExecutableOnPath(names: string[]): Promise<string | un
  * This function NEVER throws. All failure modes (spawn errors, timeouts,
  * cancellations, process crashes) are captured and returned as fields on
  * the `ProcessResult` object:
- *   - `exitCode: null` + `error: "<message>"` → spawn failed
- *   - `timedOut: true` → process exceeded timeoutMs
- *   - `signal: "SIGTERM"` + `error: "cancelled"` → AbortSignal fired
+ *   - `exitCode: null` + `error: "<message>"` -> spawn failed
+ *   - `timedOut: true` -> process exceeded timeoutMs
+ *   - `signal: "SIGTERM"` + `error: "cancelled"` -> AbortSignal fired
  *
  * Callers should check `result.exitCode === 0 && !result.error` to
  * determine success. A try/catch around the `await runProcess(...)` call
- * is unnecessary but harmless — it will never trigger.
+ * is unnecessary but harmless; it will never trigger.
  */
+export interface RunProcessCallbacks {
+  /** Called as stdout data arrives (pre-decode, per-chunk). */
+  onStdout?: (chunk: string) => void;
+  /** Called as stderr data arrives (pre-decode, per-chunk). */
+  onStderr?: (chunk: string) => void;
+}
+
 export async function runProcess(
   command: string,
   args: string[],
@@ -392,10 +411,11 @@ export async function runProcess(
   timeoutMs = agentTimeoutMs(),
   environment?: NodeJS.ProcessEnv,
   signal?: AbortSignal,
-  stdinInput?: string
+  stdinInput?: string,
+  callbacks?: RunProcessCallbacks
 ): Promise<ProcessResult> {
-  if (!signal && stdinInput !== undefined && isWindowsClaudeInvocation(command, args)) {
-    return await runWindowsClaudeDetached(command, args, cwd, timeoutMs, environment, stdinInput);
+  if (stdinInput !== undefined && isWindowsClaudeInvocation(command, args)) {
+    return await runWindowsClaudeDetached(command, args, cwd, timeoutMs, environment, stdinInput, signal, callbacks);
   }
 
   return await new Promise((resolve) => {
@@ -476,7 +496,7 @@ export async function runProcess(
             });
           }
         } catch (e) {
-          adapterWarn("all process kill attempts failed — possible orphan", { pid, error: e instanceof Error ? e.message : String(e) });
+          adapterWarn("all process kill attempts failed - possible orphan", { pid, error: e instanceof Error ? e.message : String(e) });
         }
       }
     };
@@ -546,6 +566,10 @@ export async function runProcess(
       } else {
         stdoutChunks.push(chunk);
       }
+      // Fire streaming callback for real-time activity capture
+      if (callbacks?.onStdout) {
+        try { callbacks.onStdout(decodeProcessOutput(chunk)); } catch { /* ignore callback errors */ }
+      }
     });
 
     child.stderr?.on("data", (chunk: Buffer) => {
@@ -558,6 +582,10 @@ export async function runProcess(
         stderrTruncated = true;
       } else {
         stderrChunks.push(chunk);
+      }
+      // Fire streaming callback for real-time activity capture
+      if (callbacks?.onStderr) {
+        try { callbacks.onStderr(decodeProcessOutput(chunk)); } catch { /* ignore callback errors */ }
       }
     });
 

@@ -29,9 +29,6 @@ const BASELINE_ENV_NAMES = [
   "SSL_CERT_FILE",
   "NODE_EXTRA_CA_CERTS",
   "REQUESTS_CA_BUNDLE",
-  "GIT_SSH_COMMAND",
-  "GIT_ASKPASS",
-  "GCM_INTERACTIVE",
   "EDITOR",
   "VISUAL",
   "BROWSER"
@@ -45,6 +42,8 @@ const BLOCKED_ENV_NAMES = new Set([
   "NODE_PATH",
   "ELECTRON_RUN_AS_NODE",
 ]);
+
+const SENSITIVE_HOST_ENV_NAMES = new Set(["GIT_SSH_COMMAND", "GIT_ASKPASS", "GCM_INTERACTIVE"]);
 
 /**
  * Parse AGENTARENA_EXTRA_ENV: comma-separated list of additional env var names
@@ -63,9 +62,11 @@ export function buildExecutionEnvironment(
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   const extraNames = getExtraEnvNames();
+  const extraNameSet = new Set(extraNames);
 
   for (const name of [...BASELINE_ENV_NAMES, ...allowedNames, ...extraNames]) {
     if (BLOCKED_ENV_NAMES.has(name)) continue;
+    if (SENSITIVE_HOST_ENV_NAMES.has(name) && !extraNameSet.has(name)) continue;
     const value = process.env[name];
     if (value !== undefined) {
       env[name] = value;

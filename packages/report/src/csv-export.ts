@@ -1,5 +1,5 @@
 import type { BenchmarkRun } from "@agentarena/core";
-import { formatCompositeScoreValue, type ScoredRun } from "./report-helpers.js";
+import { formatCompositeScoreValue, type ScoredResult, type ScoredRun } from "./report-helpers.js";
 import { enrichRunWithScores } from "./scoring.js";
 
 function escapeCsvField(value: unknown): string {
@@ -14,7 +14,13 @@ function escapeCsvField(value: unknown): string {
 }
 
 export function generateCsv(run: BenchmarkRun): string {
-  const scoredRun = run.task ? (enrichRunWithScores(run) as ScoredRun) : (run as ScoredRun);
+  // Enrich only when scores are missing so CSV output matches the JSON/HTML
+  // reports (which render "n/a" for un-scored results) instead of enriching
+  // solely based on task presence.
+  const needsEnrichment = (run.results ?? []).some(
+    (result) => typeof (result as ScoredResult).compositeScore !== "number"
+  );
+  const scoredRun = needsEnrichment ? (enrichRunWithScores(run) as ScoredRun) : (run as ScoredRun);
   const headers = [
     "Agent",
     "Base Agent",
@@ -54,7 +60,7 @@ export function generateCsv(run: BenchmarkRun): string {
       formatCompositeScoreValue(result),
       result.durationMs,
       result.tokenUsage,
-      result.costKnown ? result.estimatedCostUsd.toFixed(4) : "n/a",
+      result.costKnown && Number.isFinite(result.estimatedCostUsd) ? result.estimatedCostUsd.toFixed(4) : "n/a",
       result.costKnown ? "yes" : "no",
       result.changedFiles.length,
       judgesPassed,

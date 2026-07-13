@@ -3,7 +3,7 @@ import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { buildTraceTimeline, InMemoryTraceRecorder, JsonlTraceRecorder, loadTraceEvents, TraceReplayer } from "../packages/trace/dist/index.js";
+import { buildTraceTimeline, InMemoryTraceRecorder, JsonlTraceRecorder, loadTraceEvents, TraceReplayer, TraceTailer } from "../packages/trace/dist/index.js";
 
 function tempDir() {
   return path.join(tmpdir(), `agentarena-trace-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -356,6 +356,34 @@ test("loadTraceEvents convenience function works", async () => {
   assert.equal(events[0].message, "test");
 
   await fs.rm(dir, { recursive: true, force: true });
+});
+
+test("TraceTailer does not emit duplicate records when ticks overlap", async () => {
+  const dir = tempDir();
+  const filePath = path.join(dir, "trace.jsonl");
+  const record = {
+    timestamp: "2026-01-01T00:00:00Z",
+    agentId: "a",
+    type: "info",
+    message: "first"
+  };
+
+  try {
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(filePath, `${JSON.stringify(record)}\n`, "utf8");
+
+    const seen = [];
+    const tailer = new TraceTailer(filePath, (event) => {
+      seen.push(event);
+    });
+
+    await Promise.all([tailer.tick(), tailer.tick()]);
+
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].message, "first");
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
 });
 
 test("TraceFilter supports runId filtering", async () => {

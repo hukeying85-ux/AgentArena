@@ -9,6 +9,7 @@
  */
 
 import type { ParsedArgs } from "./args.js";
+import { isLocalUiHost } from "./local-only.js";
 
 export type ValidationResult =
   | { ok: true }
@@ -54,6 +55,13 @@ export function validateRunCommand(args: ParsedArgs): ValidationResult {
 }
 
 export function validateUiCommand(args: ParsedArgs): ValidationResult {
+  if (args.host !== undefined && !isLocalUiHost(args.host)) {
+    return {
+      ok: false,
+      error: "--host only supports local addresses: 127.0.0.1, localhost, ::1, or ::ffff:127.0.0.1"
+    };
+  }
+
   if (args.port !== undefined && (args.port < 1 || args.port > 65535 || !Number.isInteger(args.port))) {
     return {
       ok: false,

@@ -84,6 +84,12 @@ export interface AdapterExecutionContext {
     validate: (targetPath: string, context: string) => Promise<boolean>;
     validateOrThrow: (targetPath: string, context: string) => Promise<void>;
   };
+  /**
+   * Optional callback to emit real-time activity events (stdout/stderr lines).
+   * When provided, adapters SHOULD call this as output arrives so the runner
+   * can stream it to connected UIs. The callback is already debounced.
+   */
+  onActivity?: (line: string, stream: "stdout" | "stderr", seq: number) => void;
 }
 
 export interface AdapterExecutionResult {

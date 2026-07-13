@@ -71,16 +71,16 @@ function removeLocalValue(key) {
  * @returns {string}
  */
 function getAuthToken() {
-  // Check URL hash first (backwards compatibility)
-  const hash = window.location.hash;
-  if (hash) {
-    const match = hash.match(/[#&]token=([^&]+)/);
-    if (match) {
-      writeSessionValue(AUTH_TOKEN_SESSION_KEY, match[1]);
-      removeLocalValue(LEGACY_AUTH_TOKEN_LOCAL_KEY);
-      window.location.hash = '';
-      return match[1];
-    }
+  // SECURITY: tokens are NEVER read from the URL hash. A token in #token=...
+  // leaks via Referer, browser history, and crash/telemetry tooling. Tokens are
+  // only accepted from the localhost-injected meta tag or sessionStorage.
+  // (Any legacy token present in the hash is intentionally ignored and cleared.)
+  if (window.location.hash) {
+    try {
+      if (/[#&]token=([^&]+)/.test(window.location.hash)) {
+        window.location.hash = '';
+      }
+    } catch { /* ignore */ }
   }
 
   // Check meta tag (localhost auto-inject for seamless UX)

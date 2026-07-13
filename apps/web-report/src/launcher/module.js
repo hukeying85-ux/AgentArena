@@ -25,6 +25,15 @@ export function safeExternalHref(value) {
   }
 }
 
+export function isCommunityTaskPack(taskPack) {
+  const declaredSource = taskPack?.source ?? taskPack?.metadata?.source;
+  if (declaredSource === "community") return true;
+  if (declaredSource === "official") return false;
+
+  const repoSource = taskPack?.repoSource;
+  return typeof repoSource === "string" && !repoSource.startsWith("builtin://");
+}
+
 export function createLauncherModule(deps) {
   const {
     state,
@@ -599,7 +608,7 @@ export function createLauncherModule(deps) {
           </label>
           <label class="field field-wide">
             <span>${escapeHtml(localText("API Key / Token", "API Key / Token"))} <span class="field-optional">${escapeHtml(localText("选填，留空不修改", "optional"))}</span></span>
-            <input data-role="provider-secret" type="password" value="" placeholder="${escapeHtml(localText("留空则不修改当前已保存的 secret", "Leave blank to keep the currently stored secret"))}" />
+            <input data-role="provider-secret" type="password" value="${escapeHtml(editor.secret)}" placeholder="${escapeHtml(localText("留空则不修改当前已保存的 secret", "Leave blank to keep the currently stored secret"))}" />
           </label>
         </div>
         <label class="checkbox">
@@ -655,10 +664,38 @@ export function createLauncherModule(deps) {
       ? t("launcherCurrentAgentLabel", currentAgent)
       : t("launcherCurrentAgentIdle");
 
+    // Build progress bar + per-agent status from snapshot
+    const snap = state.runStatus?.snapshot;
+    const total = snap?.total ?? 0;
+    const finished = snap?.finished ?? 0;
+    const running = snap?.running ?? [];
+    const failed = snap?.failed ?? 0;
+    const pct = total > 0 ? Math.round((finished / total) * 100) : 0;
+
+    const progressBar = total > 0 ? `
+      <div class="launcher-progress-bar-container">
+        <div class="launcher-progress-bar" style="width:${pct}%"></div>
+        <span class="launcher-progress-bar-text">${finished}/${total} · ${running.length} ${localText("运行中", "running")} · ${failed} ${localText("失败", "failed")}</span>
+      </div>` : "";
+
+    // Per-agent status cards (from running list in snapshot)
+    const STALL_MS = 45000;
+    const now = Date.now();
+    const agentCards = running.map((variantId) => {
+      const activity = state.agentActivity[variantId];
+      const stalled = activity?.ts ? (now - activity.ts) > STALL_MS : false;
+      const label = variantId; // fallback if no display label available
+      return `<span class="agent-chip ${stalled ? "agent-chip-stalled" : "agent-chip-running"}" title="${stalled ? localText("已停滞", "Stalled") : localText("运行中", "Running")}">${escapeHtml(label)}</span>`;
+    }).join("");
+
+    const agentChips = agentCards ? `<div class="launcher-agent-chips">${agentCards}</div>` : "";
+
     const logs = Array.isArray(state.runStatus?.logs) ? state.runStatus.logs : [];
     if (logs.length === 0 && state.runInProgress) {
       const phaseLabel = t(`launcherPhases.${phase}`);
       elements.launcherLogList.innerHTML = `
+        ${progressBar}
+        ${agentChips}
         <div class="launcher-progress-hero">
           <div class="launcher-progress-spinner"></div>
           <div class="launcher-progress-hero-text">
@@ -670,11 +707,11 @@ export function createLauncherModule(deps) {
     }
 
     if (logs.length === 0) {
-      elements.launcherLogList.innerHTML = "";
+      elements.launcherLogList.innerHTML = progressBar + agentChips;
       return;
     }
 
-    elements.launcherLogList.innerHTML = logs
+    elements.launcherLogList.innerHTML = progressBar + agentChips + logs
       .slice()
       .reverse()
       .map((entry) => {
@@ -724,6 +761,33 @@ export function createLauncherModule(deps) {
     state.launcherProviderEditor = createProviderEditorState(profile);
   }
 
+  function syncProviderEditorStateFromDom() {
+    if (!state.launcherProviderEditor) return;
+
+    const editor = elements.launcherAgents.querySelector("[data-provider-editor='true']");
+    if (!editor) return;
+
+    const readValue = (selector) => editor.querySelector(selector)?.value ?? "";
+    const readChecked = (selector) => editor.querySelector(selector)?.checked ?? false;
+    state.launcherProviderEditor = {
+      ...state.launcherProviderEditor,
+      name: readValue('[data-role="provider-name"]'),
+      kind: readValue('[data-role="provider-kind"]') || state.launcherProviderEditor.kind,
+      homepage: readValue('[data-role="provider-homepage"]'),
+      baseUrl: readValue('[data-role="provider-base-url"]'),
+      apiFormat: readValue('[data-role="provider-api-format"]') || state.launcherProviderEditor.apiFormat,
+      primaryModel: readValue('[data-role="provider-primary-model"]'),
+      thinkingModel: readValue('[data-role="provider-thinking-model"]'),
+      defaultHaikuModel: readValue('[data-role="provider-haiku-model"]'),
+      defaultSonnetModel: readValue('[data-role="provider-sonnet-model"]'),
+      defaultOpusModel: readValue('[data-role="provider-opus-model"]'),
+      notes: readValue('[data-role="provider-notes"]'),
+      extraEnv: readValue('[data-role="provider-extra-env"]') || "{}",
+      writeCommonConfig: readChecked('[data-role="provider-write-common-config"]'),
+      secret: readValue('[data-role="provider-secret"]')
+    };
+  }
+
   // -----------------------------------------------------------------------
   // Task pack helpers
   // -----------------------------------------------------------------------
@@ -752,7 +816,7 @@ export function createLauncherModule(deps) {
     const desc = taskPackI18n(taskPack, "description") || taskPack.description || taskPack.objective || "";
     const diff = taskPackI18n(taskPack, "differentiator") || taskPack.differentiator;
 
-    const isCommunity = taskPack.repoSource && !taskPack.repoSource.startsWith("builtin://") && !taskPack.repoSource.startsWith("local://");
+    const isCommunity = isCommunityTaskPack(taskPack);
     const communityWarning = isCommunity
       ? `<div class="validation-msg validation-warning" style="margin-top:8px;padding:8px 12px;border-radius:4px;background:var(--warning-soft, rgba(245, 158, 11, 0.12));border:1px solid var(--warning, #f59e0b);color:var(--warning-light, #fbbf24);font-size:0.9em;">
           ⚠️ ${escapeHtml(localText(
@@ -1488,6 +1552,14 @@ export function createLauncherModule(deps) {
       const runStatus = await response.json();
       if (requestSeq !== state.runStatusRequestSeq) return;
 
+      // Update per-agent activity from snapshot (if present)
+      if (runStatus?.snapshot) {
+        const snap = runStatus.snapshot;
+        for (const [variantId, ts] of Object.entries(snap.lastActivityByAgent ?? {})) {
+          state.agentActivity[variantId] = { ts };
+        }
+      }
+
       state.runStatus = runStatus;
       if (state.runStatus?.state === "done") {
         stopRunStatusPolling();
@@ -1539,9 +1611,106 @@ export function createLauncherModule(deps) {
   function startRunStatusPolling() {
     stopRunStatusPolling();
     void pollRunStatus();
+    // Try SSE stream first; if it connects, we stop polling and let the
+    // stream drive updates. If SSE fails, fall back to 1s polling.
+    void tryStartRunStream();
     state.runStatusPollTimer = window.setInterval(() => {
-      void pollRunStatus();
+      // Only poll if SSE is not active
+      if (!state.streamClient || state.streamClient.transport !== "sse") {
+        void pollRunStatus();
+      }
     }, 1000);
+  }
+
+  /**
+   * Attempt to connect to the SSE /api/run-stream endpoint.
+   * On success: sets state.streamClient and stops polling.
+   * On failure: silently falls back to polling (no error shown to user).
+   */
+  async function tryStartRunStream() {
+    try {
+      const token = sessionStorage.getItem("agentarena-auth-token") ?? "";
+      const streamUrl = `/api/run-stream?token=${encodeURIComponent(token)}`;
+      const eventSource = new EventSource(streamUrl);
+
+      let sseActive = false;
+      const pollFallbackTimer = window.setInterval(() => {
+        // If no SSE event received within 3s, fall back to polling
+        if (!sseActive) {
+          console.warn("[AgentArena] SSE connect timeout, falling back to polling");
+          eventSource.close();
+          state.streamClient = null;
+          window.clearInterval(pollFallbackTimer);
+        }
+      }, 3000);
+
+      eventSource.addEventListener("snapshot", (ev) => {
+        sseActive = true;
+        window.clearInterval(pollFallbackTimer);
+        try {
+          const data = JSON.parse(ev.data);
+          state.runStatus = data;
+          renderLauncher();
+        } catch { /* ignore malformed */ }
+      });
+
+      eventSource.addEventListener("progress", (ev) => {
+        sseActive = true;
+        window.clearInterval(pollFallbackTimer);
+        try {
+          const data = JSON.parse(ev.data);
+          // Merge progress into runStatus
+          if (state.runStatus) {
+            state.runStatus.phase = data.phase ?? state.runStatus.phase;
+            state.runStatus.currentAgentId = data.agentId ?? state.runStatus.currentAgentId;
+            state.runStatus.currentVariantId = data.variantId ?? state.runStatus.currentVariantId;
+            state.runStatus.currentDisplayLabel = data.displayLabel ?? state.runStatus.currentDisplayLabel;
+            state.runStatus.snapshot = data.snapshot ?? state.runStatus.snapshot;
+            if (data.snapshot?.lastActivityByAgent) {
+              for (const [vid, ts] of Object.entries(data.snapshot.lastActivityByAgent)) {
+                state.agentActivity[vid] = { ts: ts };
+              }
+            }
+          }
+          renderLauncher();
+        } catch { /* ignore malformed */ }
+      });
+
+      eventSource.addEventListener("activity", (ev) => {
+        sseActive = true;
+        try {
+          const data = JSON.parse(ev.data);
+          const vid = data.variantId;
+          if (vid) {
+            // Append to agentLogs ring buffer (cap 200 lines in browser)
+            if (!state.agentLogs[vid]) state.agentLogs[vid] = [];
+            state.agentLogs[vid].push(`[${data.stream}] ${data.line}`);
+            if (state.agentLogs[vid].length > 200) state.agentLogs[vid].shift();
+            state.agentActivity[vid] = { line: data.line, ts: Date.now() };
+          }
+          renderLauncher();
+        } catch { /* ignore malformed */ }
+      });
+
+      eventSource.addEventListener("done", () => {
+        window.clearInterval(pollFallbackTimer);
+        eventSource.close();
+        state.streamClient = null;
+        // Final poll to get the result
+        void pollRunStatus().then(() => render());
+      });
+
+      eventSource.onerror = () => {
+        window.clearInterval(pollFallbackTimer);
+        eventSource.close();
+        state.streamClient = null;
+        // Fallback: polling continues via the interval
+      };
+
+      state.streamClient = { transport: "sse", close: () => eventSource.close() };
+    } catch {
+      // EventSource not supported — polling continues
+    }
   }
 
   // -----------------------------------------------------------------------
@@ -1618,6 +1787,8 @@ export function createLauncherModule(deps) {
   // -----------------------------------------------------------------------
 
   function syncLauncherStateFromDom() {
+    syncProviderEditorStateFromDom();
+
     state.launcherSelectedAgentIds = selectedLauncherAgents();
 
     // Global model override

@@ -3,6 +3,7 @@ import {
   hasReDoSRisk,
   readTextFileSafe,
   resolveWorkspacePath,
+  runRegexTestWithTimeout,
 } from "../shared.js";
 
 export async function runFileContainsJudge(judge: FileContainsJudge, workspacePath: string): Promise<JudgeResult> {
@@ -33,7 +34,7 @@ export async function runFileContainsJudge(judge: FileContainsJudge, workspacePa
     }
 
     const matched = judge.regex
-      ? new RegExp(judge.pattern, flags).test(content)
+      ? await runRegexTestWithTimeout(judge.pattern, flags, content)
       : content.includes(judge.pattern);
 
     return {

@@ -3,6 +3,7 @@ import {
   hasReDoSRisk,
   readTextFileSafe,
   resolveWorkspacePath,
+  runRegexCountWithTimeout,
 } from "../shared.js";
 
 export async function runRegexMatchJudge(
@@ -39,33 +40,7 @@ export async function runRegexMatchJudge(
       );
     }
 
-    let regex: RegExp;
-    try {
-      regex = new RegExp(judge.pattern, effectiveFlags);
-    } catch (error) {
-      throw new Error(`Invalid regex pattern "${judge.pattern}": ${error instanceof Error ? error.message : String(error)}`);
-    }
-
-    let matchCount: number;
-    if (regex.global) {
-      // Cap match counting to prevent memory exhaustion on large files
-      const MAX_MATCH_COUNT = 100_000;
-      let count = 0;
-      for (const _match of content.matchAll(regex)) {
-        count++;
-        if (count >= MAX_MATCH_COUNT) break;
-      }
-      matchCount = count;
-    } else {
-      // Wrap in timeout to guard against ReDoS on non-global patterns
-      const REGEX_TEST_TIMEOUT_MS = 5_000;
-      matchCount = await Promise.race([
-        Promise.resolve().then(() => regex.test(content) ? 1 : 0),
-        new Promise<number>((_, reject) =>
-          setTimeout(() => reject(new Error(`Regex test timed out after ${REGEX_TEST_TIMEOUT_MS}ms — possible ReDoS pattern: /${judge.pattern}/`)), REGEX_TEST_TIMEOUT_MS)
-        ),
-      ]);
-    }
+    const matchCount = await runRegexCountWithTimeout(judge.pattern, effectiveFlags, content);
     const minMatches = judge.minMatches ?? 1;
     const shouldNotMatch = judge.shouldNotMatch ?? false;
 

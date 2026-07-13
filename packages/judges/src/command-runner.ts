@@ -122,7 +122,45 @@ const SAFE_COMMANDS = new Set([
  * @see CommandSecurityOptions.allowRiskyCommands — the programmatic toggle
  */
 const RISKY_COMMANDS = new Set(["curl", "wget", "sed", "awk", "tee"]);
-const COMMANDS_USING_E_FLAG = new Set(["echo", "printf", "type", "which", "where"]);
+/**
+ * Interpreters that can execute arbitrary code via -e/-c/--eval flags.
+ * Eval detection is scoped to these ONLY, so unrelated commands that use
+ * -e (e.g. `grep -e pattern`, `sed`, `test`) are NOT falsely blocked.
+ */
+const EVAL_INTERPRETERS = new Set([
+  "node", "nodejs", "python", "python3", "py", "ruby", "rb",
+  "perl", "bun", "deno", "lua", "luajit", "php"
+]);
+
+/**
+ * Detect eval-style invocation flags (-e, -c, --eval) for known code interpreters.
+ *
+ * Correctness fixes over the previous regex check:
+ * - Scoped to {@link EVAL_INTERPRETERS} only (no false positives for grep/sed/test).
+ * - Detects glued forms like `-eCODE` / `-cCODE` / `--eval=X`, closing the
+ *   previous bypass where `-eARG` (no trailing whitespace) slipped through the
+ *   `/\s-(?:e|c)\s/` regex.
+ * - For node/nodejs, `-c` is a syntax-check (not code execution) so only `-e`
+ *   is treated as eval; for other interpreters `-c` IS eval.
+ */
+function hasEvalFlag(commandBasename: string, commandArgs: string[]): boolean {
+  if (!EVAL_INTERPRETERS.has(commandBasename)) {
+    return false;
+  }
+  const nodeLike = commandBasename === "node" || commandBasename === "nodejs";
+  return commandArgs.some((arg) => {
+    if (arg === "-e" || arg === "--eval" || arg.startsWith("--eval=")) {
+      return true;
+    }
+    if (/^-e.+/u.test(arg)) {
+      return true;
+    }
+    if (!nodeLike && (arg === "-c" || /^-c.+/u.test(arg))) {
+      return true;
+    }
+    return false;
+  });
+}
 const WINDOWS_BATCH_COMMAND = /\.(?:cmd|bat)$/i;
 const WINDOWS_EXECUTABLE_SUFFIX = /\.(?:com|exe|cmd|bat)$/i;
 
@@ -214,9 +252,11 @@ function commandBasenameForAllowlist(commandToken: string): string {
 }
 
 function quoteWindowsCmdArgument(value: string): string {
-  if (/[%"\r\n]/.test(value)) {
+  // `%` expands even inside cmd.exe quotes, while quotes/newlines can break argv
+  // framing. Semicolons are disallowed for parity with adapter cmd shims.
+  if (/[%;"\r\n]/.test(value)) {
     throw new Error(
-      "Unsupported Windows cmd.exe argument: values passed through .cmd/.bat shims cannot contain %, double quotes, or newlines."
+      "Unsupported Windows cmd.exe argument: values passed through .cmd/.bat shims cannot contain %, ;, double quotes, or newlines."
     );
   }
   return `"${value.replace(/\\+$/u, (slashes) => `${slashes}${slashes}`)}"`;
@@ -304,15 +344,13 @@ function validateParsedCommand(
     );
   }
 
-  if (!security.allowEval && (/\s-(?:e|c)\s/.test(commandForMessage) || /\s--eval[\s=]/.test(commandForMessage) || commandArgs.some(a => a === "--eval" || a.startsWith("--eval=") || a === "-e" || a === "-c"))) {
-    if (!COMMANDS_USING_E_FLAG.has(commandBasename)) {
-      throw new Error(
-        `Eval-style invocation (-e/-c/--eval) is not allowed for "${commandBasename}" in setup/judge commands. ` +
-        `The task pack uses "node -e" which is blocked by the security policy. ` +
-        `Fix: Replace the inline code with a script file (e.g., create install-deps.js and run "node install-deps.js"). ` +
-        `Command: "${commandForMessage.slice(0, 100)}"`
-      );
-    }
+  if (!security.allowEval && hasEvalFlag(commandBasename, commandArgs)) {
+    throw new Error(
+      `Eval-style invocation (-e/-c/--eval) is not allowed for "${commandBasename}" in setup/judge commands. ` +
+      `The task pack uses inline code execution which is blocked by the security policy. ` +
+      `Fix: Replace the inline code with a script file (e.g., create check.js and run "node check.js"). ` +
+      `Command: "${commandForMessage.slice(0, 100)}"`
+    );
   }
 }
 
@@ -343,21 +381,15 @@ export function parseCommand(command: string, options?: CommandSecurityOptions):
   // Block eval-style invocations that could bypass the allowlist
   // by running arbitrary code inside an allowed interpreter.
   // Detects: node -e, node --eval, python -c, ruby -e, perl -e, etc.
-  //
-  // Task pack commands (setup + judge) are trusted content defined by the
-  // user, not by the agent. Allow eval for them. External / untrusted
-  // callers can still block via the options flag.
+  // Scoped to known interpreters; glued forms are also detected (see hasEvalFlag).
   const allowEval = security.allowEval;
-  if (!allowEval && (/\s-(?:e|c)\s/.test(trimmed) || /\s--eval[\s=]/.test(trimmed) || args.some(a => a === "--eval" || a.startsWith("--eval=") || a === "-e" || a === "-c"))) {
-    // Allow echo/printf/type/which/where — they use -e for their own flags
-    if (!COMMANDS_USING_E_FLAG.has(commandBasename)) {
-      throw new Error(
-        `Eval-style invocation (-e/-c/--eval) is not allowed for "${commandBasename}" in setup/judge commands. ` +
-        `The task pack uses "node -e" which is blocked by the security policy. ` +
-        `Fix: Replace the inline code with a script file (e.g., create install-deps.js and run "node install-deps.js"). ` +
-        `Command: "${trimmed.slice(0, 100)}"`
-      );
-    }
+  if (!allowEval && hasEvalFlag(commandBasename, args)) {
+    throw new Error(
+      `Eval-style invocation (-e/-c/--eval) is not allowed for "${commandBasename}" in setup/judge commands. ` +
+      `The task pack uses inline code execution which is blocked by the security policy. ` +
+      `Fix: Replace the inline code with a script file (e.g., create check.js and run "node check.js"). ` +
+      `Command: "${trimmed.slice(0, 100)}"`
+    );
   }
 
   return [commandToken, args.slice(1)];

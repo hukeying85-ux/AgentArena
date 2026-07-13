@@ -1,8 +1,8 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { logger } from "./logging.js";
-import type { AgentRequestedConfig, AgentSelection, RepoSourceResolution } from "./types/index.js";
+import type { AgentRequestedConfig, AgentSelection, RepoSource, RepoSourceResolution } from "./types/index.js";
 
 /**
  * Compute the median of a numeric array.
@@ -65,13 +65,9 @@ export function getPlatformInfo(): { platform: string; arch: string; nodeVersion
 
 const BUILTIN_PREFIX = "builtin://";
 
-export function resolveRepoSource(
-  repoSource: string | undefined,
-  userRepoPath: string,
-  builtinReposRoot: string
-): RepoSourceResolution {
-  if (!repoSource || repoSource === "user") {
-    return { kind: "user", repoPath: userRepoPath };
+export function validateRepoSource(repoSource: string | undefined): RepoSource | undefined {
+  if (repoSource === undefined || repoSource === "user") {
+    return repoSource;
   }
 
   if (repoSource.startsWith(BUILTIN_PREFIX)) {
@@ -79,24 +75,37 @@ export function resolveRepoSource(
     if (!name || /[/\\]/.test(name) || name === ".." || name === ".") {
       throw new Error(
         `Invalid builtin repo name in repoSource: "${repoSource}". ` +
-        `Expected format: "builtin://repo-name".`
+          `Expected format: "builtin://repo-name".`
       );
     }
-    return { kind: "builtin", repoPath: path.join(builtinReposRoot, name) };
+    return repoSource as RepoSource;
   }
 
   if (repoSource.startsWith("http://") || repoSource.startsWith("https://")) {
-    const repoUrl = new URL(repoSource);
-    const repoName = path.basename(repoUrl.pathname, path.extname(repoUrl.pathname)) || "repo";
-    const safeName = repoName.replace(/[^a-zA-Z0-9._-]+/g, "_");
-    const sourceHash = createHash("sha256").update(repoUrl.href).digest("hex").slice(0, 12);
-    return { kind: "url", repoPath: path.join(builtinReposRoot, `${safeName}-${sourceHash}`) };
+    throw new Error(
+      `External repository URLs are not supported in local-only mode: "${repoSource}". ` +
+        `Use "user" or "builtin://repo-name" instead.`
+    );
   }
 
   throw new Error(
     `Unsupported repoSource: "${repoSource}". ` +
-    `Supported values: "user", "builtin://repo-name", or an HTTP(S) URL.`
+      `Supported values: "user" or "builtin://repo-name".`
   );
+}
+
+export function resolveRepoSource(
+  repoSource: string | undefined,
+  userRepoPath: string,
+  builtinReposRoot: string
+): RepoSourceResolution {
+  const validatedSource = validateRepoSource(repoSource);
+  if (!validatedSource || validatedSource === "user") {
+    return { kind: "user", repoPath: userRepoPath };
+  }
+
+  const name = validatedSource.slice(BUILTIN_PREFIX.length).trim();
+  return { kind: "builtin", repoPath: path.join(builtinReposRoot, name) };
 }
 
 export function validateTaskPackId(id: string): boolean {

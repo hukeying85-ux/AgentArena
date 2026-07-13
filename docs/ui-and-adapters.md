@@ -4,15 +4,20 @@
 
 ## `agentarena ui`：监听地址与鉴权
 
-- **默认**：`--host 127.0.0.1`、`--port 4320`。仅从本机访问时，多数 **只读** API（如 `GET /api/adapters`）可不带头。
-- **`--host 0.0.0.0`**：等同对外网卡监听，浏览器 Origin 仍可为 `http://127.0.0.1:<port>`（见服务端 CORS 白名单），但 **`isLocalhost` 为 false**，此时 **所有 `/api/*` 请求都必须带 `Authorization: Bearer <token>`**。
+- **本地模式**：UI 只允许绑定 `127.0.0.1`、`localhost`、`::1` 或 `::ffff:127.0.0.1`，默认使用 `127.0.0.1:4320`。不支持局域网或公网访问。
 - **敏感路径**（即使在本机、即使是 GET）：必须经过鉴权，例如：
   - `/api/run`、`/api/run/cancel`
   - `/api/preflight`
   - `/api/create-adhoc-taskpack`
   - `/api/provider-profiles` 及其子路径（含密钥相关）
 - **令牌**：默认进程启动时生成随机 UUID；也可用 **`--auth-token <secret>`** 固定。浏览器侧由前端存储并在 `apiFetch` 中附加（参见 web-report `app-helpers`）。
-- **误用场景**：在不可信网络将 UI 绑到 `0.0.0.0` 且未妥善保管 token，等同于把「可触发跑任务 / 读写 profile」的接口暴露给局域网 — **请仅在可信环境使用或始终绑定 127.0.0.1**。
+
+## 任务包的本地信任边界
+
+- 任务包可以定义准备、检查和清理命令，因此它本质上是可执行输入。文件保存在本机，不代表文件本身可信。
+- 只运行来源明确、内容经过检查的任务包。社区任务包会在页面中显示提醒。
+- 本地模式只接受当前仓库或随程序提供的内置仓库，不接受任务包指定的外部仓库网址。
+- 任务包不能通过 `envAllowList` 继承本机的 Git 登录辅助设置。确有需要时，只能由操作者通过 `AGENTARENA_EXTRA_ENV` 明确允许。
 
 ## `doctor` 与 `preflight`：失败语义
 

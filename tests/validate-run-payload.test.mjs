@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
@@ -6,7 +8,7 @@ import test from "node:test";
 // duplicated the function in-tree; that "mirror" silently diverged from the
 // shipped code. Now any drift between the test expectations and the production
 // path produces a real test failure.
-import { validateRunPayload } from "../packages/cli/dist/commands/run-payload-validator.js";
+import { validateRunPayload, validateRunPayloadPaths } from "../packages/cli/dist/commands/run-payload-validator.js";
 
 const CWD = process.cwd();
 
@@ -155,4 +157,69 @@ test("accepts deeply nested subdirectory of cwd", () => {
     repoPath: path.join(CWD, "a", "b", "c"),
     taskPath: path.join(CWD, "x", "y", "task.yaml"),
   }), null);
+});
+
+
+test("rejects repository and task paths that escape through directory links", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-payload-paths-"));
+  const workspace = path.join(tempDir, "workspace");
+  const outside = path.join(tempDir, "outside");
+  const linkType = process.platform === "win32" ? "junction" : "dir";
+  try {
+    await mkdir(workspace, { recursive: true });
+    await mkdir(outside, { recursive: true });
+    await writeFile(path.join(outside, "task.yaml"), "schemaVersion: agentarena.taskpack/v1", "utf8");
+    await symlink(outside, path.join(workspace, "repo-link"), linkType);
+    await symlink(outside, path.join(workspace, "task-link"), linkType);
+
+    assert.match(
+      await validateRunPayloadPaths({ repoPath: path.join(workspace, "repo-link"), taskPath: path.join(workspace, "task.yaml") }, { cwd: workspace, taskRoots: [workspace] }),
+      /repoPath.*symbolic link|repoPath.*current working directory/i
+    );
+    assert.match(
+      await validateRunPayloadPaths({ repoPath: workspace, taskPath: path.join(workspace, "task-link", "task.yaml") }, { cwd: workspace, taskRoots: [workspace] }),
+      /taskPath.*allowed task directory/i
+    );
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("accepts an official task path outside cwd when its trusted root is explicit", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-payload-paths-"));
+  const workspace = path.join(tempDir, "workspace");
+  const officialRoot = path.join(tempDir, "official-taskpacks");
+  try {
+    await mkdir(workspace, { recursive: true });
+    await mkdir(officialRoot, { recursive: true });
+    const taskPath = path.join(officialRoot, "task.yaml");
+    await writeFile(taskPath, "schemaVersion: agentarena.taskpack/v1", "utf8");
+
+    assert.equal(
+      await validateRunPayloadPaths({ repoPath: workspace, taskPath }, { cwd: workspace, taskRoots: [workspace, officialRoot] }),
+      null
+    );
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("rejects an output path that escapes through a directory link", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-payload-paths-"));
+  const workspace = path.join(tempDir, "workspace");
+  const outside = path.join(tempDir, "outside");
+  const linkType = process.platform === "win32" ? "junction" : "dir";
+  try {
+    await mkdir(workspace, { recursive: true });
+    await mkdir(outside, { recursive: true });
+    await writeFile(path.join(workspace, "task.yaml"), "schemaVersion: agentarena.taskpack/v1", "utf8");
+    await symlink(outside, path.join(workspace, "output-link"), linkType);
+
+    assert.match(
+      await validateRunPayloadPaths({ repoPath: workspace, taskPath: path.join(workspace, "task.yaml"), outputPath: path.join(workspace, "output-link", "run") }, { cwd: workspace, taskRoots: [workspace] }),
+      /outputPath.*current working directory/i
+    );
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
 });

@@ -132,9 +132,29 @@ class BaseCliAdapterImpl implements AgentAdapter {
       metadata: { command: invocation.displayCommand, args }
     });
 
+    // Activity callback for real-time stdout/stderr streaming (if provided)
+    const onActivity = context.onActivity;
+    const onStdout = onActivity
+      ? (chunk: string) => {
+          // Split chunk into lines and emit each (debounced upstream)
+          const lines = chunk.split("\n").filter((l) => l.trim());
+          for (const line of lines) {
+            onActivity(line, "stdout", 0);
+          }
+        }
+      : undefined;
+    const onStderr = onActivity
+      ? (chunk: string) => {
+          const lines = chunk.split("\n").filter((l) => l.trim());
+          for (const line of lines) {
+            onActivity(line, "stderr", 0);
+          }
+        }
+      : undefined;
+
     let execution: Awaited<ReturnType<typeof runProcess>>;
     try {
-      execution = await runProcess(invocation.command, args, context.workspacePath, agentTimeoutMs(), context.environment, context.signal, prompt);
+      execution = await runProcess(invocation.command, args, context.workspacePath, agentTimeoutMs(), context.environment, context.signal, prompt, onStdout || onStderr ? { onStdout, onStderr } : undefined);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       const actionableMessage = formatAdapterError(errorMessage, this.title, invocation.displayCommand);

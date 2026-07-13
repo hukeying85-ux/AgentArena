@@ -4,7 +4,7 @@
 
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { logger, validateTaskPackId } from "@agentarena/core";
+import { isPathInsideWorkspace, logger, validateTaskPackId } from "@agentarena/core";
 import { checkTaskCompatibility } from "@agentarena/runner";
 import { loadTaskPack } from "@agentarena/taskpacks";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
@@ -278,6 +278,17 @@ export async function handleCheckCompatibility(rawBody: string): Promise<ApiResp
     const { loadTaskPack } = await import("@agentarena/taskpacks");
     const taskPath = path.resolve(body.taskPath as string);
     const repoPath = path.resolve(body.repoPath as string);
+
+    // SECURITY: contain both paths to the current working directory to prevent
+    // the server from reading/validating arbitrary filesystem locations
+    // (path-traversal). Mirrors the guards in validateRunPayload.
+    if (!(await isPathInsideWorkspace(process.cwd(), taskPath))) {
+      return jsonResponse({ error: "Task path is outside the allowed workspace." }, 400);
+    }
+    if (!(await isPathInsideWorkspace(process.cwd(), repoPath))) {
+      return jsonResponse({ error: "Repository path is outside the allowed workspace." }, 400);
+    }
+
     const taskPack = await loadTaskPack(taskPath);
     const result = await checkTaskCompatibility(taskPack, repoPath);
     return jsonResponse(result);

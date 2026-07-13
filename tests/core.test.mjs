@@ -210,23 +210,15 @@ test("resolveRepoSource resolves builtin:// to builtin repos root", () => {
   assert.match(result.repoPath, /node-starter/);
 });
 
-test("resolveRepoSource resolves http(s) URLs to url kind", () => {
-  const result1 = resolveRepoSource("https://github.com/org/repo.git", "/user/repo", "/repos");
-  assert.equal(result1.kind, "url");
-  assert.match(result1.repoPath, /repo/);
-
-  const result2 = resolveRepoSource("http://example.com/project", "/user/repo", "/repos");
-  assert.equal(result2.kind, "url");
-  assert.match(result2.repoPath, /project/);
-});
-
-test("resolveRepoSource gives different cache paths to different URLs with the same repo name", () => {
-  const result1 = resolveRepoSource("https://github.com/org-a/shared.git", "/user/repo", "/repos");
-  const result2 = resolveRepoSource("https://gitlab.com/org-b/shared.git", "/user/repo", "/repos");
-
-  assert.equal(result1.kind, "url");
-  assert.equal(result2.kind, "url");
-  assert.notEqual(result1.repoPath, result2.repoPath);
+test("resolveRepoSource rejects external repository URLs in local-only mode", () => {
+  assert.throws(
+    () => resolveRepoSource("https://github.com/org/repo.git", "/user/repo", "/repos"),
+    /External repository URLs are not supported/i
+  );
+  assert.throws(
+    () => resolveRepoSource("http://example.com/project", "/user/repo", "/repos"),
+    /External repository URLs are not supported/i
+  );
 });
 
 test("resolveRepoSource rejects invalid builtin names and unsupported schemes", () => {

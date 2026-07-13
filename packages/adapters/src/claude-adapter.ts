@@ -15,7 +15,7 @@ import { formatAdapterError } from "./adapter-diagnostics.js";
 import { buildAgentPrompt, createPreflightResult, getChangedFilesFromGit, savePromptArtifact } from "./adapter-helpers.js";
 import { getClaudeProviderProfileSecret, writeClaudeWorkspaceSettings } from "./claude-provider-profiles.js";
 import { probeClaudeLikeAuth, probeClaudeLikeAuthFast, probeHelp, probeInvocationVersion } from "./invocation-probes.js";
-import { findExecutableOnPath, preflightTimeoutMs, transportTimeoutMs } from "./process-utils.js";
+import { findExecutableOnPath, preflightTimeoutMs, type RunProcessCallbacks, transportTimeoutMs } from "./process-utils.js";
 import { resolveClaudeRuntime } from "./runtime-resolution.js";
 import { createClaudeTransportChain, type TransportChainResult } from "./transport.js";
 
@@ -168,6 +168,21 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
       }
     });
 
+    const activityCallbacks: RunProcessCallbacks | undefined = context.onActivity
+      ? {
+          onStdout: (chunk: string) => {
+            for (const line of chunk.split(/\r?\n/).filter((value) => value.trim())) {
+              context.onActivity?.(line, "stdout", 0);
+            }
+          },
+          onStderr: (chunk: string) => {
+            for (const line of chunk.split(/\r?\n/).filter((value) => value.trim())) {
+              context.onActivity?.(line, "stderr", 0);
+            }
+          }
+        }
+      : undefined;
+
     let chainResult: TransportChainResult;
     try {
       chainResult = await transportChain.execute(
@@ -176,7 +191,9 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
         {
           ...context.environment,
           ...options?.extraEnvironment
-        }
+        },
+        context.signal,
+        activityCallbacks
       );
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -216,7 +233,7 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
     if (usedFallback) {
       await context.trace({
         type: "adapter.transport_fallback",
-        message: `Transport fallback occurred: ${attempts.map(a => a.transportId).join(" → ")}`,
+        message: `Transport fallback occurred: ${attempts.map(a => a.transportId).join(" -> ")}`,
         metadata: { attempts, finalTransport: transportResult.transportId }
       });
     }
@@ -314,7 +331,7 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
     // Token usage is only trustworthy when: no transport fallback was used
     // (fallback transports may not surface token data), the count wasn't flagged
     // suspicious (result event seen but zero tokens), AND an authoritative
-    // cumulative total was present (the "result" event — without it the
+    // cumulative total was present (the "result" event; without it the
     // per-message sum can double-count cache-read tokens across turns).
     const tokenUsageReliable =
       !usedFallback &&

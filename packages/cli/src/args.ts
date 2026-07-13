@@ -30,6 +30,8 @@ export interface ParsedArgs {
   repeat?: number;
   maxConcurrency?: number;
   json: boolean;
+  /** Opt-in NDJSON event stream mode. Does NOT touch --json behavior. */
+  jsonEvents: boolean;
   templateName?: string;
   ciTemplate?: string;
   force: boolean;
@@ -96,6 +98,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     cleanupWorkspaces: false,
     dryRun: false,
     json: false,
+    jsonEvents: false,
     force: false,
     verbose: false,
     format: 'human' as const,
@@ -428,8 +431,19 @@ export function parseArgs(argv: string[]): ParsedArgs {
         break;
       }
       case "--json":
+        if (parsed.jsonEvents) {
+          throw new Error("--json and --json-events cannot be combined. Use --json for a single summary object, or --json-events for a live NDJSON event stream.");
+        }
         parsed.format = 'json';
         parsed.json = true;
+        break;
+      case "--json-events":
+      case "--ndjson":
+        // Opt-in NDJSON event stream. Mutually exclusive with --json.
+        if (parsed.json) {
+          throw new Error("--json-events and --json cannot be combined. Use --json for a single summary object, or --json-events for a live NDJSON event stream.");
+        }
+        parsed.jsonEvents = true;
         break;
       case "--last":
         parsed.last = true;

@@ -190,6 +190,17 @@ export function generateAuthToken(): string {
   return randomBytes(32).toString("hex");
 }
 
+function authTokensMatch(expectedToken: string, providedToken: string): boolean {
+  const expectedBuf = Buffer.from(expectedToken, "utf8");
+  const providedBuf = Buffer.from(providedToken, "utf8");
+  const maxLen = Math.max(expectedBuf.length, providedBuf.length, 1);
+  const paddedExpected = Buffer.alloc(maxLen);
+  const paddedProvided = Buffer.alloc(maxLen);
+  expectedBuf.copy(paddedExpected);
+  providedBuf.copy(paddedProvided);
+  return timingSafeEqual(paddedExpected, paddedProvided);
+}
+
 /**
  * Cache of computed allowed-origin Sets keyed by `host:port`.
  *
@@ -280,18 +291,14 @@ export function checkAuthHeader(
   const isDestructiveApi = method !== "GET";
 
   if (isSensitive || isDestructiveApi || !isLocalhost) {
-    const providedToken = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : "";
-    // Use crypto.timingSafeEqual for constant-time comparison (prevents timing attacks).
-    // Pad the shorter buffer to match the longer one to avoid leaking length via timing.
-    const expectedBuf = Buffer.from(authToken, "utf8");
-    const providedBuf = Buffer.from(providedToken, "utf8");
-    const maxLen = Math.max(expectedBuf.length, providedBuf.length, 1);
-    const paddedExpected = Buffer.alloc(maxLen);
-    const paddedProvided = Buffer.alloc(maxLen);
-    expectedBuf.copy(paddedExpected);
-    providedBuf.copy(paddedProvided);
-    const mismatch = timingSafeEqual(paddedExpected, paddedProvided) ? 0 : 1;
-    if (mismatch !== 0) {
+    const headerToken = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : "";
+    const queryToken =
+      method === "GET" && requestUrl.pathname === "/api/run-stream"
+        ? (requestUrl.searchParams.get("token") ?? "")
+        : "";
+    const providedToken = headerToken || queryToken;
+    const matches = authTokensMatch(authToken, providedToken);
+    if (!matches) {
       const maskedIp = clientIp ? clientIp.slice(0, 3) + "***" : "unknown";
       metrics.authFailureTotal.inc({ clientIp: maskedIp, path: requestUrl.pathname });
       logger.warn("server", "auth.verify", "Authentication failed: token mismatch (length or content)", {
@@ -311,7 +318,7 @@ export function checkAuthHeader(
         metadata: { method },
       });
     }
-    return mismatch === 0;
+    return matches;
   }
   return true;
 }

@@ -14,7 +14,7 @@ import type { InvocationSpec } from "./adapter-capabilities.js";
 import { formatAdapterError } from "./adapter-diagnostics.js";
 import { buildAgentPrompt, createPreflightResult, getChangedFilesFromGit, savePromptArtifact } from "./adapter-helpers.js";
 import { probeHelp, probeInvocationVersion } from "./invocation-probes.js";
-import { agentTimeoutMs, pathExists, runProcess } from "./process-utils.js";
+import { agentTimeoutMs, pathExists, type RunProcessCallbacks, runProcess } from "./process-utils.js";
 
 /**
  * Qwen Code CLI 能力定义
@@ -69,7 +69,7 @@ async function resolveQwenInvocation(): Promise<InvocationSpec> {
 export { resolveQwenInvocation };
 
 /**
- * 解析 Qwen Code 运行时配置
+ * Resolve Qwen Code runtime configuration.
  */
 async function resolveQwenRuntime(config: {
   requestedModel?: string;
@@ -93,7 +93,7 @@ async function resolveQwenRuntime(config: {
 }
 
 /**
- * Qwen 模型定价映射表 (每 1K tokens 的美元价格)
+ * Qwen model pricing map (USD per 1K tokens).
  */
 const QWEN_PRICING: Record<string, { input: number; output: number }> = {
   "qwen-max": { input: 0.008, output: 0.012 },
@@ -145,13 +145,27 @@ function parseQwenOutput(
     if (stats && typeof stats === "object" && "models" in stats) {
       const models = (stats as Record<string, unknown>).models;
       if (models && typeof models === "object") {
+        // Some Qwen CLI versions emit BOTH per-turn entries and a final
+        // cumulative entry for the same model. Summing them double-counts
+        // tokens, so we keep only the largest total per normalized model name
+        // (the cumulative entry is always >= any partial entry).
+        const bestByModel = new Map<string, { input: number; output: number }>();
         for (const modelKey of Object.keys(models)) {
           const modelStats = (models as Record<string, unknown>)[modelKey];
           if (modelStats && typeof modelStats === "object") {
             const ms = modelStats as Record<string, unknown>;
-            inputTokens += Number(ms.input) || Number(ms.prompt_tokens) || 0;
-            outputTokens += Number(ms.output) || Number(ms.completion_tokens) || 0;
+            const input = Number(ms.input) || Number(ms.prompt_tokens) || 0;
+            const output = Number(ms.output) || Number(ms.completion_tokens) || 0;
+            const norm = modelKey.toLowerCase();
+            const prev = bestByModel.get(norm);
+            if (!prev || input + output > prev.input + prev.output) {
+              bestByModel.set(norm, { input, output });
+            }
           }
+        }
+        for (const { input, output } of bestByModel.values()) {
+          inputTokens += input;
+          outputTokens += output;
         }
         tokenUsage = inputTokens + outputTokens;
 
@@ -349,6 +363,21 @@ export class QwenCodeAdapter implements AgentAdapter {
       }
     });
 
+    const activityCallbacks: RunProcessCallbacks | undefined = context.onActivity
+      ? {
+          onStdout: (chunk: string) => {
+            for (const line of chunk.split(/\r?\n/).filter((value) => value.trim())) {
+              context.onActivity?.(line, "stdout", 0);
+            }
+          },
+          onStderr: (chunk: string) => {
+            for (const line of chunk.split(/\r?\n/).filter((value) => value.trim())) {
+              context.onActivity?.(line, "stderr", 0);
+            }
+          }
+        }
+      : undefined;
+
     let execution: Awaited<ReturnType<typeof runProcess>>;
     try {
       execution = await runProcess(
@@ -358,7 +387,8 @@ export class QwenCodeAdapter implements AgentAdapter {
         agentTimeoutMs(),
         context.environment,
         context.signal,
-        prompt
+        prompt,
+        activityCallbacks
       );
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);

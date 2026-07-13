@@ -42,7 +42,7 @@ export interface TaskPackMetadata {
   };
 }
 
-export type RepoSource = string;
+export type RepoSource = "user" | `builtin://${string}`;
 
 export interface TaskPack {
   schemaVersion: typeof TASK_PACK_SCHEMA_V1;

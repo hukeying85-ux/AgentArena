@@ -57,6 +57,33 @@ function redactSensitiveValue(key: string, value: unknown): unknown {
   return value;
 }
 
+/**
+ * Scrub likely secrets from a free-text stack trace before it is persisted to
+ * logs (and, in `--json` mode, to stdout). Key-based redaction (redactObject)
+ * cannot catch secrets embedded in error messages / stack frames, so we
+ * redact explicit credential patterns while leaving file paths intact for
+ * debuggability.
+ */
+const STACK_SECRET_PATTERNS: RegExp[] = [
+  /(bearer\s+)[A-Za-z0-9._-]+/gi,
+  /(api[_-]?key\s*[=:]\s*)[^\s"'`,}]+/gi,
+  /(secret\s*[=:]\s*)[^\s"'`,}]+/gi,
+  /(password\s*[=:]\s*)[^\s"'`,}]+/gi,
+  /(token\s*[=:]\s*)[^\s"'`,}]+/gi,
+  /\b(sk-[A-Za-z0-9]{20,})\b/g,
+  /\b(pk-[A-Za-z0-9]{20,})\b/g,
+  /\b(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}\b/g,
+];
+
+function scrubStackTrace(stack: string | undefined): string | undefined {
+  if (!stack) return stack;
+  let out = stack;
+  for (const re of STACK_SECRET_PATTERNS) {
+    out = out.replace(re, (_m, p1) => (p1 ? `${p1}****` : "****"));
+  }
+  return out;
+}
+
 function redactObject(obj: unknown, depth = 0): unknown {
   if (depth > 10) return "[max depth]";
   if (obj === null || obj === undefined) return obj;
@@ -116,7 +143,7 @@ export function createLogEntry(
       name: err.name,
       message: err.message,
       code: (err as NodeJS.ErrnoException).code,
-      stack: err.stack,
+      stack: scrubStackTrace(err.stack),
     };
   }
 

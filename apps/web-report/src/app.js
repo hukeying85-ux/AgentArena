@@ -158,6 +158,21 @@ function showError(message) {
   render();
 }
 
+function showResultLoaderError(message) {
+  const loaderMessage = elements.resultLoaderMessage;
+  if (!loaderMessage) return;
+  loaderMessage.textContent = message;
+  loaderMessage.hidden = false;
+  if (elements.resultLoaderPanel) elements.resultLoaderPanel.open = true;
+}
+
+function clearResultLoaderError() {
+  const loaderMessage = elements.resultLoaderMessage;
+  if (!loaderMessage) return;
+  loaderMessage.textContent = "";
+  loaderMessage.hidden = true;
+}
+
 // Increment _toastSeq so the next render() always fires a fresh toast, even if
 // the user triggers two same-kind notices in a row (e.g. two failed saves).
 function bumpToastSeq() {
@@ -168,7 +183,7 @@ function bumpToastSeq() {
 // Toast notification system — fixed-position, always-visible feedback.
 // Replaces hidden inline messages that users missed when scrolled away.
 // ---------------------------------------------------------------------------
-let toastTimers = new Map();
+const toastTimers = new Map();
 
 function showToast(message, kind = "success", duration = 5000) {
   const container = document.getElementById("toast-container");
@@ -513,7 +528,9 @@ const resultLoaders = createResultLoaders({
   applyRuns,
   showLoading,
   hideLoading,
-  showError
+  showError,
+  showResultLoaderError,
+  clearResultLoaderError
 });
 
 const traceReplay = createTraceReplayModule({
@@ -945,7 +962,7 @@ function render() {
   try { renderStaticText(); } catch(e) { console.error("[agentarena] renderStaticText error:", e); renderErrors.push(`Static text: ${e instanceof Error ? e.message : String(e)}`); }
   // Version display is NOT gated by the language-cache inside renderStaticText,
   // so it updates on every render (including the one triggered by detectService).
-  try { updateVersionDisplay(state.serviceInfo?.version ?? null); } catch(e) { /* ignore */ }
+  try { updateVersionDisplay(state.serviceInfo?.version ?? null); } catch { /* ignore */ }
   if (elements.resultLoaderMessage) {
     const noticeText = state.notice ?? "";
     // Push ALL notices to a fixed-position toast so they're visible regardless

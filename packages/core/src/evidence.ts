@@ -278,7 +278,10 @@ export async function collectEvidence(
   try {
     const exitCodePath = path.join(evidenceDir, EVIDENCE_FILES.EXIT_CODE);
     const content = await fs.readFile(exitCodePath, "utf8");
-    result.exitCode = parseInt(content.trim(), 10);
+    const parsedExitCode = Number.parseInt(content.trim(), 10);
+    // Guard against empty/garbage content producing NaN (which would corrupt
+    // downstream pass/fail logic). Fall back to null when not a valid integer.
+    result.exitCode = Number.isInteger(parsedExitCode) ? parsedExitCode : null;
   } catch {
     // File doesn't exist - skip
   }

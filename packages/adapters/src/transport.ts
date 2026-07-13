@@ -1,8 +1,21 @@
 import type { InvocationSpec } from "./adapter-capabilities.js";
 import { adapterWarn } from "./adapter-diagnostics.js";
 import { parseClaudeEvents } from "./event-parsers.js";
-import type { ProcessResult } from "./process-utils.js";
+import type { ProcessResult, RunProcessCallbacks } from "./process-utils.js";
 import { runProcess } from "./process-utils.js";
+
+/**
+ * Decide whether to pass Claude Code's `--dangerously-skip-permissions` flag.
+ *
+ * This flag disables all permission prompts, granting the agent unrestricted
+ * filesystem and command access. It MUST be opted into explicitly via the
+ * `AGENTARENA_SKIP_PERMISSIONS` environment variable ("1" or "true"); the
+ * default is OFF so the agent runs with its normal, safer prompt behavior.
+ */
+export function shouldSkipClaudePermissions(): boolean {
+  const v = process.env.AGENTARENA_SKIP_PERMISSIONS;
+  return v === "1" || v?.toLowerCase() === "true";
+}
 
 /**
  * Transport abstraction for different communication modes with AI agent CLIs.
@@ -21,7 +34,9 @@ export interface Transport {
     prompt: string,
     cwd: string,
     environment?: NodeJS.ProcessEnv,
-    timeoutMs?: number
+    timeoutMs?: number,
+    signal?: AbortSignal,
+    callbacks?: RunProcessCallbacks
   ): Promise<TransportResult>;
   /**
    * Optional: Check if this transport is likely to work.
@@ -77,7 +92,9 @@ export class StreamJsonTransport implements Transport {
     prompt: string,
     cwd: string,
     environment?: NodeJS.ProcessEnv,
-    timeoutMs?: number
+    timeoutMs?: number,
+    signal?: AbortSignal,
+    callbacks?: RunProcessCallbacks
   ): Promise<TransportResult> {
     const args = [
       ...this.invocation.argsPrefix,
@@ -89,7 +106,7 @@ export class StreamJsonTransport implements Transport {
       "--no-session-persistence",  // Don't save session state between runs
     ];
 
-    if (process.env.AGENTARENA_SKIP_PERMISSIONS !== "0") {
+    if (shouldSkipClaudePermissions()) {
       args.push("--dangerously-skip-permissions");
     }
 
@@ -99,8 +116,9 @@ export class StreamJsonTransport implements Transport {
       cwd,
       timeoutMs,
       environment,
-      undefined,
-      prompt
+      signal,
+      prompt,
+      callbacks
     );
 
     const parsed = parseClaudeEvents(processResult.stdout);
@@ -134,10 +152,10 @@ export class StreamJsonTransport implements Transport {
    * that warrants falling back to TextTransport.
    *
    * FALLBACK THRESHOLDS (empirical, based on observed Claude Code behavior):
-   * - Timeout + <100 bytes stdout → likely provider incompatibility or hanging
-   * - Process error (spawn failure, command not found) → cannot proceed
-   * - Exit code other than 0 or 1 → unexpected failure mode (0 = success, 1 = task failure)
-   * - Non-zero exit + no parsed content → stream-json mode produced nothing useful
+   * - Timeout + <100 bytes stdout -> likely provider incompatibility or hanging
+   * - Process error (spawn failure, command not found) -> cannot proceed
+   * - Exit code other than 0 or 1 -> unexpected failure mode (0 = success, 1 = task failure)
+   * - Non-zero exit + no parsed content -> stream-json mode produced nothing useful
    *
    * These thresholds are NOT documented by the CLI tools. They are reverse-engineered
    * from how Claude Code behaves with third-party providers.
@@ -146,11 +164,11 @@ export class StreamJsonTransport implements Transport {
     result: ProcessResult,
     parsed: ReturnType<typeof parseClaudeEvents>
   ): boolean {
-    // Timeout with very little output — likely provider incompatibility
+    // Timeout with very little output -> likely provider incompatibility
     if (result.timedOut && result.stdout.length < 100) {
       return true;
     }
-    // Process error — command not found or similar
+    // Process error -> command not found or similar
     if (result.error && result.exitCode !== 0) {
       return true;
     }
@@ -205,7 +223,9 @@ export class TextTransport implements Transport {
     prompt: string,
     cwd: string,
     environment?: NodeJS.ProcessEnv,
-    timeoutMs?: number
+    timeoutMs?: number,
+    signal?: AbortSignal,
+    callbacks?: RunProcessCallbacks
   ): Promise<TransportResult> {
     const args = [
       ...this.invocation.argsPrefix,
@@ -216,7 +236,7 @@ export class TextTransport implements Transport {
       "--no-session-persistence",
     ];
 
-    if (process.env.AGENTARENA_SKIP_PERMISSIONS !== "0") {
+    if (shouldSkipClaudePermissions()) {
       args.push("--dangerously-skip-permissions");
     }
 
@@ -226,8 +246,9 @@ export class TextTransport implements Transport {
       cwd,
       timeoutMs,
       environment,
-      undefined,
-      prompt
+      signal,
+      prompt,
+      callbacks
     );
 
     // Parse text output - extract summary from last non-empty line
@@ -269,7 +290,9 @@ export class RawTransport implements Transport {
     _prompt: string,
     cwd: string,
     environment?: NodeJS.ProcessEnv,
-    timeoutMs?: number
+    timeoutMs?: number,
+    signal?: AbortSignal,
+    _callbacks?: RunProcessCallbacks
   ): Promise<TransportResult> {
     // For raw transport, we just check if CLI responds to --help
     const processResult = await runProcess(
@@ -277,7 +300,8 @@ export class RawTransport implements Transport {
       [...this.invocation.argsPrefix, "--help"],
       cwd,
       timeoutMs ?? 10_000,
-      environment
+      environment,
+      signal
     );
 
     return {
@@ -343,7 +367,9 @@ export class TransportChain {
   async execute(
     prompt: string,
     cwd: string,
-    environment?: NodeJS.ProcessEnv
+    environment?: NodeJS.ProcessEnv,
+    signal?: AbortSignal,
+    callbacks?: RunProcessCallbacks
   ): Promise<TransportChainResult> {
     const attempts: TransportChainResult["attempts"] = [];
     let lastResult: TransportResult | undefined;
@@ -362,7 +388,9 @@ export class TransportChain {
           prompt,
           cwd,
           environment,
-          this.timeoutMs
+          this.timeoutMs,
+          signal,
+          callbacks
         );
 
         const duration = Date.now() - startTime;
@@ -451,7 +479,7 @@ export class TransportChain {
 /**
  * Create a default transport chain for Claude Code with fallback.
  * - Official providers: StreamJson only (most reliable)
- * - Third-party providers: StreamJson → Text fallback
+ * - Third-party providers: StreamJson -> Text fallback
  */
 export function createClaudeTransportChain(
   invocation: InvocationSpec,

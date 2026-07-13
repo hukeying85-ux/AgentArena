@@ -79,6 +79,12 @@ describe("args-validators", () => {
       assert.equal(result.ok, false);
     });
 
+    it("fails with a non-local host", () => {
+      const result = validateUiCommand({ host: "0.0.0.0", port: 3000 });
+      assert.equal(result.ok, false);
+      assert.match(result.error ?? "", /local/i);
+    });
+
     it("fails with negative port", () => {
       const result = validateUiCommand({ port: -1 });
       assert.equal(result.ok, false);
@@ -142,6 +148,12 @@ describe("args-validators", () => {
     it("dispatches to ui validator", () => {
       const result = validateCommandArgs({ command: "ui", port: 3000 });
       assert.equal(result.ok, true);
+    });
+
+    it("rejects a non-local UI host through command validation", () => {
+      const result = validateCommandArgs({ command: "ui", host: "0.0.0.0", port: 3000 });
+      assert.equal(result.ok, false);
+      assert.match(result.error ?? "", /local/i);
     });
 
     it("passes for unknown command", () => {

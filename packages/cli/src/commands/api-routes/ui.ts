@@ -14,9 +14,9 @@ import {
   metrics,
 } from "@agentarena/core";
 import { jsonResponse } from "../../server/index.js";
+import { readVersionInfo } from "../../server/version.js";
 import { OFFICIAL_TASKPACK_ROOT } from "../shared.js";
 import type { ApiResponse } from "./types.js";
-import { readVersionInfo } from "../../server/version.js";
 
 export async function handleUiInfo(codexDefaults: unknown, host: string, port: number, isLocalhost: boolean): Promise<ApiResponse> {
   const providerProfiles = await listClaudeProviderProfiles();

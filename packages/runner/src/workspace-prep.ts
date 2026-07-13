@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { createRunId, ensureDirectory } from "@agentarena/core";
+import { createRunId, ensureDirectory, logger } from "@agentarena/core";
 import { formatErrorDetails } from "./workspace.js";
 
 const MIN_FREE_SPACE_BYTES = 500 * 1024 * 1024;
@@ -40,11 +40,28 @@ export async function prepareWorkspace(options: WorkspacePrepOptions): Promise<W
       );
     }
   } catch (error) {
-    // If statfs is not available (older Node), continue anyway
+    // The explicit "Insufficient disk space" error must always propagate.
     if (error instanceof Error && error.message.startsWith("Insufficient disk space")) {
       throw error;
     }
-    // statfs may not be available on all platforms, skip the check
+    // statfs may be unsupported on some platforms/filesystems (ENOSYS/ENOTSUP).
+    // In that case the guard is simply skipped. Any OTHER filesystem error is
+    // unexpected and is surfaced (not silently swallowed) so the guard's
+    // failure is visible rather than masking a real disk problem.
+    const code = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined;
+    if (code === "ENOSYS" || code === "ENOTSUP" || code === "EOPNOTSUPP") {
+      logger.debug(
+        "runner",
+        "workspace_prep.disk_check_unsupported",
+        `Disk space precheck skipped because statfs is unsupported: ${code}`
+      );
+    } else {
+      logger.warn(
+        "runner",
+        "workspace_prep.disk_check_skipped",
+        `Disk space precheck skipped due to unexpected error: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
   }
 
   let workspaceRootPath: string;

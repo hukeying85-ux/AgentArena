@@ -9,10 +9,10 @@ import { fileURLToPath } from "node:url";
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const CLI_ENTRY = path.join(REPO_ROOT, "packages", "cli", "dist", "index.js");
 
-function request(port, method, pathname, body, token) {
+function request(port, method, pathname, body, token, hostname = "127.0.0.1") {
   return new Promise((resolve, reject) => {
     const options = {
-      hostname: "127.0.0.1",
+      hostname,
       port,
       path: pathname,
       method,
@@ -42,11 +42,11 @@ function request(port, method, pathname, body, token) {
   });
 }
 
-function waitForServer(port, timeoutMs = 30000) {
+function waitForServer(port, timeoutMs = 30000, hostname = "127.0.0.1") {
   return new Promise((resolve, reject) => {
     const deadline = Date.now() + timeoutMs;
     const check = () => {
-      const req = http.get(`http://127.0.0.1:${port}/api/ui-info`, (res) => {
+      const req = http.get({ hostname, port, path: "/api/ui-info" }, (res) => {
         res.resume();
         if (res.statusCode === 200) {
           resolve();
@@ -70,12 +70,24 @@ function waitForServer(port, timeoutMs = 30000) {
   });
 }
 
-async function startServer(port, authTokenOverride) {
+async function getAvailablePort(hostname = "127.0.0.1") {
+  return await new Promise((resolve, reject) => {
+    const server = http.createServer();
+    server.listen(0, hostname, () => {
+      const address = server.address();
+      const port = typeof address === "object" && address ? address.port : 0;
+      server.close(() => resolve(port));
+    });
+    server.on("error", reject);
+  });
+}
+
+async function startServer(port, authTokenOverride, hostname = "127.0.0.1") {
   // Pre-generate an explicit auth token to avoid token-file race conditions across
   // parallel test runs. The CLI masks tokens in stdout for security, so parsing
   // from stdout no longer works.
   const authToken = authTokenOverride ?? `test-token-${Date.now()}-${port}-${Math.random().toString(36).slice(2, 10)}`;
-  const child = spawn(process.execPath, [CLI_ENTRY, "ui", "--port", String(port), "--no-open", "--auth-token", authToken], {
+  const child = spawn(process.execPath, [CLI_ENTRY, "ui", "--host", hostname, "--port", String(port), "--no-open", "--auth-token", authToken], {
     cwd: REPO_ROOT,
     stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env }
@@ -86,7 +98,7 @@ async function startServer(port, authTokenOverride) {
   child.stderr.on("data", (chunk) => { stderr += chunk; });
 
   try {
-    await waitForServer(port);
+    await waitForServer(port, 30000, hostname);
   } catch (error) {
     child.kill("SIGTERM");
     throw new Error(`${error instanceof Error ? error.message : String(error)}\nstderr:\n${stderr}`);
@@ -97,11 +109,23 @@ async function startServer(port, authTokenOverride) {
   return { child, stderr: () => stderr, authToken };
 }
 
-// Use a unique port for each test run to avoid conflicts
-const BASE_PORT = 4320 + Math.floor(Math.random() * 1000);
+
+for (const hostname of ["::1", "::ffff:127.0.0.1"]) {
+  test(`UI serves requests on allowed IPv6 localhost address ${hostname}`, { timeout: 60_000 }, async () => {
+    const port = await getAvailablePort(hostname);
+    const { child } = await startServer(port, undefined, hostname);
+    try {
+      const res = await request(port, "GET", "/api/ui-info", undefined, undefined, hostname);
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.body.mode, "local-service");
+    } finally {
+      child.kill("SIGTERM");
+    }
+  });
+}
 
 test("GET /api/ui-info returns correct structure", { timeout: 60_000 }, async () => {
-  const port = BASE_PORT;
+  const port = await getAvailablePort();
   const { child } = await startServer(port);
   try {
     const res = await request(port, "GET", "/api/ui-info");
@@ -116,7 +140,7 @@ test("GET /api/ui-info returns correct structure", { timeout: 60_000 }, async ()
 });
 
 test("GET / escapes localhost auth token before injecting it into index.html", { timeout: 60_000 }, async () => {
-  const port = BASE_PORT + 50;
+  const port = await getAvailablePort();
   const unsafeToken = 'unsafe"><script>window.__agentarenaXss = true</script>';
   const { child } = await startServer(port, unsafeToken);
   try {
@@ -131,7 +155,7 @@ test("GET / escapes localhost auth token before injecting it into index.html", {
 });
 
 test("GET /api/adapters returns adapter list", { timeout: 60_000 }, async () => {
-  const port = BASE_PORT + 1;
+  const port = await getAvailablePort();
   const { child } = await startServer(port);
   try {
     const res = await request(port, "GET", "/api/adapters");
@@ -147,7 +171,7 @@ test("GET /api/adapters returns adapter list", { timeout: 60_000 }, async () => 
 });
 
 test("POST /api/run with empty body returns 400", { timeout: 60_000 }, async () => {
-  const port = BASE_PORT + 2;
+  const port = await getAvailablePort();
   const { child, authToken } = await startServer(port);
   try {
     const res = await request(port, "POST", "/api/run", {}, authToken);
@@ -159,7 +183,7 @@ test("POST /api/run with empty body returns 400", { timeout: 60_000 }, async () 
 });
 
 test("POST /api/run missing agents returns 400", { timeout: 60_000 }, async () => {
-  const port = BASE_PORT + 3;
+  const port = await getAvailablePort();
   const { child, authToken } = await startServer(port);
   try {
     const res = await request(port, "POST", "/api/run", {
@@ -174,7 +198,7 @@ test("POST /api/run missing agents returns 400", { timeout: 60_000 }, async () =
 });
 
 test("POST /api/preflight missing baseAgentId returns 400", { timeout: 60_000 }, async () => {
-  const port = BASE_PORT + 4;
+  const port = await getAvailablePort();
   const { child, authToken } = await startServer(port);
   try {
     const res = await request(port, "POST", "/api/preflight", {}, authToken);
@@ -186,7 +210,7 @@ test("POST /api/preflight missing baseAgentId returns 400", { timeout: 60_000 },
 });
 
 test("POST /api/create-adhoc-taskpack missing prompt returns 400", { timeout: 60_000 }, async () => {
-  const port = BASE_PORT + 5;
+  const port = await getAvailablePort();
   const { child, authToken } = await startServer(port);
   try {
     const res = await request(port, "POST", "/api/create-adhoc-taskpack", {}, authToken);
@@ -198,7 +222,7 @@ test("POST /api/create-adhoc-taskpack missing prompt returns 400", { timeout: 60
 });
 
 test("POST /api/provider-profiles missing required fields returns 400", { timeout: 60_000 }, async () => {
-  const port = BASE_PORT + 6;
+  const port = await getAvailablePort();
   const { child, authToken } = await startServer(port);
   try {
     const res = await request(port, "POST", "/api/provider-profiles", { name: "test" }, authToken);
@@ -210,7 +234,7 @@ test("POST /api/provider-profiles missing required fields returns 400", { timeou
 });
 
 test("GET static file path traversal is blocked", { timeout: 60_000 }, async () => {
-  const port = BASE_PORT + 7;
+  const port = await getAvailablePort();
   const { child } = await startServer(port);
   try {
     // The server normalizes paths and rejects anything outside WEB_REPORT_DIST_ROOT.
@@ -228,7 +252,7 @@ test("GET static file path traversal is blocked", { timeout: 60_000 }, async () 
 });
 
 test("GET static file with encoded path traversal is blocked", { timeout: 60_000 }, async () => {
-  const port = BASE_PORT + 20;
+  const port = await getAvailablePort();
   const { child } = await startServer(port);
   try {
     // URL-encoded ..%2F..%2F should also be blocked
@@ -243,7 +267,7 @@ test("GET static file with encoded path traversal is blocked", { timeout: 60_000
 });
 
 test("GET static file with double-encoded path traversal is blocked", { timeout: 60_000 }, async () => {
-  const port = BASE_PORT + 21;
+  const port = await getAvailablePort();
   const { child } = await startServer(port);
   try {
     // Double-encoded %252e%252e%252f — Node.js URL parser decodes once, leaving %2e%2e%2f
@@ -256,7 +280,7 @@ test("GET static file with double-encoded path traversal is blocked", { timeout:
 });
 
 test("POST /api/run concurrent requests return 409", { timeout: 60_000 }, async () => {
-  const port = BASE_PORT + 8;
+  const port = await getAvailablePort();
   const { child, authToken } = await startServer(port);
   try {
     const runBody = {
@@ -279,7 +303,7 @@ test("POST /api/run concurrent requests return 409", { timeout: 60_000 }, async 
 });
 
 test("POST /api/run valid request returns 202", { timeout: 60_000 }, async () => {
-  const port = BASE_PORT + 9;
+  const port = await getAvailablePort();
   const { child, authToken } = await startServer(port);
   try {
     const res = await request(port, "POST", "/api/run", {
@@ -297,7 +321,7 @@ test("POST /api/run valid request returns 202", { timeout: 60_000 }, async () =>
 });
 
 test("Rate limit returns 429 after many requests", { timeout: 60_000 }, async () => {
-  const port = BASE_PORT + 10;
+  const port = await getAvailablePort();
   const { child } = await startServer(port);
   try {
     // Fire many requests rapidly to trigger the general rate limit (120/min)
@@ -315,7 +339,7 @@ test("Rate limit returns 429 after many requests", { timeout: 60_000 }, async ()
 });
 
 test("localhost GET /api/ui-info works without token", { timeout: 60_000 }, async () => {
-  const port = BASE_PORT + 20;
+  const port = await getAvailablePort();
   const { child } = await startServer(port);
   try {
     const res = await request(port, "GET", "/api/ui-info");
@@ -326,7 +350,7 @@ test("localhost GET /api/ui-info works without token", { timeout: 60_000 }, asyn
 });
 
 test("localhost POST /api/run requires token", { timeout: 60_000 }, async () => {
-  const port = BASE_PORT + 21;
+  const port = await getAvailablePort();
   const { child } = await startServer(port);
   try {
     const res = await request(port, "POST", "/api/run", {});
@@ -337,7 +361,7 @@ test("localhost POST /api/run requires token", { timeout: 60_000 }, async () => 
 });
 
 test("localhost POST /api/run with valid token returns non-401", { timeout: 60_000 }, async () => {
-  const port = BASE_PORT + 22;
+  const port = await getAvailablePort();
   const { child, authToken } = await startServer(port);
   try {
     const res = await request(port, "POST", "/api/run", {}, authToken);
@@ -348,7 +372,7 @@ test("localhost POST /api/run with valid token returns non-401", { timeout: 60_0
 });
 
 test("POST /api/preflight requires auth token", { timeout: 60_000 }, async () => {
-  const port = BASE_PORT + 31;
+  const port = await getAvailablePort();
   const { child } = await startServer(port);
   try {
     const res = await request(port, "POST", "/api/preflight", { baseAgentId: "demo-fast" });
@@ -359,7 +383,7 @@ test("POST /api/preflight requires auth token", { timeout: 60_000 }, async () =>
 });
 
 test("POST /api/create-adhoc-taskpack requires auth token", { timeout: 60_000 }, async () => {
-  const port = BASE_PORT + 32;
+  const port = await getAvailablePort();
   const { child } = await startServer(port);
   try {
     const res = await request(port, "POST", "/api/create-adhoc-taskpack", { prompt: "test", title: "Test" });
@@ -369,8 +393,20 @@ test("POST /api/create-adhoc-taskpack requires auth token", { timeout: 60_000 },
   }
 });
 
+test("GET /api/run-stream accepts a valid Authorization header", { timeout: 60_000 }, async () => {
+  const port = await getAvailablePort();
+  const { child, authToken } = await startServer(port);
+  try {
+    const res = await request(port, "GET", "/api/run-stream", undefined, authToken);
+    assert.equal(res.statusCode, 200);
+    assert.match(String(res.body), /event: snapshot/);
+  } finally {
+    child.kill("SIGTERM");
+  }
+});
+
 test("GET /api/run-status returns idle when no run active", { timeout: 60_000 }, async () => {
-  const port = BASE_PORT + 33;
+  const port = await getAvailablePort();
   // Clean up any persisted run state from previous tests
   const stateDir = path.join(process.cwd(), ".agentarena", "ui");
   try { await fs.rm(stateDir, { recursive: true, force: true }); } catch { /* best-effort: cleanup */ }

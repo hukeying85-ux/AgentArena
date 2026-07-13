@@ -52,6 +52,9 @@ importers:
       '@agentarena/taskpacks':
         specifier: workspace:*
         version: link:../taskpacks
+      '@agentarena/trace':
+        specifier: workspace:*
+        version: link:../trace
       yaml:
         specifier: 2.9.0
         version: 2.9.0

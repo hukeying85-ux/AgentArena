@@ -169,6 +169,7 @@ export interface UiRunStatus {
   currentAgentId?: string;
   currentVariantId?: string;
   currentDisplayLabel?: string;
+  snapshot?: BenchmarkProgressEvent["snapshot"];
   result?: {
     run: unknown;
     markdown: string;
@@ -213,6 +214,7 @@ export function toUiRunState(status: UiRunStatus): import("@agentarena/core").Ui
     ...(status.currentAgentId !== undefined ? { currentAgentId: status.currentAgentId } : {}),
     ...(status.currentVariantId !== undefined ? { currentVariantId: status.currentVariantId } : {}),
     ...(status.currentDisplayLabel !== undefined ? { currentDisplayLabel: status.currentDisplayLabel } : {}),
+    ...(status.snapshot !== undefined ? { snapshot: status.snapshot } : {}),
     ...(status.error !== undefined ? { error: status.error } : {}),
   };
 }
@@ -239,6 +241,7 @@ export function fromUiRunState(state: import("@agentarena/core").UiRunState): Ui
     ...(state.currentAgentId !== undefined ? { currentAgentId: state.currentAgentId } : {}),
     ...(state.currentVariantId !== undefined ? { currentVariantId: state.currentVariantId } : {}),
     ...(state.currentDisplayLabel !== undefined ? { currentDisplayLabel: state.currentDisplayLabel } : {}),
+    ...(state.snapshot !== undefined ? { snapshot: state.snapshot } : {}),
     ...(state.error !== undefined ? { error: state.error } : {}),
   };
 }

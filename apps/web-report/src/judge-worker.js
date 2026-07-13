@@ -35,6 +35,8 @@ const BLOCKED_APIS = [
   'history', 'openDatabase',
   // Service infrastructure
   'registration', 'serviceWorker',
+  // Cross-origin / capability probes that could aid exfiltration or side channels
+  'crossOriginIsolated', 'Notification', 'clipboard',
 ];
 
 // Block dangerous APIs before any judge code runs

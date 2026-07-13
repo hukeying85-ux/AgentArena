@@ -117,7 +117,10 @@ function inferScenario(run: BenchmarkRun): string {
 function computeRecommendations(results: AgentRunResult[]): DecisionRecommendation[] {
   // Sort by composite score (descending)
   const sorted = [...results].sort(
-    (a, b) => Number(isResultScoreExcluded(a)) - Number(isResultScoreExcluded(b)) || (b.compositeScore ?? 0) - (a.compositeScore ?? 0)
+    (a, b) =>
+      Number(isResultScoreExcluded(a)) - Number(isResultScoreExcluded(b)) ||
+      (b.compositeScore ?? 0) - (a.compositeScore ?? 0) ||
+      (a.displayLabel ?? a.agentId).localeCompare(b.displayLabel ?? b.agentId)
   );
 
   return sorted.map((result, index) => {
@@ -486,7 +489,7 @@ export function formatDecisionReport(report: DecisionReport, locale?: string): s
       }
       diagLines.push(``);
     }
-    lines.splice(lines.length - 3, 0, ...diagLines);
+    lines.push(...diagLines);
   }
 
   lines.push(report.reproduceCommand);

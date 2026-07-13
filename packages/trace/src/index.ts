@@ -198,7 +198,9 @@ export class JsonlTraceRecorder {
         metadata: { filePath: this.filePath },
         error
       });
-      throw error;
+      // Do NOT re-throw: a single write failure must not reject the queue chain
+      // nor the awaiting callers (record/recordBatch), which would corrupt the
+      // recorder and abort the run. The failure is captured via `writeFailed`.
     }).finally(() => {
       this.queueDepth--;
     });
@@ -206,7 +208,9 @@ export class JsonlTraceRecorder {
 
   async record(event: TraceEvent): Promise<void> {
     if (this.writeFailed) {
-      throw new Error(`Trace recording failed for ${this.filePath}. Previous write failed, refusing to queue more events.`);
+      // A previous write failed; stop recording to avoid partial/corrupt traces
+      // without throwing (trace recording is best-effort and must not abort runs).
+      return;
     }
 
     if (this.bufferSize <= 1) {
@@ -236,7 +240,9 @@ export class JsonlTraceRecorder {
     if (events.length === 0) return;
 
     if (this.writeFailed) {
-      throw new Error(`Trace recording failed for ${this.filePath}. Previous write failed, refusing to queue more events.`);
+      // A previous write failed; stop recording to avoid partial/corrupt traces
+      // without throwing (trace recording is best-effort and must not abort runs).
+      return;
     }
 
     const filePath = this.filePath;
@@ -335,17 +341,23 @@ export class JsonlTraceRecorder {
 
   async compress(): Promise<string> {
     const compressedPath = `${this.filePath}.gz`;
+    // Write to a temp file and atomically rename to avoid leaving a corrupt
+    // .gz behind if the process crashes mid-write.
+    const tempPath = `${compressedPath}.${randomUUID()}.tmp`;
     let fileHandle: import("node:fs/promises").FileHandle | undefined;
 
     try {
       const sourceStream = createReadStream(this.filePath);
       const gzipStream = createGzip();
-      fileHandle = await fs.open(compressedPath, "w");
+      fileHandle = await fs.open(tempPath, "w");
       const destinationStream = fileHandle.createWriteStream();
       await pipeline(sourceStream, gzipStream, destinationStream);
+      await fileHandle.close();
+      fileHandle = undefined;
+      await fs.rename(tempPath, compressedPath);
     } catch (error) {
-      // Clean up incomplete compressed file on failure
-      await fs.rm(compressedPath, { force: true }).catch(() => {});
+      // Clean up incomplete temp file on failure
+      await fs.rm(tempPath, { force: true }).catch(() => {});
       throw error;
     } finally {
       await fileHandle?.close().catch(() => {});
@@ -461,4 +473,5 @@ export {
   type TraceStep,
   type TraceTimeline
 } from "./replay.js";
+export { type TraceRecord, TraceTailer, type TraceTailerOptions } from "./tailer.js";
 export { matchesFilter, type TraceFilter, type TraceQueryOptions } from "./types.js";

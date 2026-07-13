@@ -30,6 +30,7 @@
     "@agentarena/report": "workspace:*",
     "@agentarena/runner": "workspace:*",
     "@agentarena/taskpacks": "workspace:*",
+    "@agentarena/trace": "workspace:*",
     "yaml": "2.9.0"
   },
   "scripts": {

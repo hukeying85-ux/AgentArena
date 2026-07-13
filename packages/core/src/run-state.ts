@@ -8,6 +8,7 @@
 
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { writeJsonAtomic } from "./atomic-write.js";
 import { logger } from "./logging.js";
 
 export type UiRunStateName = "idle" | "running" | "done" | "error" | "cancelled" | "cancelling";
@@ -20,6 +21,14 @@ export interface UiRunStateLogEntry {
   agentId?: string;
   variantId?: string;
   displayLabel?: string;
+}
+
+export interface UiRunProgressSnapshot {
+  total: number;
+  finished: number;
+  running: string[];
+  failed: number;
+  lastActivityByAgent: Record<string, number>;
 }
 
 export interface UiRunState {
@@ -35,6 +44,7 @@ export interface UiRunState {
   currentAgentId?: string;
   currentVariantId?: string;
   currentDisplayLabel?: string;
+  snapshot?: UiRunProgressSnapshot;
   error?: string;
 }
 
@@ -56,7 +66,6 @@ export async function saveRunState(cwd: string, state: UiRunState): Promise<void
   await fs.mkdir(dir, { recursive: true });
 
   const filePath = getStateFilePath(cwd);
-  const tmpPath = `${filePath}.tmp`;
 
   // Only persist essential fields (skip result to avoid huge files)
   const persisted: UiRunState = {
@@ -72,21 +81,11 @@ export async function saveRunState(cwd: string, state: UiRunState): Promise<void
     currentAgentId: state.currentAgentId,
     currentVariantId: state.currentVariantId,
     currentDisplayLabel: state.currentDisplayLabel,
+    snapshot: state.snapshot,
     error: state.error,
   };
 
-  try {
-    await fs.writeFile(tmpPath, JSON.stringify(persisted, null, 2), "utf8");
-    await fs.rename(tmpPath, filePath);
-  } catch (err) {
-    // Best-effort persistence — don't crash the server on write failure, but
-    // surface the failure via structured log so operators can detect a disk-full
-    // or permission problem instead of silently losing recovery state.
-    logger.warn("core", "run_state.persist_failed", `Failed to persist run state: ${err instanceof Error ? err.message : String(err)}`, {
-      error: err
-    });
-    try { await fs.unlink(tmpPath); } catch { /* best-effort: cleanup partial write */ }
-  }
+  await writeJsonAtomic(filePath, persisted);
 }
 
 const VALID_STATES = new Set<UiRunStateName>(["idle", "running", "done", "error", "cancelled", "cancelling"]);
@@ -103,6 +102,31 @@ function stripDangerousKeys(key: string, value: unknown): unknown {
     return undefined;
   }
   return value;
+}
+
+/**
+ * Defense-in-depth recursive cleaner. The reviver above drops `__proto__`/
+ * `constructor`/`prototype` at parse time, but a belt-and-suspenders walk after
+ * parsing guarantees no dangerous key survives (reviver ordering edge cases,
+ * duplicate keys, etc.). Operates in place on the freshly-parsed object.
+ */
+function sanitizeDangerousKeys(value: unknown): void {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      sanitizeDangerousKeys(item);
+    }
+    return;
+  }
+  if (value !== null && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    for (const key of Object.keys(record)) {
+      if (FORBIDDEN_KEYS.has(key)) {
+        delete record[key];
+      } else {
+        sanitizeDangerousKeys(record[key]);
+      }
+    }
+  }
 }
 
 function isOptionalString(value: unknown): value is string | undefined {
@@ -129,6 +153,30 @@ function validateLogEntry(value: unknown): UiRunStateLogEntry | null {
   return result;
 }
 
+function validateProgressSnapshot(value: unknown): UiRunProgressSnapshot | null {
+  if (!value || typeof value !== "object") return null;
+  const snapshot = value as Record<string, unknown>;
+  if (typeof snapshot.total !== "number" || !Number.isFinite(snapshot.total)) return null;
+  if (typeof snapshot.finished !== "number" || !Number.isFinite(snapshot.finished)) return null;
+  if (typeof snapshot.failed !== "number" || !Number.isFinite(snapshot.failed)) return null;
+  if (!Array.isArray(snapshot.running) || !snapshot.running.every((item) => typeof item === "string")) return null;
+  if (!snapshot.lastActivityByAgent || typeof snapshot.lastActivityByAgent !== "object") return null;
+
+  const lastActivityByAgent: Record<string, number> = {};
+  for (const [key, timestamp] of Object.entries(snapshot.lastActivityByAgent as Record<string, unknown>)) {
+    if (typeof timestamp !== "number" || !Number.isFinite(timestamp)) return null;
+    lastActivityByAgent[key] = timestamp;
+  }
+
+  return {
+    total: snapshot.total,
+    finished: snapshot.finished,
+    running: snapshot.running,
+    failed: snapshot.failed,
+    lastActivityByAgent
+  };
+}
+
 /**
  * Load persisted run state from disk.
  * Returns null if file doesn't exist, is corrupted, or fails validation.
@@ -153,6 +201,8 @@ export async function loadRunState(cwd: string): Promise<UiRunState | null> {
   let parsed: unknown;
   try {
     parsed = JSON.parse(content, stripDangerousKeys);
+    // Belt-and-suspenders: strip any dangerous keys the reviver may have missed.
+    sanitizeDangerousKeys(parsed);
   } catch (err) {
     logger.warn("core", "run_state.parse_failed", `Failed to parse run state at ${filePath}: ${err instanceof Error ? err.message : String(err)}`);
     return null;
@@ -220,6 +270,10 @@ export async function loadRunState(cwd: string): Promise<UiRunState | null> {
   if (obj.currentAgentId !== undefined) result.currentAgentId = obj.currentAgentId as string;
   if (obj.currentVariantId !== undefined) result.currentVariantId = obj.currentVariantId as string;
   if (obj.currentDisplayLabel !== undefined) result.currentDisplayLabel = obj.currentDisplayLabel as string;
+  if (obj.snapshot !== undefined) {
+    const snapshot = validateProgressSnapshot(obj.snapshot);
+    if (snapshot) result.snapshot = snapshot;
+  }
   if (obj.error !== undefined) result.error = obj.error as string;
   return result;
 }

@@ -19,6 +19,7 @@ import { type BenchmarkProgressEvent, checkTaskCompatibility, runBenchmark } fro
 import { loadTaskPack } from "@agentarena/taskpacks";
 import type { ParsedArgs } from "../args.js";
 import { buildBenchmarkOutputSummary } from "../output.js";
+import { type AgentStatus, createStatusRegion, shouldUseTty } from "../ui/status-region.js";
 import {
   normalizeCliSelections,
   resolveReportLocale,
@@ -110,7 +111,7 @@ function printBenchmarkOutput(
 
   console.log(`\nPreflight Results:`);
   for (const preflight of scoredBenchmark.preflights) {
-    const statusIcon = preflight.status === "ready" ? "✓" : preflight.status === "unverified" ? "?" : "✗";
+    const statusIcon = preflight.status === "ready" ? "OK" : preflight.status === "unverified" ? "?" : "BLOCKED";
     console.log(`  ${statusIcon} ${preflight.displayLabel}: ${preflight.status} - ${preflight.summary}`);
     if (preflight.resolvedRuntime?.effectiveModel) console.log(`    Model: ${preflight.resolvedRuntime.effectiveModel}`);
     if (preflight.resolvedRuntime?.effectiveAgentVersion) console.log(`    Version: ${preflight.resolvedRuntime.effectiveAgentVersion}`);
@@ -118,7 +119,7 @@ function printBenchmarkOutput(
 
   console.log(`\nBenchmark Results:`);
   for (const result of scoredBenchmark.results) {
-    const statusIcon = result.status === "success" ? "✓" : "✗";
+    const statusIcon = result.status === "success" ? "OK" : "FAIL";
     console.log(`  ${statusIcon} ${result.displayLabel}: ${result.status} (${formatDuration(result.durationMs)})`);
     console.log(`    status=${result.status}`);
     console.log(`    Score: ${formatCompositeScoreValue(result)}`);
@@ -149,15 +150,16 @@ function printBenchmarkOutput(
   const topRec = decisionReport.recommendations.find((r) => r.recommendation === "recommended");
   if (topRec) {
     const copy = getReportCopy(reportLocale);
-    console.log(`\n${"═".repeat(60)}`);
+    console.log(`
+${"-".repeat(60)}`);
     console.log(`📋 ${copy.decisionReportTitle}`);
-    console.log(`${"═".repeat(60)}`);
+    console.log(`${"-".repeat(60)}`);
     console.log(`\n🏆 ${copy.recommendationLabel}: ${topRec.displayLabel}`);
     console.log(`   - ${copy.successRateLabel}: ${(topRec.successRate * 100).toFixed(0)}%`);
     console.log(`   - ${copy.averageCostLabel}: $${topRec.avgCostPerRun.toFixed(2)}/${copy.perRun}`);
     console.log(`   - ${copy.confidenceLabel}: ${topRec.confidence}`);
     console.log(`\n📄 ${copy.fullReportLabel}: ${decisionReportPath}`);
-    console.log(`${"═".repeat(60)}`);
+    console.log(`${"-".repeat(60)}`);
   }
 
   console.log(`\nOutput Files:`);
@@ -251,11 +253,12 @@ export async function runBenchmarkCommand(
 
   const selections = normalizeCliSelections(parsed);
   const repeatCount = parsed.repeat ?? 1;
+  const jsonLineOutput = parsed.format === "json" || parsed.jsonEvents;
 
   // In JSON output mode, redirect all structured logs to stderr so stdout
   // contains only the final JSON result. This allows piping to jq or other
   // JSON parsers without log lines breaking the parse.
-  if (parsed.format === "json") {
+  if (jsonLineOutput) {
     setJsonOutputMode(true);
   }
 
@@ -292,7 +295,7 @@ export async function runBenchmarkCommand(
   if (parsed.agentTimeout !== undefined) {
     process.env.AGENTARENA_AGENT_TIMEOUT_MS = String(parsed.agentTimeout);
     process.env.AGENTARENA_AGENT_EXECUTE_TIMEOUT_MS = String(parsed.agentTimeout + 60_000);
-    if (parsed.format !== "json") {
+    if (!jsonLineOutput) {
       console.log(`Per-agent timeout: ${parsed.agentTimeout}ms`);
     }
   }
@@ -303,7 +306,7 @@ export async function runBenchmarkCommand(
     const runNumber = repeatIndex + 1;
     const runStartMs = Date.now();
 
-    if (parsed.format !== "json") {
+    if (!jsonLineOutput) {
       console.log(`\nStarting AgentArena benchmark...`);
       if (repeatCount > 1) {
         console.log(`Repeat: ${runNumber}/${repeatCount}`);
@@ -362,7 +365,7 @@ export async function runBenchmarkCommand(
           ),
         );
       } else {
-        console.log("Dry run — resolved plan (no agents executed):");
+        console.log("Dry run - resolved plan (no agents executed):");
         console.log(`  Output:       ${resolvedOutput}`);
         if (resumeFromPath) {
           console.log(`  Resume from:  ${resumeFromPath}`);
@@ -382,14 +385,14 @@ export async function runBenchmarkCommand(
 
         // Show compatibility status
         if (compatibilityResult) {
-          const statusIcon = { compatible: "✅", warning: "⚠️", incompatible: "❌" }[compatibilityResult.status] ?? "🔍";
+          const statusIcon = { compatible: "OK", warning: "WARN", incompatible: "FAIL" }[compatibilityResult.status] ?? "INFO";
           console.log(`\n${statusIcon} Task compatibility: ${compatibilityResult.status}`);
           console.log(`   ${compatibilityResult.summary}`);
           const failedChecks = compatibilityResult.checks.filter((c) => c.status !== "pass");
           if (failedChecks.length > 0) {
             console.log("   Issues:");
             for (const check of failedChecks.slice(0, 5)) {
-              const icon = check.status === "fail" ? "  ✗" : "  ⚠";
+              const icon = check.status === "fail" ? "  FAIL" : "  WARN";
               console.log(`${icon} ${check.label}: ${check.message}`);
               if (check.fix) {
                 console.log(`     Fix: ${check.fix}`);
@@ -411,6 +414,55 @@ export async function runBenchmarkCommand(
       const m = Math.floor(sec / 60);
       const s = sec % 60;
       return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+    }
+
+    // ── TTY live status region (only when stderr is a TTY and not JSON mode) ──
+    const useTty = shouldUseTty(jsonLineOutput);
+    const statusRegion = createStatusRegion(jsonLineOutput);
+    const agentStatuses = new Map<string, AgentStatus>();
+
+    /** Create a progress handler: TTY uses StatusRegion, non-TTY uses line output */
+    function createProgressHandler(): (event: BenchmarkProgressEvent) => void {
+      if (useTty) {
+        return (event: BenchmarkProgressEvent) => {
+          // Track per-agent status for the TUI
+          if (event.phase === "agent-start" && event.variantId) {
+            agentStatuses.set(event.variantId, {
+              variantId: event.variantId,
+              displayLabel: event.displayLabel ?? event.agentId ?? event.variantId,
+              state: "running",
+              elapsedMs: 0,
+              currentActivity: event.message
+            });
+          }
+          if (event.phase === "agent-finish" && event.variantId) {
+            const existing = agentStatuses.get(event.variantId);
+            if (existing) {
+              existing.state = event.message?.includes("failed") ? "failed" : "success";
+              existing.elapsedMs = Date.now() - runStartMs;
+            }
+          }
+          if (event.phase === "agent-activity" && event.variantId) {
+            const existing = agentStatuses.get(event.variantId);
+            if (existing) existing.currentActivity = event.message;
+          }
+          // Build snapshot for the region
+          const snap = event.snapshot;
+          const header = {
+            total: snap?.total ?? agentStatuses.size,
+            finished: snap?.finished ?? 0,
+            running: snap?.running?.length ?? [...agentStatuses.values()].filter(s => s.state === "running").length,
+            failed: snap?.failed ?? [...agentStatuses.values()].filter(s => s.state === "failed").length,
+            etaText: undefined as string | undefined
+          };
+          statusRegion.update(header, [...agentStatuses.values()]);
+        };
+      }
+      // Non-TTY: simple line output
+      return (event: BenchmarkProgressEvent) => {
+        const prefix = event.displayLabel ? `[${event.displayLabel}] ` : "";
+        process.stderr.write(`  [${elapsed()}] ${prefix}${event.message}\n`);
+      };
     }
 
     let cancelled = false;
@@ -451,15 +503,28 @@ export async function runBenchmarkCommand(
           tokenBudget: parsed.tokenBudget,
           debug: parsed.debug,
           cancellation,
+          enableActivityEvents: parsed.jsonEvents || useTty,
           onProgress:
             parsed.format === "json"
               ? undefined
-              : (event: BenchmarkProgressEvent) => {
-                  const prefix = event.displayLabel
-                    ? `[${event.displayLabel}] `
-                    : "";
-                  process.stderr.write(`  [${elapsed()}] ${prefix}${event.message}\n`);
-                },
+              : parsed.jsonEvents
+                ? (event: BenchmarkProgressEvent) => {
+                    // NDJSON mode: emit each event as one JSON line on stdout.
+                    process.stdout.write(JSON.stringify({
+                      type: event.phase === "agent-activity" ? "activity" : "progress",
+                      phase: event.phase,
+                      message: event.message,
+                      agentId: event.agentId,
+                      variantId: event.variantId,
+                      displayLabel: event.displayLabel,
+                      line: event.line,
+                      seq: event.seq,
+                      stream: event.stream,
+                      snapshot: event.snapshot,
+                      ts: Date.now()
+                    }) + "\n");
+                  }
+                : createProgressHandler(),
         });
       } finally {
         if (parsed.probeAuth && parsed.probeTimeout !== undefined) {
@@ -472,6 +537,8 @@ export async function runBenchmarkCommand(
       }
     } finally {
       process.removeListener("SIGINT", sigintHandler);
+      // Clean up the TTY status region so the terminal is left clean
+      statusRegion.destroy();
     }
 
     const report = await writeReport(benchmark, { locale: reportLocale });
@@ -520,7 +587,7 @@ export async function runBenchmarkCommand(
         varianceReportText = formatVarianceReport(varianceReport);
 
         // Multi-run trend: aggregate the prior comparable runs together with the
-        // current run (already in memory — no extra scan) and write a trend.md
+        // current run (already in memory - no extra scan) and write a trend.md
         // artifact summarizing per-agent performance across runs.
         try {
           const trendComparison = aggregateMultiRuns(comparisonRuns);
@@ -537,9 +604,10 @@ export async function runBenchmarkCommand(
     }
 
     const outputSummary = buildBenchmarkOutputSummary(benchmark, report);
-    if (parsed.format === "json") {
+    if (parsed.format === "json" || parsed.jsonEvents) {
       jsonSummaries.push(outputSummary);
-    } else {
+    }
+    if (parsed.format !== "json" && !parsed.jsonEvents) {
       printBenchmarkOutput(scoredBenchmark, report, decisionReport, decisionReportPath, csvPath, trendReportPath, varianceReportText, reportLocale);
     }
 
@@ -563,10 +631,30 @@ export async function runBenchmarkCommand(
     );
   }
 
+  // NDJSON mode: emit final summary as the last line on stdout.
+  if (parsed.jsonEvents) {
+    process.stdout.write(JSON.stringify({
+      type: "summary",
+      repeat: repeatCount,
+      runs: jsonSummaries,
+      ts: Date.now()
+    }) + "\n");
+  }
+
   // Auto-cleanup old runs (keep most recent 50 by default)
   try {
     const { runCleanup } = await import("./cleanup.js");
-    await runCleanup({ ...parsed, maxRuns: parsed.maxRuns ?? 50 });
+    if (jsonLineOutput) {
+      const originalConsoleLog = console.log;
+      console.log = (...args: unknown[]) => console.error(...args);
+      try {
+        await runCleanup({ ...parsed, maxRuns: parsed.maxRuns ?? 50 });
+      } finally {
+        console.log = originalConsoleLog;
+      }
+    } else {
+      await runCleanup({ ...parsed, maxRuns: parsed.maxRuns ?? 50 });
+    }
   } catch (cleanupError) {
     console.warn(`[agentarena] Auto-cleanup failed: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`);
   }

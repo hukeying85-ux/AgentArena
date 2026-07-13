@@ -55,6 +55,7 @@ export interface BenchmarkOptions {
   cleanupWorkspaces?: boolean;
   resumeFrom?: string;
   builtinReposRoot?: string;
+  userRepoRoot?: string;
   cancellation?: BenchmarkCancellation;
   onProgress?: (event: BenchmarkProgressEvent) => void | Promise<void>;
   scoreMode?: ScoreMode;
@@ -152,10 +153,24 @@ function isAgentRunResult(value: unknown): value is AgentRunResult {
   );
 }
 
+class AgentResultPersistenceError extends Error {
+  constructor(result: AgentRunResult, cause: unknown) {
+    super(
+      `Failed to persist resumable result for ${result.displayLabel}: ${cause instanceof Error ? cause.message : String(cause)}`,
+      { cause }
+    );
+    this.name = "AgentResultPersistenceError";
+  }
+}
+
 async function writeAgentResult(outputPath: string, result: AgentRunResult): Promise<void> {
   const filePath = agentResultPath(outputPath, result.variantId);
   await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.writeFile(filePath, JSON.stringify(result, null, 2), "utf8");
+  try {
+    await writeJsonAtomic(filePath, result);
+  } catch (error) {
+    throw new AgentResultPersistenceError(result, error);
+  }
 }
 
 async function loadResumeState(
@@ -201,18 +216,42 @@ async function loadResumeState(
       if (!entry.isDirectory()) {
         continue;
       }
+      const resultPath = path.join(agentsDir, entry.name, "result.json");
+      let rawResult: string;
       try {
-        const result = JSON.parse(
-          await fs.readFile(path.join(agentsDir, entry.name, "result.json"), "utf8"),
-        ) as unknown;
-        if (isAgentRunResult(result) && result.status !== "cancelled") {
-          results.set(result.variantId, result);
+        rawResult = await fs.readFile(resultPath, "utf8");
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
+          continue;
         }
-      } catch {
-        // Missing or malformed per-agent result files are treated as not resumable.
+        throw new Error(
+          `Cannot resume agent "${entry.name}": result file could not be read. Refusing to rerun completed work silently.`,
+          { cause: error }
+        );
+      }
+
+      let result: unknown;
+      try {
+        result = JSON.parse(rawResult) as unknown;
+      } catch (error) {
+        throw new Error(
+          `Cannot resume agent "${entry.name}": result file is corrupt or malformed. Refusing to rerun completed work silently.`,
+          { cause: error }
+        );
+      }
+      if (!isAgentRunResult(result) || result.variantId !== entry.name) {
+        throw new Error(
+          `Cannot resume agent "${entry.name}": result file has an invalid shape or mismatched variant id. Refusing to rerun completed work silently.`
+        );
+      }
+      if (result.status !== "cancelled") {
+        results.set(result.variantId, result);
       }
     }
-  } catch {
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException | undefined)?.code !== "ENOENT") {
+      throw error;
+    }
     // No per-agent result directory yet.
   }
 
@@ -500,10 +539,14 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
   }
 
   // Step 4: Execute agents concurrently
+  let persistenceFailure: AgentResultPersistenceError | undefined;
   const { results: rawResults, aborted } = await mapWithConcurrency(
     preflights,
     agentConcurrency(options),
     async (preflight) => {
+      if (persistenceFailure) {
+        throw persistenceFailure;
+      }
       throwIfAborted(cancellation?.signal, createCancellationSummary("agent scheduling"));
       const resumedResult = resumeResults.get(preflight.variantId);
       if (resumedResult) {
@@ -597,13 +640,11 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
 
       try {
         await writeAgentResult(outputPath, result);
-      } catch (persistError) {
-        logger.warn(
-          "runner",
-          "resume.result_persist_failed",
-          `Failed to persist resumable result for ${result.displayLabel}: ${persistError instanceof Error ? persistError.message : String(persistError)}`,
-          { error: persistError }
-        );
+      } catch (error) {
+        if (error instanceof AgentResultPersistenceError) {
+          persistenceFailure ??= error;
+        }
+        throw error;
       }
 
       await emitProgress({
@@ -623,6 +664,11 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
       return result;
     }
   );
+
+  const fatalPersistenceError = persistenceFailure ?? rawResults.find((result) => result instanceof AgentResultPersistenceError);
+  if (fatalPersistenceError instanceof AgentResultPersistenceError) {
+    throw fatalPersistenceError;
+  }
 
   // Step 5: Collect results
   const results = collectResults(rawResults, preflights, outputPath, workspaceRootPath);

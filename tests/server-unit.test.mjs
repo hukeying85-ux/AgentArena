@@ -64,6 +64,16 @@ test("checkAuthHeader: non-localhost requires token for ALL API paths", () => {
   assert.equal(checkAuthHeader(url, "GET", false, token, `Bearer ${token}`), true);
 });
 
+test("checkAuthHeader: run stream accepts query token for EventSource", () => {
+  const token = "my-auth-token-1234";
+  const streamUrl = new URL(`http://192.168.1.100:3000/api/run-stream?token=${token}`);
+  const adaptersUrl = new URL(`http://192.168.1.100:3000/api/adapters?token=${token}`);
+
+  assert.equal(checkAuthHeader(streamUrl, "GET", false, token, undefined), true);
+  assert.equal(checkAuthHeader(adaptersUrl, "GET", false, token, undefined), false);
+  assert.equal(checkAuthHeader(streamUrl, "GET", false, token, "Bearer wrong-token"), false);
+});
+
 test("checkAuthHeader: wrong token is rejected", () => {
   const url = new URL("http://localhost:3000/api/run");
   assert.equal(checkAuthHeader(url, "POST", true, "correct-token", "Bearer wrong-token"), false);

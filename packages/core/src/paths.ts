@@ -49,7 +49,7 @@ export async function isPathInsideWorkspace(workspacePath: string, targetPath: s
     const realRelativePath = path.relative(realWorkspace, realTarget);
     return !realRelativePath.startsWith("..") && !path.isAbsolute(realRelativePath);
   } catch (error: unknown) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+    if (error instanceof Error && (error as NodeJS.ErrnoException).code === "ENOENT") {
       let current = resolvedTarget;
       while (current !== resolvedWorkspace) {
         const parent = path.dirname(current);
@@ -64,7 +64,7 @@ export async function isPathInsideWorkspace(workspacePath: string, targetPath: s
           const relativeFromParent = path.relative(parent, resolvedTarget);
           return !relativeFromParent.startsWith("..") && !path.isAbsolute(relativeFromParent);
         } catch (parentError: unknown) {
-          if ((parentError as NodeJS.ErrnoException).code !== "ENOENT") {
+          if (parentError instanceof Error && (parentError as NodeJS.ErrnoException).code !== "ENOENT") {
             return false;
           }
           current = parent;
