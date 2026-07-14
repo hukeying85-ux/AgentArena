@@ -35,6 +35,19 @@ AgentArena classifies adapters by **support tier** and exposes a capability matr
 | `augment` | experimental | Augment CLI JSON events | available | available | partial |
 | `windsurf` | blocked | Windsurf CLI (auth stability issues) | unavailable | unavailable | minimal |
 
+## Local Configuration Modes
+
+`codex` currently uses the official local CLI configuration. An empty model or reasoning override means “use the active local configuration at run time.” AgentArena respects `CODEX_HOME` when it is set and does not create or rewrite a personal Codex configuration.
+
+`claude-code` has two Profile-driven modes:
+
+- The built-in `official` Profile uses the current local Claude Code login and personal configuration, including `CLAUDE_CONFIG_DIR` when set. AgentArena does not create replacement workspace settings for this mode.
+- Any non-official Profile runs with a unique temporary `CLAUDE_CONFIG_DIR`, the Provider address/model/secret stored by AgentArena, isolated settings sources, and strict MCP loading. The auth probe and the real run use the same isolation policy. Provider secrets are passed only through the child-process environment and are not written into temporary launcher scripts. Temporary configuration is removed after success, failure, timeout, or cancellation.
+
+Third-party Claude workspaces keep project instruction files such as `AGENTS.md` and `CLAUDE.md`, but remove root `.claude/`, `.codex/`, and `.mcp.json` tool configuration before the Git baseline is created. If the installed Claude Code version cannot enforce isolated settings and strict MCP configuration, the third-party Profile is blocked instead of falling back to personal configuration.
+
+Claude Code also requires explicit permission for unattended repository changes. Start AgentArena with `AGENTARENA_SKIP_PERMISSIONS=1` (or `true`) when you intend to run Claude tasks. Without this opt-in, preflight is blocked before the agent starts instead of waiting indefinitely for an interactive approval prompt. The opt-in applies to both official and isolated Provider modes and grants Claude Code the permissions of the local operating-system account.
+
 ## Capability Definitions
 
 ### Token Availability

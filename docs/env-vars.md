@@ -54,6 +54,7 @@ Default values are in parentheses. All are optional.
 | Variable | Default | File | Description |
 |----------|---------|------|-------------|
 | `AGENTARENA_CODEX_SANDBOX` | `danger-full-access` on Windows, `workspace-write` elsewhere | `packages/adapters/src/codex-adapter.ts` | Codex CLI sandbox mode (`read-only`, `workspace-write`, or `danger-full-access`) |
+| `AGENTARENA_SKIP_PERMISSIONS` | unset | `packages/adapters/src/transport.ts` | Explicitly allow unattended Claude Code tasks by passing its permission-bypass flag (`1` or `true`). Without it, Claude runs are blocked before execution. |
 
 ## Claude Provider Profile Storage
 

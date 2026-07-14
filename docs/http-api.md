@@ -98,6 +98,13 @@ Run a preflight check for a single agent selection. Verifies authentication and 
 }
 ```
 
+`providerProfileId` 同时决定 Claude Code 的本地配置模式：
+
+- 省略该字段或使用 `claude-official`：读取当前本地 Claude Code 登录和个人配置。
+- 使用非官方 Profile ID：使用 AgentArena 保存的 Provider 信息和独立临时配置，不读取当前官方登录、个人规则、插件或 MCP。
+
+该模式由 Profile 类型自动确定，不存在额外的模式字段。第三方 Profile 的鉴权检查和正式运行使用同一隔离策略；不支持隔离所需命令参数的 Claude Code 版本会返回阻止状态。
+
 **Response 200:** Preflight result object with `status` ("ready" | "unverified" | "failed"), `summary`, and `resolvedRuntime`.
 
 **Response 400:** `{ "error": "Missing baseAgentId." }`

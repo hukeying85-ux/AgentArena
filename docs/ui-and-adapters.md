@@ -19,6 +19,15 @@
 - 本地模式只接受当前仓库或随程序提供的内置仓库，不接受任务包指定的外部仓库网址。
 - 任务包不能通过 `envAllowList` 继承本机的 Git 登录辅助设置。确有需要时，只能由操作者通过 `AGENTARENA_EXTRA_ENV` 明确允许。
 
+## Codex / Claude Code 本地配置边界
+
+- Codex 的模型和推理等级留空时，运行会直接使用当时的本地登录与配置；如果设置了 `CODEX_HOME`，检查和正式运行都会使用该目录。页面里检测到的默认值只用于说明，不会自动固定成一次运行覆盖。
+- Claude Code 内置官方 Profile 直接使用当前本地登录和个人配置；如果设置了 `CLAUDE_CONFIG_DIR`，正式运行会沿用它。AgentArena 不主动修改个人配置，但 Claude Code 自身仍可能正常更新缓存、历史或登录状态。
+- Claude Code 第三方 Profile 使用每次新建的临时配置目录，不读取当前官方登录、个人规则、插件或 MCP。连接测试与正式运行使用同一隔离规则，结束后清理临时配置。
+- 第三方临时仓库仍保留 `AGENTS.md`、`CLAUDE.md`，但在建立 Git 基线前移除根目录 `.claude/`、`.codex/` 和 `.mcp.json`，因此隔离动作不会被算成智能体修改。
+- Claude Code 的官方与第三方模式都要求操作者在启动 AgentArena 时明确设置 `AGENTARENA_SKIP_PERMISSIONS=1`，才允许无人值守修改临时仓库；未设置时页面和正式预检都会在运行前阻止并说明原因。
+- Provider 的 `extraEnv` 不能覆盖隔离目录、系统启动路径、专用地址、模型或密钥字段。已有 Profile 如果包含这些冲突字段，会在修正前被阻止运行。
+
 ## `doctor` 与 `preflight`：失败语义
 
 二者都会调用适配器的 **`preflightAdapters`**（UI 中 `/api/preflight` 同理），带 `--probe-auth` 时会尝试探测登录态。

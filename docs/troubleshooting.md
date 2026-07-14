@@ -43,6 +43,12 @@ pnpm install --no-strict-peer-dependencies
 
 ## Agent Authentication
 
+### "Claude Code unattended permissions are not enabled"
+
+AgentArena 不会默认替 Claude Code 跳过权限确认，因为该选项会让 Claude Code 以当前本机账户权限执行命令。需要运行会修改临时仓库的 Claude 任务时，请在启动 AgentArena 前设置 `AGENTARENA_SKIP_PERMISSIONS=1`（或 `true`），然后重新检测。
+
+未设置时，官方模式和第三方 Provider 模式都会在运行前明确阻止，不会继续等待无法交互的授权提示。只对可信任务包和仓库开启该选项。
+
 ### "Agent not ready" or "Authentication failed"
 
 This is the most common issue. Each agent CLI has its own authentication method.
@@ -74,6 +80,18 @@ The auth probe took too long. This usually means the agent CLI is hanging on an 
 codex --help
 claude --help
 ```
+
+### "This Claude Code version cannot guarantee isolated third-party Provider execution"
+
+第三方 Provider 运行需要 Claude Code 支持隔离设置来源和严格 MCP 配置。AgentArena 不会为了兼容旧版本而退回读取个人配置。
+
+**处理：**升级 Claude Code，确认 `claude --help` 中包含 `--setting-sources`、`--strict-mcp-config` 和 `--no-session-persistence`，然后重新执行连接测试。
+
+### "extraEnv cannot override reserved runtime fields"
+
+Provider 的附加环境中包含会破坏隔离的字段，例如 `CLAUDE_CONFIG_DIR`、`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_BASE_URL`、系统路径或主目录字段。
+
+**处理：**删除错误信息列出的字段。地址、模型和密钥使用 Provider 页面中的专用输入项填写；隔离目录由 AgentArena 自动管理。
 
 ## Benchmark Runs
 

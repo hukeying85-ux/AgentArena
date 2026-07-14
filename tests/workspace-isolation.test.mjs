@@ -3,8 +3,8 @@ import { execFile } from "node:child_process";
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { promisify } from "node:util";
 import test from "node:test";
+import { promisify } from "node:util";
 import { setupWorkspaceAndPrechecks } from "../packages/runner/dist/workspace-operations.js";
 
 const execFileAsync = promisify(execFile);

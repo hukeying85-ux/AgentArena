@@ -15,15 +15,15 @@ export {
   supportsWindowsCredentialManager,
   writeClaudeWorkspaceSettings
 } from "./claude-provider-profiles.js";
+export type {
+  ClaudeRuntimeMode,
+  PrepareClaudeRuntimeEnvironmentOptions,
+  PreparedClaudeRuntimeEnvironment
+} from "./claude-runtime-environment.js";
 export {
   CLAUDE_ISOLATION_ARGS,
   claudeIsolationArgsSupported,
   prepareClaudeRuntimeEnvironment
-} from "./claude-runtime-environment.js";
-export type {
-  ClaudeRuntimeMode,
-  PreparedClaudeRuntimeEnvironment,
-  PrepareClaudeRuntimeEnvironmentOptions
 } from "./claude-runtime-environment.js";
 export type { InstallGuide } from "./install-guides.js";
 export { getInstallGuide, INSTALL_GUIDES, listInstallGuides } from "./install-guides.js";
