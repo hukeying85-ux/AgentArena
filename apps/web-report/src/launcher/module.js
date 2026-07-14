@@ -37,13 +37,13 @@ export function isCommunityTaskPack(taskPack) {
 export function claudeRuntimeModeDescription(profile, localText) {
   if ((profile?.kind ?? "official") === "official") {
     return localText(
-      "使用当前本地 Claude Code 登录和个人配置。AgentArena 不主动修改这些配置，但 Claude Code 自身可能正常更新缓存、历史或登录状态。",
-      "Uses the current local Claude Code login and personal configuration. AgentArena does not modify it, although Claude Code may normally update caches, history, or login state."
+      "使用当前本地 Claude Code 登录和个人配置。AgentArena 不主动修改这些配置，但 Claude Code 自身可能正常更新缓存、历史或登录状态。无人值守修改临时仓库前，需在启动 AgentArena 时设置 AGENTARENA_SKIP_PERMISSIONS=1；未设置时会在运行前明确阻止。",
+      "Uses the current local Claude Code login and personal configuration. AgentArena does not modify it, although Claude Code may normally update caches, history, or login state. Before unattended work can edit the temporary repository, start AgentArena with AGENTARENA_SKIP_PERMISSIONS=1; otherwise the run is explicitly blocked before it starts."
     );
   }
   return localText(
-    "使用独立临时配置，不读取当前官方登录、个人规则、插件或 MCP。项目中的 AGENTS.md 和 CLAUDE.md 仍会保留；连接测试与正式运行使用同一隔离规则。",
-    "Uses an isolated temporary configuration without reading the current official login, personal rules, plugins, or MCP. Project AGENTS.md and CLAUDE.md remain available, and connection tests use the same isolation policy as real runs."
+    "使用独立临时配置，不读取当前官方登录、个人规则、插件或 MCP。项目中的 AGENTS.md 和 CLAUDE.md 仍会保留；连接测试与正式运行使用同一隔离规则。无人值守修改临时仓库前，需在启动 AgentArena 时设置 AGENTARENA_SKIP_PERMISSIONS=1；未设置时会在运行前明确阻止。",
+    "Uses an isolated temporary configuration without reading the current official login, personal rules, plugins, or MCP. Project AGENTS.md and CLAUDE.md remain available, and connection tests use the same isolation policy as real runs. Before unattended work can edit the temporary repository, start AgentArena with AGENTARENA_SKIP_PERMISSIONS=1; otherwise the run is explicitly blocked before it starts."
   );
 }
 
