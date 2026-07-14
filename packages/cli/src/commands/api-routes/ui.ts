@@ -131,7 +131,7 @@ export async function handleQuickPreflight(rawBody: string): Promise<ApiResponse
         });
 
     let overallStatus: "ready" | "warning" | "blocked" = "ready";
-    if (!preflight || preflight.status === "missing") {
+    if (!preflight || preflight.status === "missing" || preflight.status === "blocked") {
       overallStatus = "blocked";
     } else if (!authResult.configured) {
       overallStatus = "warning";

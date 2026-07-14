@@ -122,6 +122,7 @@ test("third-party Claude preflight and execution use isolated config without tou
     const originalConfigDir = process.env.CLAUDE_CONFIG_DIR;
     const originalOauth = process.env.CLAUDE_CODE_OAUTH_TOKEN;
     const originalAuthToken = process.env.ANTHROPIC_AUTH_TOKEN;
+    const originalSkipPermissions = process.env.AGENTARENA_SKIP_PERMISSIONS;
 
     await mkdir(path.dirname(settingsPath), { recursive: true });
     await mkdir(workspacePath, { recursive: true });
@@ -135,6 +136,7 @@ test("third-party Claude preflight and execution use isolated config without tou
       process.env.CLAUDE_CONFIG_DIR = personalConfig;
       process.env.CLAUDE_CODE_OAUTH_TOKEN = "personal-oauth";
       process.env.ANTHROPIC_AUTH_TOKEN = "personal-token";
+      process.env.AGENTARENA_SKIP_PERMISSIONS = "1";
       process.chdir(sourcePath);
 
       const adapter = getAdapter("claude-code");
@@ -198,6 +200,8 @@ test("third-party Claude preflight and execution use isolated config without tou
       else process.env.CLAUDE_CODE_OAUTH_TOKEN = originalOauth;
       if (originalAuthToken === undefined) delete process.env.ANTHROPIC_AUTH_TOKEN;
       else process.env.ANTHROPIC_AUTH_TOKEN = originalAuthToken;
+      if (originalSkipPermissions === undefined) delete process.env.AGENTARENA_SKIP_PERMISSIONS;
+      else process.env.AGENTARENA_SKIP_PERMISSIONS = originalSkipPermissions;
     }
   });
 });
@@ -211,6 +215,7 @@ test("official Claude execution uses the active local configuration without gene
   const originalCapture = process.env.AGENTARENA_CLAUDE_CAPTURE;
   const originalConfigDir = process.env.CLAUDE_CONFIG_DIR;
   const originalOauth = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  const originalSkipPermissions = process.env.AGENTARENA_SKIP_PERMISSIONS;
 
   try {
     await mkdir(workspacePath, { recursive: true });
@@ -220,6 +225,7 @@ test("official Claude execution uses the active local configuration without gene
     process.env.AGENTARENA_CLAUDE_CAPTURE = capturePath;
     process.env.CLAUDE_CONFIG_DIR = personalConfig;
     process.env.CLAUDE_CODE_OAUTH_TOKEN = "personal-oauth";
+    process.env.AGENTARENA_SKIP_PERMISSIONS = "1";
     const executionEnvironment = { ...process.env };
     delete executionEnvironment.CLAUDE_CONFIG_DIR;
     delete executionEnvironment.CLAUDE_CODE_OAUTH_TOKEN;
@@ -267,6 +273,8 @@ test("official Claude execution uses the active local configuration without gene
     else process.env.CLAUDE_CONFIG_DIR = originalConfigDir;
     if (originalOauth === undefined) delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
     else process.env.CLAUDE_CODE_OAUTH_TOKEN = originalOauth;
+    if (originalSkipPermissions === undefined) delete process.env.AGENTARENA_SKIP_PERMISSIONS;
+    else process.env.AGENTARENA_SKIP_PERMISSIONS = originalSkipPermissions;
     await rm(tempDir, { recursive: true, force: true });
   }
 });
@@ -274,10 +282,12 @@ test("official Claude execution uses the active local configuration without gene
 test("third-party Claude quick preflight reports the stored Provider secret instead of host login state", async () => {
   await withTempProvider(async (tempDir, profile) => {
     const originalClaudeBin = process.env.AGENTARENA_CLAUDE_BIN;
+    const originalSkipPermissions = process.env.AGENTARENA_SKIP_PERMISSIONS;
     const shimPath = await createClaudeShim(tempDir);
 
     try {
       process.env.AGENTARENA_CLAUDE_BIN = shimPath;
+      process.env.AGENTARENA_SKIP_PERMISSIONS = "1";
       const response = await handleQuickPreflight(JSON.stringify({
         baseAgentId: "claude-code",
         displayLabel: "Claude Isolated",
@@ -292,6 +302,8 @@ test("third-party Claude quick preflight reports the stored Provider secret inst
     } finally {
       if (originalClaudeBin === undefined) delete process.env.AGENTARENA_CLAUDE_BIN;
       else process.env.AGENTARENA_CLAUDE_BIN = originalClaudeBin;
+      if (originalSkipPermissions === undefined) delete process.env.AGENTARENA_SKIP_PERMISSIONS;
+      else process.env.AGENTARENA_SKIP_PERMISSIONS = originalSkipPermissions;
     }
   });
 });

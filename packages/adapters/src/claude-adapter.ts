@@ -22,7 +22,11 @@ import {
 import { probeClaudeLikeAuth, probeClaudeLikeAuthFast, probeHelp, probeInvocationVersion } from "./invocation-probes.js";
 import { findExecutableOnPath, preflightTimeoutMs, type RunProcessCallbacks, transportTimeoutMs } from "./process-utils.js";
 import { resolveClaudeRuntime } from "./runtime-resolution.js";
-import { createClaudeTransportChain, type TransportChainResult } from "./transport.js";
+import {
+  createClaudeTransportChain,
+  shouldSkipClaudePermissions,
+  type TransportChainResult
+} from "./transport.js";
 
 async function resolveClaudeInvocation(): Promise<InvocationSpec> {
   const configuredCommand = process.env.AGENTARENA_CLAUDE_BIN?.trim();
@@ -445,6 +449,24 @@ export class ClaudeCodeAdapter extends ClaudeLikeAdapter {
       );
     }
 
+    if (!shouldSkipClaudePermissions()) {
+      return createPreflightResult(
+        options?.selection,
+        this.id,
+        this.title,
+        this.kind,
+        this.capability,
+        "blocked",
+        "Claude Code unattended permissions are not enabled for AgentArena tasks.",
+        resolvedRuntime,
+        invocation.displayCommand,
+        [
+          "Set AGENTARENA_SKIP_PERMISSIONS=1 before starting AgentArena to allow Claude Code to work without interactive approval prompts.",
+          "This gives Claude Code the permissions of your local operating-system account, so only run trusted task packs and repositories."
+        ]
+      );
+    }
+
     if (options?.probeAuth) {
       let prepared: Awaited<ReturnType<typeof prepareClaudeRuntimeEnvironment>>;
       try {
@@ -546,6 +568,18 @@ export class ClaudeCodeAdapter extends ClaudeLikeAdapter {
     const { runtime: runtimeBase, profile } = await resolveClaudeRuntime({
       requestedConfig: context.selection.config
     });
+    if (!shouldSkipClaudePermissions()) {
+      return {
+        status: "failed",
+        summary:
+          "Claude Code unattended permissions are not enabled. Set AGENTARENA_SKIP_PERMISSIONS=1 before starting AgentArena, then retry the task.",
+        tokenUsage: 0,
+        estimatedCostUsd: 0,
+        costKnown: false,
+        changedFilesHint: [],
+        resolvedRuntime: runtimeBase
+      };
+    }
     const invocation = await this.resolveInvocation();
     if (profile.kind !== "official") {
       try {
