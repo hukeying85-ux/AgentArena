@@ -77,19 +77,23 @@ test("new Codex variants inherit the current local configuration instead of pinn
 
 test("Claude profile descriptions explain official local use and third-party isolation", () => {
   const localText = (_zh, en) => en;
+  const officialDescription = claudeRuntimeModeDescription({ kind: "official" }, localText);
+  const isolatedDescription = claudeRuntimeModeDescription({ kind: "openai-proxy" }, localText);
 
   assert.match(
-    claudeRuntimeModeDescription({ kind: "official" }, localText),
+    officialDescription,
     /current local Claude Code login and personal configuration/i
   );
   assert.match(
-    claudeRuntimeModeDescription({ kind: "openai-proxy" }, localText),
+    isolatedDescription,
     /isolated temporary configuration/i
   );
   assert.match(
-    claudeRuntimeModeDescription({ kind: "openai-proxy" }, localText),
+    isolatedDescription,
     /AGENTS\.md and CLAUDE\.md/i
   );
+  assert.match(officialDescription, /AGENTARENA_SKIP_PERMISSIONS=1/i);
+  assert.match(isolatedDescription, /AGENTARENA_SKIP_PERMISSIONS=1/i);
 });
 
 test("safeTraceCategoryClass preserves normal trace categories", () => {
