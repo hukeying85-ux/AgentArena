@@ -44,7 +44,7 @@ async function createClaudeShim(tempDir) {
       "  authSource: process.env.ANTHROPIC_AUTH_TOKEN === 'isolated-secret' ? 'isolated' : (process.env.ANTHROPIC_AUTH_TOKEN ? 'other' : 'none'),",
       "  baseUrl: process.env.ANTHROPIC_BASE_URL",
       "};",
-      'appendFileSync(process.env.AGENTARENA_CLAUDE_CAPTURE, `${JSON.stringify(capture)}\\n`, "utf8");',
+      'appendFileSync(process.env.AGENTARENA_CLAUDE_CAPTURE, JSON.stringify(capture) + "\\n", "utf8");',
       'if (args.includes("stream-json")) {',
       '  console.log(JSON.stringify({ type: "result", subtype: "success", result: "READY", usage: { input_tokens: 1, output_tokens: 1 }, total_cost_usd: 0 }));',
       "} else {",
@@ -292,6 +292,91 @@ test("third-party Claude quick preflight reports the stored Provider secret inst
     } finally {
       if (originalClaudeBin === undefined) delete process.env.AGENTARENA_CLAUDE_BIN;
       else process.env.AGENTARENA_CLAUDE_BIN = originalClaudeBin;
+    }
+  });
+});
+
+test("Claude preflight and direct execution block when unattended permissions were not explicitly enabled", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-claude-permission-gate-"));
+  const workspacePath = path.join(tempDir, "workspace");
+  const capturePath = path.join(tempDir, "capture.jsonl");
+  const originalClaudeBin = process.env.AGENTARENA_CLAUDE_BIN;
+  const originalCapture = process.env.AGENTARENA_CLAUDE_CAPTURE;
+  const originalSkipPermissions = process.env.AGENTARENA_SKIP_PERMISSIONS;
+
+  try {
+    await mkdir(workspacePath, { recursive: true });
+    process.env.AGENTARENA_CLAUDE_BIN = await createClaudeShim(tempDir);
+    process.env.AGENTARENA_CLAUDE_CAPTURE = capturePath;
+    delete process.env.AGENTARENA_SKIP_PERMISSIONS;
+
+    const adapter = getAdapter("claude-code");
+    const selection = {
+      baseAgentId: "claude-code",
+      variantId: "claude-official",
+      displayLabel: "Claude Official",
+      config: { providerProfileId: "claude-official" },
+      configSource: "test"
+    };
+    const preflight = await adapter.preflight({ probeAuth: false, selection });
+    assert.equal(preflight.status, "blocked");
+    assert.match(preflight.summary, /unattended permissions/i);
+
+    const result = await adapter.execute({
+      agentId: "claude-code",
+      selection,
+      repoPath: tempDir,
+      workspacePath,
+      environment: { ...process.env },
+      task: {
+        schemaVersion: "agentarena.taskpack/v1",
+        id: "claude-permission-gate",
+        title: "Claude Permission Gate",
+        prompt: "No-op.",
+        envAllowList: [],
+        setupCommands: [],
+        judges: [],
+        teardownCommands: []
+      },
+      trace: async () => {}
+    });
+    assert.equal(result.status, "failed");
+    assert.match(result.summary, /AGENTARENA_SKIP_PERMISSIONS=1/i);
+    assert.equal(await exists(capturePath), false);
+  } finally {
+    if (originalClaudeBin === undefined) delete process.env.AGENTARENA_CLAUDE_BIN;
+    else process.env.AGENTARENA_CLAUDE_BIN = originalClaudeBin;
+    if (originalCapture === undefined) delete process.env.AGENTARENA_CLAUDE_CAPTURE;
+    else process.env.AGENTARENA_CLAUDE_CAPTURE = originalCapture;
+    if (originalSkipPermissions === undefined) delete process.env.AGENTARENA_SKIP_PERMISSIONS;
+    else process.env.AGENTARENA_SKIP_PERMISSIONS = originalSkipPermissions;
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("third-party Claude quick preflight exposes the unattended permission gate", async () => {
+  await withTempProvider(async (tempDir, profile) => {
+    const originalClaudeBin = process.env.AGENTARENA_CLAUDE_BIN;
+    const originalSkipPermissions = process.env.AGENTARENA_SKIP_PERMISSIONS;
+
+    try {
+      process.env.AGENTARENA_CLAUDE_BIN = await createClaudeShim(tempDir);
+      delete process.env.AGENTARENA_SKIP_PERMISSIONS;
+      const response = await handleQuickPreflight(JSON.stringify({
+        baseAgentId: "claude-code",
+        displayLabel: "Claude Isolated",
+        config: { providerProfileId: profile.id }
+      }));
+      const body = JSON.parse(response.body);
+
+      assert.equal(response.statusCode, 200);
+      assert.equal(body.overallStatus, "blocked");
+      assert.match(body.summary, /unattended permissions/i);
+    } finally {
+      if (originalClaudeBin === undefined) delete process.env.AGENTARENA_CLAUDE_BIN;
+      else process.env.AGENTARENA_CLAUDE_BIN = originalClaudeBin;
+      if (originalSkipPermissions === undefined) delete process.env.AGENTARENA_SKIP_PERMISSIONS;
+      else process.env.AGENTARENA_SKIP_PERMISSIONS = originalSkipPermissions;
     }
   });
 });
