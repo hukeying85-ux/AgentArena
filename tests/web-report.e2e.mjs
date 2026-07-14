@@ -689,6 +689,7 @@ test("Claude provider editor preserves typed values and saves a profile", {
     const claudeSection = page.locator("details.launcher-section").filter({ hasText: "Claude Code" }).first();
     await claudeSection.locator("summary").click();
     await page.locator("#launcher-add-provider").waitFor({ state: "visible", timeout: 15000 });
+    assert.doesNotMatch(await claudeSection.innerText(), /<(?:strong|code)>/i);
 
     await page.locator("#launcher-add-provider").click();
     await page.locator("[data-provider-editor='true']").waitFor({ state: "visible", timeout: 10000 });
