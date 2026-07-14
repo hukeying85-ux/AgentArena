@@ -1323,12 +1323,12 @@ export function createLauncherModule(deps) {
           <p style="margin:0 0 8px;font-size:var(--text-sm);"><strong>${escapeHtml(localText("💡 关于 Claude Provider", "About Claude Provider"))}</strong></p>
           <ul style="margin:0;padding-left:20px;font-size:var(--text-xs);color:var(--text-secondary);line-height:1.6;">
             <li>${escapeHtml(localText(
-              '<strong>"Official"（官方）</strong>：使用 Claude Code 官方登录态。需要先在终端运行 <code>claude login</code> 登录，之后 Benchmark 会自动复用登录状态。<strong>不需要填 API Key。</strong>',
-              '<strong>"Official"</strong>: Uses your official Claude Code login. Run <code>claude login</code> in terminal first, then benchmark reuses it automatically. <strong>No API Key needed.</strong>'
+              '“Official”（官方）：使用 Claude Code 官方登录态。需要先在终端运行 claude login 登录，之后 Benchmark 会自动复用登录状态，不需要填写 API Key。',
+              '“Official”: Uses your official Claude Code login. Run claude login in a terminal first, then the benchmark reuses it automatically. No API key is needed.'
             ))}</li>
             <li>${escapeHtml(localText(
-              '<strong>第三方 Provider</strong>：如果你修改了 Claude Code 的配置文件（如 <code>.claude/settings.json</code> 指向第三方代理），或者想直接用 API Key 绕过登录，请点下方「新增 Claude Provider」添加第三方供应商。',
-              '<strong>Third-party Provider</strong>: If you modified Claude Code config (e.g. <code>.claude/settings.json</code> pointing to a proxy), or want to use an API Key directly, click "Add Claude Provider" below.'
+              '第三方 Provider：如果你修改了 Claude Code 的配置文件（如 .claude/settings.json 指向第三方代理），或者想直接使用 API Key，请点下方「新增 Claude Provider」添加第三方供应商。',
+              'Third-party Provider: If your Claude Code configuration points to a proxy, or you want to use an API key directly, click “Add Claude Provider” below.'
             ))}</li>
           </ul>
         </div>
