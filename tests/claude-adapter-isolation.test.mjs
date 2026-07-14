@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -29,8 +29,7 @@ async function createClaudeShim(tempDir) {
   await writeFile(
     scriptPath,
     [
-      'import { appendFileSync, writeFileSync } from "node:fs";',
-      'import { spawn } from "node:child_process";',
+      'import { appendFileSync } from "node:fs";',
       "const args = process.argv.slice(2);",
       "const capture = {",
       "  args,",
@@ -41,18 +40,15 @@ async function createClaudeShim(tempDir) {
       "  baseUrl: process.env.ANTHROPIC_BASE_URL",
       "};",
       'if (process.env.AGENTARENA_CLAUDE_CAPTURE) { appendFileSync(process.env.AGENTARENA_CLAUDE_CAPTURE, JSON.stringify(capture) + "\\n", "utf8"); }',
-      'if (args.includes("--version")) { console.log("2.1.207"); process.exit(0); }',
-      'if (args.includes("--help")) {',
-      '  console.log("--setting-sources <sources>\\n--strict-mcp-config\\n--no-session-persistence");',
-      "  process.exit(0);",
-      "}",
-      'if (process.env.AGENTARENA_CLAUDE_HOLD_CONFIG_OPEN && args.includes("stream-json")) {',
-      '  const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], { cwd: process.env.CLAUDE_CONFIG_DIR, detached: true, stdio: "ignore" });',
-      "  child.unref();",
-      '  writeFileSync(process.env.AGENTARENA_CLAUDE_HOLD_CONFIG_OPEN, String(child.pid), "utf8");',
-      "}",
-      'if (args.includes("stream-json")) {',
-      '  console.log(JSON.stringify({ type: "result", subtype: "success", result: "READY", usage: { input_tokens: 1, output_tokens: 1 }, total_cost_usd: 0 }));',
+      'const delayMs = Number(process.env.AGENTARENA_CLAUDE_DELAY_RESULT_MS ?? 0);',
+      'const emitWithDelay = (emit) => { if (delayMs > 0) setTimeout(emit, delayMs); else emit(); };',
+      'if (args.includes("--version")) {',
+      '  emitWithDelay(() => console.log("2.1.207"));',
+      '} else if (args.includes("--help")) {',
+      '  emitWithDelay(() => console.log("--setting-sources <sources>\\n--strict-mcp-config\\n--no-session-persistence"));',
+      '} else if (args.includes("stream-json")) {',
+      '  const emitResult = () => console.log(JSON.stringify({ type: "result", subtype: "success", result: "READY", usage: { input_tokens: 1, output_tokens: 1 }, total_cost_usd: 0 }));',
+      '  emitWithDelay(emitResult);',
       "} else {",
       '  console.log("READY");',
       "}"
@@ -113,25 +109,6 @@ async function withTempProvider(fn) {
 
 function parseCapture(contents) {
   return contents.trim().split(/\r?\n/u).filter(Boolean).map((line) => JSON.parse(line));
-}
-
-async function stopHeldProcess(pidPath) {
-  if (!(await exists(pidPath))) return;
-  const pid = Number.parseInt(await readFile(pidPath, "utf8"), 10);
-  if (!Number.isInteger(pid)) return;
-  try {
-    process.kill(pid, "SIGKILL");
-  } catch {
-    return;
-  }
-  for (let attempt = 0; attempt < 50; attempt += 1) {
-    try {
-      process.kill(pid, 0);
-    } catch {
-      return;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
 }
 
 test("third-party Claude preflight and execution use isolated config without touching the source project", async () => {
@@ -209,8 +186,10 @@ test("third-party Claude preflight and execution use isolated config without tou
         assert.equal(capture.usesPersonalOauth, false, JSON.stringify(capture));
         assert.equal(capture.authSource, "isolated");
         assert.equal(capture.baseUrl, "https://api.openai.com/v1");
-        assert.equal(capture.args.includes("--setting-sources"), true);
-        assert.equal(capture.args.includes("--strict-mcp-config"), true);
+        if (!capture.args.includes("--version") && !capture.args.includes("--help")) {
+          assert.equal(capture.args.includes("--setting-sources"), true);
+          assert.equal(capture.args.includes("--strict-mcp-config"), true);
+        }
         assert.equal(await exists(capture.configDir), false);
       }
     } finally {
@@ -358,7 +337,9 @@ test("Claude preflight and direct execution block when unattended permissions we
     const preflight = await adapter.preflight({ probeAuth: false, selection });
     assert.equal(preflight.status, "blocked");
     assert.match(preflight.summary, /unattended permissions/i);
-    const preflightCaptureCount = parseCapture(await readFile(capturePath, "utf8")).length;
+    const preflightCaptureCount = await exists(capturePath)
+      ? parseCapture(await readFile(capturePath, "utf8")).length
+      : 0;
 
     const result = await adapter.execute({
       agentId: "claude-code",
@@ -380,7 +361,10 @@ test("Claude preflight and direct execution block when unattended permissions we
     });
     assert.equal(result.status, "failed");
     assert.match(result.summary, /AGENTARENA_SKIP_PERMISSIONS=1/i);
-    assert.equal(parseCapture(await readFile(capturePath, "utf8")).length, preflightCaptureCount);
+    const finalCaptureCount = await exists(capturePath)
+      ? parseCapture(await readFile(capturePath, "utf8")).length
+      : 0;
+    assert.equal(finalCaptureCount, preflightCaptureCount);
   } finally {
     if (originalClaudeBin === undefined) delete process.env.AGENTARENA_CLAUDE_BIN;
     else process.env.AGENTARENA_CLAUDE_BIN = originalClaudeBin;
@@ -425,19 +409,25 @@ test(
   async () => {
     await withTempProvider(async (tempDir, profile) => {
       const capturePath = path.join(tempDir, "cleanup-preflight-capture.jsonl");
-      const pidPath = path.join(tempDir, "cleanup-preflight.pid");
       const originalClaudeBin = process.env.AGENTARENA_CLAUDE_BIN;
       const originalCapture = process.env.AGENTARENA_CLAUDE_CAPTURE;
-      const originalHold = process.env.AGENTARENA_CLAUDE_HOLD_CONFIG_OPEN;
+      const originalDelay = process.env.AGENTARENA_CLAUDE_DELAY_RESULT_MS;
       const originalSkipPermissions = process.env.AGENTARENA_SKIP_PERMISSIONS;
+      const originalCwd = process.cwd();
+      let lockedRuntimeRoot;
+      const existingRuntimeDirs = new Set(
+        (await readdir(os.tmpdir(), { withFileTypes: true }))
+          .filter((entry) => entry.isDirectory() && entry.name.startsWith("agentarena-claude-runtime-"))
+          .map((entry) => entry.name)
+      );
 
       try {
         process.env.AGENTARENA_CLAUDE_BIN = await createClaudeShim(tempDir);
         process.env.AGENTARENA_CLAUDE_CAPTURE = capturePath;
-        process.env.AGENTARENA_CLAUDE_HOLD_CONFIG_OPEN = pidPath;
+        process.env.AGENTARENA_CLAUDE_DELAY_RESULT_MS = "1500";
         process.env.AGENTARENA_SKIP_PERMISSIONS = "1";
         const adapter = getAdapter("claude-code");
-        const preflight = await adapter.preflight({
+        const preflightPromise = adapter.preflight({
           probeAuth: true,
           selection: {
             baseAgentId: "claude-code",
@@ -447,22 +437,35 @@ test(
             configSource: "test"
           }
         });
+        for (let attempt = 0; attempt < 500; attempt += 1) {
+          const runtimeDir = (await readdir(os.tmpdir(), { withFileTypes: true }))
+            .find(
+              (entry) =>
+                entry.isDirectory() &&
+                entry.name.startsWith("agentarena-claude-runtime-") &&
+                !existingRuntimeDirs.has(entry.name)
+            );
+          if (runtimeDir) {
+            lockedRuntimeRoot = path.join(os.tmpdir(), runtimeDir.name);
+            process.chdir(lockedRuntimeRoot);
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        assert.ok(lockedRuntimeRoot, "expected to observe the isolated preflight runtime");
+        const preflight = await preflightPromise;
 
         assert.equal(preflight.status, "blocked");
         assert.match(preflight.summary, /clean.*runtime/i);
       } finally {
-        await stopHeldProcess(pidPath);
-        if (await exists(capturePath)) {
-          for (const capture of parseCapture(await readFile(capturePath, "utf8"))) {
-            if (capture.configDir) await rm(capture.configDir, { recursive: true, force: true }).catch(() => {});
-          }
-        }
+        process.chdir(originalCwd);
+        if (lockedRuntimeRoot) await rm(lockedRuntimeRoot, { recursive: true, force: true }).catch(() => {});
         if (originalClaudeBin === undefined) delete process.env.AGENTARENA_CLAUDE_BIN;
         else process.env.AGENTARENA_CLAUDE_BIN = originalClaudeBin;
         if (originalCapture === undefined) delete process.env.AGENTARENA_CLAUDE_CAPTURE;
         else process.env.AGENTARENA_CLAUDE_CAPTURE = originalCapture;
-        if (originalHold === undefined) delete process.env.AGENTARENA_CLAUDE_HOLD_CONFIG_OPEN;
-        else process.env.AGENTARENA_CLAUDE_HOLD_CONFIG_OPEN = originalHold;
+        if (originalDelay === undefined) delete process.env.AGENTARENA_CLAUDE_DELAY_RESULT_MS;
+        else process.env.AGENTARENA_CLAUDE_DELAY_RESULT_MS = originalDelay;
         if (originalSkipPermissions === undefined) delete process.env.AGENTARENA_SKIP_PERMISSIONS;
         else process.env.AGENTARENA_SKIP_PERMISSIONS = originalSkipPermissions;
       }
@@ -477,17 +480,18 @@ test(
     await withTempProvider(async (tempDir, profile) => {
       const workspacePath = path.join(tempDir, "cleanup-workspace");
       const capturePath = path.join(tempDir, "cleanup-execute-capture.jsonl");
-      const pidPath = path.join(tempDir, "cleanup-execute.pid");
       const originalClaudeBin = process.env.AGENTARENA_CLAUDE_BIN;
       const originalCapture = process.env.AGENTARENA_CLAUDE_CAPTURE;
-      const originalHold = process.env.AGENTARENA_CLAUDE_HOLD_CONFIG_OPEN;
+      const originalDelay = process.env.AGENTARENA_CLAUDE_DELAY_RESULT_MS;
       const originalSkipPermissions = process.env.AGENTARENA_SKIP_PERMISSIONS;
+      const originalCwd = process.cwd();
+      let lockedRuntimeRoot;
 
       try {
         await mkdir(workspacePath, { recursive: true });
         process.env.AGENTARENA_CLAUDE_BIN = await createClaudeShim(tempDir);
         process.env.AGENTARENA_CLAUDE_CAPTURE = capturePath;
-        process.env.AGENTARENA_CLAUDE_HOLD_CONFIG_OPEN = pidPath;
+        process.env.AGENTARENA_CLAUDE_DELAY_RESULT_MS = "1500";
         process.env.AGENTARENA_SKIP_PERMISSIONS = "1";
         const adapter = getAdapter("claude-code");
         const result = await adapter.execute({
@@ -512,24 +516,25 @@ test(
             judges: [],
             teardownCommands: []
           },
-          trace: async () => {}
+          trace: async (event) => {
+            if (event.type !== "adapter.claude.profile" || lockedRuntimeRoot) return;
+            const capture = parseCapture(await readFile(capturePath, "utf8"))[0];
+            lockedRuntimeRoot = capture.configDir;
+            process.chdir(lockedRuntimeRoot);
+          }
         });
 
         assert.equal(result.status, "failed");
         assert.match(result.summary, /clean.*runtime/i);
       } finally {
-        await stopHeldProcess(pidPath);
-        if (await exists(capturePath)) {
-          for (const capture of parseCapture(await readFile(capturePath, "utf8"))) {
-            if (capture.configDir) await rm(capture.configDir, { recursive: true, force: true }).catch(() => {});
-          }
-        }
+        process.chdir(originalCwd);
+        if (lockedRuntimeRoot) await rm(lockedRuntimeRoot, { recursive: true, force: true }).catch(() => {});
         if (originalClaudeBin === undefined) delete process.env.AGENTARENA_CLAUDE_BIN;
         else process.env.AGENTARENA_CLAUDE_BIN = originalClaudeBin;
         if (originalCapture === undefined) delete process.env.AGENTARENA_CLAUDE_CAPTURE;
         else process.env.AGENTARENA_CLAUDE_CAPTURE = originalCapture;
-        if (originalHold === undefined) delete process.env.AGENTARENA_CLAUDE_HOLD_CONFIG_OPEN;
-        else process.env.AGENTARENA_CLAUDE_HOLD_CONFIG_OPEN = originalHold;
+        if (originalDelay === undefined) delete process.env.AGENTARENA_CLAUDE_DELAY_RESULT_MS;
+        else process.env.AGENTARENA_CLAUDE_DELAY_RESULT_MS = originalDelay;
         if (originalSkipPermissions === undefined) delete process.env.AGENTARENA_SKIP_PERMISSIONS;
         else process.env.AGENTARENA_SKIP_PERMISSIONS = originalSkipPermissions;
       }

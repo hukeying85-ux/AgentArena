@@ -94,8 +94,7 @@ export async function prepareClaudeRuntimeEnvironment(
 
   const providerRuntime = await buildClaudeProviderEnvironment(profile.id, options.requestedModel);
   const runtimeRoot = await fs.mkdtemp(path.join(os.tmpdir(), "agentarena-claude-runtime-"));
-  const configDir = path.join(runtimeRoot, "config");
-  await fs.mkdir(configDir, { recursive: true });
+  const configDir = runtimeRoot;
   let cleaned = false;
 
   return {
@@ -113,8 +112,8 @@ export async function prepareClaudeRuntimeEnvironment(
       if (cleaned) {
         return;
       }
-      cleaned = true;
       await fs.rm(runtimeRoot, { recursive: true, force: true });
+      cleaned = true;
     }
   };
 }

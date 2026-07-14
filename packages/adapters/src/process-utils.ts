@@ -253,21 +253,9 @@ async function runWindowsClaudeDetached(
       await writeFile(stdinPath, "", "utf8");
     }
 
-    const envAssignments = Object.entries(environment ?? {})
-      .filter((entry): entry is [string, string] => typeof entry[1] === "string")
-      .map(([key, value]) => {
-        const safeValue = value.replace(/[\r\n]/g, " ");
-        return `Set-Item -LiteralPath ${quotePowerShellSingle(`Env:${key}`)} -Value ${quotePowerShellSingle(safeValue)}`;
-      })
-      .join("\n");
-    const resetEnvironment = environment
-      ? "Get-ChildItem Env: | ForEach-Object { Remove-Item -LiteralPath $_.PSPath -ErrorAction SilentlyContinue }"
-      : "";
     const redirectInput = stdinInput !== undefined ? ` -RedirectStandardInput ${quotePowerShellSingle(stdinPath)}` : "";
     const script = [
       "$ErrorActionPreference = 'Stop'",
-      resetEnvironment,
-      envAssignments,
       `$timeoutMs = ${Math.max(1, Math.floor(timeoutMs))}`,
       "function Stop-ProcessTree([int]$ProcessId) {",
       "  try {",
@@ -292,7 +280,7 @@ async function runWindowsClaudeDetached(
       ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath],
       cwd,
       timeoutMs + 30_000,
-      process.env,
+      environment ?? process.env,
       signal
     );
 
@@ -325,7 +313,7 @@ async function runWindowsClaudeDetached(
       error: wrapperResult.error
     };
   } finally {
-    await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+    await rm(tempDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }
 }
 

@@ -122,9 +122,19 @@ export async function probeInvocationVersion(
   };
 }
 
-export async function probeHelp(invocation: InvocationSpec, cwd: string): Promise<ProcessResult> {
+export async function probeHelp(
+  invocation: InvocationSpec,
+  cwd: string,
+  environment?: NodeJS.ProcessEnv
+): Promise<ProcessResult> {
   try {
-    return await runProcess(invocation.command, [...invocation.argsPrefix, "--help"], cwd, 45_000);
+    return await runProcess(
+      invocation.command,
+      [...invocation.argsPrefix, "--help"],
+      cwd,
+      45_000,
+      environment
+    );
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     return {
