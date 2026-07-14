@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -274,6 +274,74 @@ test(
     } finally {
       if (originalLeak === undefined) delete process.env.AGENTARENA_SHOULD_NOT_LEAK;
       else process.env.AGENTARENA_SHOULD_NOT_LEAK = originalLeak;
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  }
+);
+
+test(
+  "detached Windows Claude launch scripts never contain environment secrets",
+  { skip: process.platform !== "win32" ? "Windows-specific Claude wrapper behavior" : false },
+  async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-claude-secret-script-"));
+    const secret = "third-party-secret-sentinel";
+    const existingWrapperDirs = new Set(
+      (await readdir(os.tmpdir(), { withFileTypes: true }))
+        .filter((entry) => entry.isDirectory() && entry.name.startsWith("agentarena-claude-run-"))
+        .map((entry) => entry.name)
+    );
+    let resultPromise;
+
+    try {
+      const scriptPath = path.join(tempDir, "delay.js");
+      const shimPath = path.join(tempDir, "claude.cmd");
+      await writeFile(
+        scriptPath,
+        'setTimeout(() => process.stdout.write("READY"), 1500);\n',
+        "utf8"
+      );
+      await writeFile(shimPath, `@echo off\n"${process.execPath}" "${scriptPath}" %*\n`, "utf8");
+
+      const requestedEnvironment = {
+        ...process.env,
+        ANTHROPIC_AUTH_TOKEN: secret
+      };
+      resultPromise = runProcess(
+        shimPath,
+        ["-p", "--output-format", "text"],
+        tempDir,
+        10_000,
+        requestedEnvironment,
+        undefined,
+        "READY"
+      );
+
+      let wrapperScript;
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        const wrapperDirs = (await readdir(os.tmpdir(), { withFileTypes: true }))
+          .filter(
+            (entry) =>
+              entry.isDirectory() &&
+              entry.name.startsWith("agentarena-claude-run-") &&
+              !existingWrapperDirs.has(entry.name)
+          );
+        for (const entry of wrapperDirs) {
+          const candidate = path.join(os.tmpdir(), entry.name, "run.ps1");
+          if (await fileExists(candidate)) {
+            wrapperScript = await readFile(candidate, "utf8");
+            break;
+          }
+        }
+        if (wrapperScript !== undefined) break;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+
+      assert.ok(wrapperScript, "expected to observe the detached Claude wrapper script");
+      assert.doesNotMatch(wrapperScript, new RegExp(secret));
+      const result = await resultPromise;
+      assert.equal(result.exitCode, 0, result.stderr);
+    } finally {
+      await resultPromise?.catch(() => {});
       await rm(tempDir, { recursive: true, force: true });
     }
   }

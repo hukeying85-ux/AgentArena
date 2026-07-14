@@ -110,6 +110,7 @@ test("third-party Claude runtime replaces inherited provider settings with an is
     try {
       assert.equal(prepared.mode, "third-party-isolated");
       assert.ok(prepared.configDir);
+      assert.equal(prepared.configDir, prepared.runtimeRoot);
       assert.notEqual(prepared.configDir, "C:/personal-claude");
       assert.equal(await exists(prepared.configDir), true);
       assert.deepEqual(prepared.extraArgs, ["--setting-sources", "user", "--strict-mcp-config"]);
@@ -150,6 +151,37 @@ test("concurrent third-party Claude runtimes never share a config directory", as
     }
   });
 });
+
+test(
+  "third-party Claude cleanup can retry after a transient removal failure",
+  { skip: process.platform !== "win32" ? "Windows-specific locked-directory behavior" : false },
+  async () => {
+    await withTempProvider(async (profile) => {
+      const { prepareClaudeRuntimeEnvironment } = await import(
+        "../packages/adapters/dist/claude-runtime-environment.js"
+      );
+      const prepared = await prepareClaudeRuntimeEnvironment({
+        profileId: profile.id,
+        baseEnvironment: {}
+      });
+      const originalCwd = process.cwd();
+
+      try {
+        process.chdir(prepared.runtimeRoot);
+        await assert.rejects(prepared.cleanup(), /busy|locked|EBUSY/i);
+      } finally {
+        process.chdir(originalCwd);
+      }
+
+      try {
+        await prepared.cleanup();
+        assert.equal(await exists(prepared.runtimeRoot), false);
+      } finally {
+        await rm(prepared.runtimeRoot, { recursive: true, force: true }).catch(() => {});
+      }
+    });
+  }
+);
 
 test("Claude isolation capability detection fails closed when required flags are missing", async () => {
   const { claudeIsolationArgsSupported } = await import(
