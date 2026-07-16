@@ -73,8 +73,8 @@ export function ComparePage() {
     <PageHeader eyebrow="COMPARE" title={t(locale, "compare")} description={locale === "zh-CN" ? "先检查共同条件，再看历史趋势和交叉会话。" : "Check shared conditions before trends and cross-run sessions."}/>
 
     <Section title={t(locale, "compare")} description={t(locale, "fair")}>
-      <label class="inline-field"><span>{locale === "zh-CN" ? "基准运行" : "Base run"}</span>
-        <select value={base.runId} onChange={(event) => session.setBaseRunId(event.currentTarget.value)}>
+      <label class="inline-field" for="compare-base-run"><span>{locale === "zh-CN" ? "基准运行" : "Base run"}</span>
+        <select id="compare-base-run" value={base.runId} onChange={(event) => session.setBaseRunId(event.currentTarget.value)}>
           {runs.map((run) => <option value={run.runId}>{run.task.title} · {run.runId}</option>)}
         </select>
       </label>
@@ -103,8 +103,8 @@ export function ComparePage() {
       {comparableRuns.length < 2
         ? <p class="muted-line">{t(locale, "trendEmpty")}</p>
         : <>
-          <label class="inline-field"><span>{t(locale, "trendAgent")}</span>
-            <select value={trendAgent} onChange={(event) => setTrendAgent(event.currentTarget.value)}>
+          <label class="inline-field" for="compare-trend-agent"><span>{t(locale, "trendAgent")}</span>
+            <select id="compare-trend-agent" value={trendAgent} onChange={(event) => setTrendAgent(event.currentTarget.value)}>
               {base.results.map((item) => <option value={item.variantId}>{item.displayLabel}</option>)}
             </select>
           </label>

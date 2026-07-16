@@ -56,7 +56,7 @@ export function Shell({ children }: { children: ComponentChildren }) {
       </div>
       {(selectedRun || runStatus.state !== "idle") && <nav class="stage-nav" aria-label={locale === "zh-CN" ? "实验阶段" : "Experiment stages"}>{stages.map((item, index) => <button type="button" class={page === item.id ? "active" : ""} aria-current={page === item.id ? "step" : undefined} onClick={() => setPage(item.id)}><span class="stage-index">{index + 1}</span><Icon name={item.icon}/><span>{t(locale, item.label)}</span></button>)}</nav>}
       {notice && <div class={`global-notice global-${notice.kind}`} role={notice.kind === "danger" ? "alert" : "status"}><Icon name={notice.kind === "success" ? "check" : notice.kind}/><span>{notice.message}</span><button type="button" onClick={clearNotice} aria-label={t(locale, "clear")}><Icon name="cancel"/></button></div>}
-      <main id="main" class="page-content">{children}</main>
+      <main id="main" class="page-content" tabindex={-1}>{children}</main>
       <nav class="mobile-nav" aria-label={locale === "zh-CN" ? "移动导航" : "Mobile navigation"}>{mainNav.slice(0,4).map((item) => <button type="button" class={page === item.id ? "active" : ""} onClick={() => setPage(item.id)}><Icon name={item.icon}/><span>{t(locale, item.label)}</span></button>)}</nav>
     </div>
   </div>;
