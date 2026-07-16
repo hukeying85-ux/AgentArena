@@ -1,0 +1,238 @@
+export type RunSourceKind = "generated" | "imported" | "demo" | "legacy" | "unknown";
+export type IntegrityLevel = "complete" | "partial" | "degraded" | "damaged";
+export type EvaluationStatus = "pass" | "partial" | "fail" | "incomplete";
+export type ExecutionStatus = "completed" | "cancelled" | "interrupted" | "running" | "unknown";
+
+export interface NormalizedJudgeResult {
+  judgeId: string;
+  label: string;
+  type: string;
+  success: boolean;
+  message: string | null;
+}
+
+export interface NormalizedAgentResult {
+  agentId: string;
+  variantId: string;
+  displayLabel: string;
+  status: string;
+  durationMs: number | null;
+  tokenUsage: number | null;
+  estimatedCostUsd: number | null;
+  costKnown: boolean;
+  compositeScore: number | null;
+  changedFiles: string[];
+  judgeResults: NormalizedJudgeResult[];
+  tracePath: string | null;
+  traceAvailability: "available" | "missing" | "unknown";
+  summary: string;
+  failureReason: string | null;
+  requestedConfig: Record<string, unknown>;
+  resolvedRuntime: Record<string, unknown> | null;
+  raw: Record<string, unknown>;
+}
+
+export interface NormalizedRun {
+  runId: string;
+  createdAt: string | null;
+  repository: { path: string | null; revision: string | null };
+  task: { id: string | null; title: string; schemaVersion: string | null };
+  scoreMode: string;
+  source: { kind: RunSourceKind; label: string };
+  results: NormalizedAgentResult[];
+  integrity: IntegrityLevel;
+  integrityReasons: string[];
+  raw: Record<string, unknown>;
+}
+
+export interface RunOutcome {
+  execution: ExecutionStatus;
+  evaluation: EvaluationStatus;
+  winner: NormalizedAgentResult | null;
+  qualifiedResults: NormalizedAgentResult[];
+  failedResults: NormalizedAgentResult[];
+  trust: { level: IntegrityLevel; reasons: string[] };
+}
+
+function record(value: unknown): Record<string, unknown> {
+  return value != null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function text(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function finiteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function normalizeJudge(value: unknown, index: number): NormalizedJudgeResult {
+  const item = record(value);
+  return {
+    judgeId: text(item.judgeId) ?? text(item.id) ?? `judge-${index + 1}`,
+    label: text(item.label) ?? text(item.name) ?? text(item.judgeId) ?? `Judge ${index + 1}`,
+    type: text(item.type) ?? "unknown",
+    success: item.success === true || item.status === "pass" || item.status === "success",
+    message: text(item.message) ?? text(item.error) ?? text(item.summary)
+  };
+}
+
+function normalizeResult(value: unknown, index: number): NormalizedAgentResult {
+  const item = record(value);
+  const agentId = text(item.agentId) ?? text(item.baseAgentId) ?? `agent-${index + 1}`;
+  const variantId = text(item.variantId) ?? agentId;
+  const tracePath = text(item.tracePath);
+  const costKnown = item.costKnown === true || finiteNumber(item.estimatedCostUsd) !== null;
+  return {
+    agentId,
+    variantId,
+    displayLabel: text(item.displayLabel) ?? text(item.agentTitle) ?? variantId,
+    status: text(item.status) ?? "unknown",
+    durationMs: finiteNumber(item.durationMs),
+    tokenUsage: finiteNumber(item.tokenUsage),
+    estimatedCostUsd: costKnown ? finiteNumber(item.estimatedCostUsd) : null,
+    costKnown,
+    compositeScore: finiteNumber(item.compositeScore) ?? finiteNumber(item.score),
+    changedFiles: stringList(item.changedFiles),
+    judgeResults: Array.isArray(item.judgeResults)
+      ? item.judgeResults.map(normalizeJudge)
+      : [],
+    tracePath,
+    traceAvailability: tracePath ? "available" : "missing",
+    summary: text(item.summary) ?? "",
+    failureReason: text(item.failureReason) ?? text(item.error) ?? null,
+    requestedConfig: record(item.requestedConfig),
+    resolvedRuntime: item.resolvedRuntime == null ? null : record(item.resolvedRuntime),
+    raw: item
+  };
+}
+
+function inferSource(raw: Record<string, unknown>): { kind: RunSourceKind; label: string } {
+  const source = record(raw.source);
+  const declared = text(source.kind);
+  if (declared === "generated" || declared === "imported" || declared === "demo" || declared === "legacy") {
+    return { kind: declared, label: text(source.label) ?? declared };
+  }
+  if (raw.isDemo === true) return { kind: "demo", label: "Demo" };
+  if (raw.imported === true) return { kind: "imported", label: "Imported" };
+  if (raw.legacy === true) return { kind: "legacy", label: "Legacy" };
+  return { kind: "generated", label: "Local run" };
+}
+
+export function normalizeRun(value: unknown): NormalizedRun {
+  const raw = record(value);
+  const repository = record(raw.repository);
+  const fairComparison = record(raw.fairComparison);
+  const task = record(raw.task);
+  const source = inferSource(raw);
+  const rawResults: unknown[] | null = Array.isArray(raw.results) ? raw.results : null;
+  const resultsValid = rawResults !== null;
+  const results = rawResults ? rawResults.map(normalizeResult) : [];
+  const integrityReasons: string[] = [];
+
+  if (!resultsValid) integrityReasons.push("results-invalid");
+  if (results.length === 0) integrityReasons.push("results-missing");
+  if (source.kind === "legacy") integrityReasons.push("legacy-source");
+  if (results.some((item) => !item.costKnown)) integrityReasons.push("cost-unknown");
+  if (results.some((item) => item.traceAvailability === "missing")) integrityReasons.push("trace-missing");
+
+  let integrity: IntegrityLevel = "complete";
+  if (!resultsValid) integrity = "damaged";
+  else if (source.kind === "legacy") integrity = "degraded";
+  else if (integrityReasons.length > 0) integrity = "partial";
+
+  return {
+    runId: text(raw.runId) ?? text(raw.id) ?? "unknown-run",
+    createdAt: text(raw.createdAt),
+    repository: {
+      path: text(repository.path) ?? text(raw.repoPath) ?? text(fairComparison.repositoryPath),
+      revision: text(repository.revision) ?? text(repository.snapshot) ?? text(fairComparison.repositoryRevision)
+    },
+    task: {
+      id: text(task.id) ?? text(raw.taskId) ?? text(fairComparison.taskId),
+      title: text(task.title) ?? text(raw.taskTitle) ?? "Untitled task",
+      schemaVersion: text(task.schemaVersion) ?? text(fairComparison.taskSchemaVersion)
+    },
+    scoreMode: text(raw.scoreMode) ?? "practical",
+    source,
+    results,
+    integrity,
+    integrityReasons,
+    raw
+  };
+}
+
+function isTerminalFailure(status: string): boolean {
+  return ["failed", "error", "cancelled", "skipped", "blocked"].includes(status);
+}
+
+function isQualified(result: NormalizedAgentResult): boolean {
+  if (result.status !== "success") return false;
+  if (result.judgeResults.length === 0) return true;
+  return result.judgeResults.every((judge) => judge.success);
+}
+
+function rankValue(result: NormalizedAgentResult): number {
+  if (result.compositeScore !== null) return result.compositeScore;
+  const passed = result.judgeResults.filter((judge) => judge.success).length;
+  const ratio = result.judgeResults.length > 0 ? passed / result.judgeResults.length : 1;
+  const durationPenalty = result.durationMs === null ? 0 : Math.min(result.durationMs / 1_000_000, 0.5);
+  return ratio * 100 - durationPenalty;
+}
+
+export function deriveRunOutcome(run: NormalizedRun): RunOutcome {
+  const qualifiedResults = run.results.filter(isQualified);
+  const failedResults = run.results.filter((item) => !isQualified(item));
+  const rawRunStatus = text(run.raw.status) ?? text(run.raw.state);
+
+  let execution: ExecutionStatus = "completed";
+  if (rawRunStatus === "running" || rawRunStatus === "cancelling") execution = "running";
+  else if (rawRunStatus === "cancelled") execution = "cancelled";
+  else if (rawRunStatus === "interrupted" || rawRunStatus === "error") execution = "interrupted";
+  else if (run.results.length === 0) execution = "unknown";
+
+  let evaluation: EvaluationStatus;
+  if (run.integrity === "damaged" || run.results.length === 0) evaluation = "incomplete";
+  else if (qualifiedResults.length === run.results.length) evaluation = "pass";
+  else if (qualifiedResults.length > 0) evaluation = "partial";
+  else evaluation = "fail";
+
+  const winner = qualifiedResults.length === 0
+    ? null
+    : [...qualifiedResults].sort((a, b) => rankValue(b) - rankValue(a))[0] ?? null;
+
+  const trustReasons = [...run.integrityReasons];
+  if (run.results.every((item) => isTerminalFailure(item.status))) trustReasons.push("all-agents-failed");
+
+  return {
+    execution,
+    evaluation,
+    winner,
+    qualifiedResults,
+    failedResults,
+    trust: { level: run.integrity, reasons: [...new Set(trustReasons)] }
+  };
+}
+
+export function runIdentityKey(run: NormalizedRun, agentId: string | null = null): string {
+  return `${run.runId}::${agentId ?? "run"}::${run.source.kind}`;
+}
+
+export function comparisonExclusionReasons(base: NormalizedRun, candidate: NormalizedRun): string[] {
+  const reasons: string[] = [];
+  if (base.task.id !== candidate.task.id || base.task.schemaVersion !== candidate.task.schemaVersion) {
+    reasons.push("different-task");
+  }
+  if (base.repository.revision !== candidate.repository.revision) reasons.push("different-revision");
+  if (base.scoreMode !== candidate.scoreMode) reasons.push("different-score-mode");
+  if (candidate.integrity === "damaged") reasons.push("damaged-result");
+  return reasons;
+}
+
+

@@ -35,6 +35,9 @@ export {
   handleCreateAdhocTaskpack,
   handleTaskpacksList,
 } from "./api-routes/taskpacks.js";
+export {
+  handleTraceGet,
+} from "./api-routes/trace.js";
 export type { ApiResponse, ProviderProfilePayload } from "./api-routes/types.js";
 export {
   maskProfileExtraEnv,

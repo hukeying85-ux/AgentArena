@@ -1,0 +1,16 @@
+{"agentId":"demo-thorough","runId":"demo-workbench-001","timestamp":"2026-07-15T08:00:01.200Z","type":"setup.start","message":"Preparing isolated workspace"}
+{"agentId":"demo-thorough","runId":"demo-workbench-001","timestamp":"2026-07-15T08:00:01.900Z","type":"setup.finish","message":"Workspace ready","metadata":{"setupResults":[]}}
+{"agentId":"demo-thorough","runId":"demo-workbench-001","timestamp":"2026-07-15T08:00:02.100Z","type":"preflight.result","message":"CLI is installed. Authentication not probed in demo."}
+{"agentId":"demo-thorough","runId":"demo-workbench-001","timestamp":"2026-07-15T08:00:03.000Z","type":"adapter.start","message":"Starting Demo Thorough adapter","metadata":{"effectiveModel":"demo-balanced"}}
+{"agentId":"demo-thorough","runId":"demo-workbench-001","timestamp":"2026-07-15T08:00:04.500Z","type":"adapter.prompt","message":"Assembled prompt sent to agent","metadata":{"promptLength":1878}}
+{"agentId":"demo-thorough","runId":"demo-workbench-001","timestamp":"2026-07-15T08:01:10.000Z","type":"adapter.tool_use","message":"Read src/validation.ts","metadata":{"toolName":"Read","file":"src/validation.ts"}}
+{"agentId":"demo-thorough","runId":"demo-workbench-001","timestamp":"2026-07-15T08:01:42.000Z","type":"adapter.tool_use","message":"Read tests/validation.test.ts","metadata":{"toolName":"Read","file":"tests/validation.test.ts"}}
+{"agentId":"demo-thorough","runId":"demo-workbench-001","timestamp":"2026-07-15T08:02:30.000Z","type":"adapter.tool_use","message":"Edit src/validation.ts","metadata":{"toolName":"Edit","file":"src/validation.ts","linesAdded":24,"linesRemoved":3}}
+{"agentId":"demo-thorough","runId":"demo-workbench-001","timestamp":"2026-07-15T08:03:05.000Z","type":"adapter.tool_use","message":"Write tests/validation.test.ts","metadata":{"toolName":"Write","file":"tests/validation.test.ts","linesAdded":31}}
+{"agentId":"demo-thorough","runId":"demo-workbench-001","timestamp":"2026-07-15T08:03:40.000Z","type":"adapter.tool_use","message":"Run tests","metadata":{"toolName":"Bash","command":"npm test"}}
+{"agentId":"demo-thorough","runId":"demo-workbench-001","timestamp":"2026-07-15T08:04:00.000Z","type":"snapshot.write","message":"Workspace snapshot recorded","metadata":{"files":["src/validation.ts","tests/validation.test.ts"]}}
+{"agentId":"demo-thorough","runId":"demo-workbench-001","timestamp":"2026-07-15T08:04:12.000Z","type":"judge.tests","message":"Tests passed","metadata":{"status":"pass"}}
+{"agentId":"demo-thorough","runId":"demo-workbench-001","timestamp":"2026-07-15T08:04:18.000Z","type":"judge.lint","message":"Lint clean","metadata":{"status":"pass"}}
+{"agentId":"demo-thorough","runId":"demo-workbench-001","timestamp":"2026-07-15T08:04:25.000Z","type":"judge.scope","message":"Changes stayed in scope","metadata":{"status":"pass"}}
+{"agentId":"demo-thorough","runId":"demo-workbench-001","timestamp":"2026-07-15T08:04:40.000Z","type":"adapter.finish","message":"Adapter finished successfully"}
+{"agentId":"demo-thorough","runId":"demo-workbench-001","timestamp":"2026-07-15T08:04:42.000Z","type":"teardown.finish","message":"Workspace cleaned up"}

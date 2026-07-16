@@ -741,3 +741,60 @@ test("Claude provider editor preserves typed values and saves a profile", {
     await rm(tempDir, { recursive: true, force: true });
   }
 });
+
+test("workbench evidence page replays trace and shows per-agent identity", {
+  concurrency: false,
+  timeout: 120000
+}, async (t) => {
+  const chromium = await loadChromiumOrSkip(t);
+  if (!chromium) return;
+
+  const root = path.resolve(import.meta.dirname, "..");
+  const uiServer = await startUiServer(root);
+  const browser = await chromium.launch({ headless: true });
+
+  try {
+    const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
+    await page.goto(`http://127.0.0.1:${uiServer.port}/workbench/`);
+
+    // Load the safe demo from the Runs page.
+    const demoButton = page.getByRole("button", { name: /Safe demo|安全 Demo/i }).first();
+    await demoButton.waitFor({ state: "visible", timeout: 15000 });
+    await demoButton.click();
+
+    // Navigate to the Evidence page for the first (selected) agent.
+    await page.evaluate(() => { window.location.hash = "/evidence"; });
+    await page.waitForSelector(".trace-replay", { timeout: 15000 });
+
+    // Demo-thorough has a bundled trace: replay should render step cards.
+    const stepCards = page.locator(".trace-step-card");
+    await stepCards.first().waitFor({ state: "visible", timeout: 10000 });
+    assert.ok((await stepCards.count()) >= 1, "trace replay should render at least one step");
+
+    // Summary shows event count and agent identity.
+    const summary = await page.locator(".trace-summary").innerText();
+    assert.match(summary, /Demo Thorough|demo-thorough/);
+
+    // Switch agent to demo-fast: trace should update, not cross-wire.
+    const agentSelect = page.locator("select.agent-select");
+    await agentSelect.waitFor({ state: "visible", timeout: 10000 });
+    await agentSelect.selectOption("demo-fast");
+    await page.waitForFunction(() => {
+      const summaryEl = document.querySelector(".trace-summary");
+      return Boolean(summaryEl && /Demo Fast|demo-fast/.test(summaryEl.textContent ?? ""));
+    }, { timeout: 10000 });
+    assert.match(await page.locator(".trace-summary").innerText(), /Demo Fast|demo-fast/);
+
+    // Switch to demo-budget, which has no tracePath: degrade to missing, no crash.
+    await agentSelect.selectOption("demo-budget");
+    await page.waitForFunction(() => {
+      const muted = document.querySelector(".evidence-trace .muted-line");
+      return Boolean(muted?.textContent?.trim().length);
+    }, { timeout: 10000 });
+    const missing = await page.locator(".evidence-trace .muted-line").innerText();
+    assert.ok(missing.trim().length > 0, "missing trace should show a graceful note");
+  } finally {
+    await browser.close();
+    await uiServer.stop();
+  }
+});

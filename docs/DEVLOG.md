@@ -5,6 +5,20 @@
 
 ---
 
+## [2026-07-16] 新版 Evidence 接入真实 Trace 回放
+
+- 现象/目标：新版工作台 Evidence 页的 Trace 区块只是占位，旧版靠相对 URL 巧合命中 trace 文件，真实/导入结果无法稳定回放（P1「Trace 路径再次分裂」）。
+- 根因/思路：CLI 静态服务只覆盖 `WEB_REPORT_DIST_ROOT`，真实 trace 在 `.agentarena/runs|<ui-runs>/<runId>/agents/<variantId>/trace.jsonl`，相对路径无法解析；身份也无法绑定到 run+variant。
+- 解法：新增 `GET /api/trace?runId&variantId` 端点（packages/cli），服务端按 workspace 解析并用 `isPathInsideWorkspace`  containment 防逃逸；前端新增 `domain/trace.ts`（纯函数）、`useTrace` hook、`TraceReplay` 与 `FileChanges` 组件，demo 用内置样例离线回放、真实结果经端点加载，缺失/错误降级为文本。
+- 教训/可复用点：新前端取 Trace 必须走身份绑定的后端端点，不要用相对路径猜测；CLI 资产由 `copy-cli-assets.mjs` 从 `apps/web-report/dist` 复制到 `packages/cli/assets`，新增 public 资源后必须重 build CLI 才会进入运行产物，否则浏览器 404 且难查。
+
+## [2026-07-15] 渐进式前端迁移保留稳定业务能力
+
+- 现象/目标：重建实验工作台的信息结构和界面，同时不能破坏已稳定的运行、报告、导入、离线和本地配置隔离能力。
+- 根因/思路：现有前端虽然拆出文件，但状态和页面职责仍集中；继续叠加难以控制，一次性重写又会复制大量隐藏兼容行为。
+- 解法：采用轻量新应用壳，先统一数据和证据身份，再以双入口按完整页面迁移；默认切换和旧版删除分成两个发布门槛。
+- 教训/可复用点：复杂界面迁移应先稳定数据边界，以页面为发布和回退单位，最后才移除旧实现，不能用整套重写换取表面整洁。
+
 ## [2026-07-14] [通用] 子进程密钥不能通过临时启动脚本传递
 
 - 现象/目标：第三方 Provider 已与个人配置隔离，但 Windows 后台启动脚本仍可能把完整环境写入磁盘，导致密钥短暂落盘。

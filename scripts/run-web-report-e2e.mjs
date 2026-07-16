@@ -5,20 +5,17 @@ const env = {
   AGENTARENA_RUN_BROWSER_SMOKE: process.env.AGENTARENA_RUN_BROWSER_SMOKE ?? "1"
 };
 
-const child = spawn(process.execPath, ["--test", "tests/web-report.e2e.mjs"], {
-  env,
-  stdio: "inherit"
-});
-
-child.on("exit", (code, signal) => {
-  if (signal) {
-    process.kill(process.pid, signal);
-    return;
-  }
-  process.exit(code ?? 1);
-});
-
-child.on("error", (error) => {
-  console.error(error);
-  process.exit(1);
-});
+for (const testFile of ["tests/web-report.e2e.mjs", "tests/workbench.e2e.mjs"]) {
+  const exitCode = await new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ["--test", testFile], { env, stdio: "inherit" });
+    child.on("error", reject);
+    child.on("exit", (code, signal) => {
+      if (signal) {
+        reject(new Error(`${testFile} stopped by signal ${signal}.`));
+        return;
+      }
+      resolve(code ?? 1);
+    });
+  });
+  if (exitCode !== 0) process.exit(exitCode);
+}

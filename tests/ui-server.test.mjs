@@ -239,7 +239,7 @@ test("GET static file path traversal is blocked", { timeout: 60_000 }, async () 
   try {
     // The server normalizes paths and rejects anything outside WEB_REPORT_DIST_ROOT.
     // Depending on normalization, this returns 403 (direct rejection) or 404 (file not found after normalization).
-    // Both are acceptable — the key is that /etc/passwd is NOT served.
+    // Both are acceptable —the key is that /etc/passwd is NOT served.
     const res = await request(port, "GET", "/../../../etc/passwd");
     assert.ok(res.statusCode === 403 || res.statusCode === 404, `expected 403 or 404, got ${res.statusCode}`);
     // Ensure the response is not a file listing
@@ -270,7 +270,7 @@ test("GET static file with double-encoded path traversal is blocked", { timeout:
   const port = await getAvailablePort();
   const { child } = await startServer(port);
   try {
-    // Double-encoded %252e%252e%252f — Node.js URL parser decodes once, leaving %2e%2e%2f
+    // Double-encoded %252e%252e%252f —Node.js URL parser decodes once, leaving %2e%2e%2f
     // which path.normalize then resolves to ../
     const res = await request(port, "GET", "/%252e%252e%252f%252e%252e%252fetc%252fpasswd");
     assert.ok(res.statusCode === 403 || res.statusCode === 404, `expected 403 or 404, got ${res.statusCode}`);
@@ -415,6 +415,19 @@ test("GET /api/run-status returns idle when no run active", { timeout: 60_000 },
     const res = await request(port, "GET", "/api/run-status");
     assert.equal(res.statusCode, 200);
     assert.equal(res.body.state, "idle");
+  } finally {
+    child.kill("SIGTERM");
+  }
+});
+
+test("GET /workbench/ serves the nested workbench index", { timeout: 60_000 }, async () => {
+  const port = await getAvailablePort();
+  const { child } = await startServer(port);
+  try {
+    const res = await request(port, "GET", "/workbench/");
+    assert.equal(res.statusCode, 200);
+    assert.match(String(res.body), /AgentArena Workbench/);
+    assert.match(String(res.body), /agentarena-auth-token/);
   } finally {
     child.kill("SIGTERM");
   }

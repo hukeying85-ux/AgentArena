@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile, stat } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -45,4 +45,14 @@ test("manifest.json is valid JSON with required fields", async () => {
 test("service worker references app shell files", async () => {
   const sw = await readFile(path.join(DIST, "sw.js"), "utf8");
   assert.ok(sw.includes("cache") || sw.includes("Cache"), "sw.js should reference caching");
+});
+
+test("workbench build exists alongside the legacy report", async () => {
+  const html = await readFile(path.join(DIST, "workbench", "index.html"), "utf8");
+  assert.match(html, /AgentArena Workbench/);
+  assert.match(html, /type="module"/);
+
+  const assets = await readdir(path.join(DIST, "workbench", "assets"));
+  assert.ok(assets.some((file) => file.endsWith(".js")), "workbench JS bundle missing");
+  assert.ok(assets.some((file) => file.endsWith(".css")), "workbench CSS bundle missing");
 });

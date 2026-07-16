@@ -41,7 +41,8 @@
       "packages/*/src/**",
       "apps/*/src/**",
       "tests/**",
-      "!!**/apps/web-report/src/launcher/module.js"
+      "!!**/apps/web-report/src/launcher/module.js",
+      "apps/web-report/workbench/src/**"
     ]
   },
   "overrides": [
@@ -55,6 +56,14 @@
     },
     {
       "includes": ["packages/cli/src/**"],
+      "linter": {
+        "rules": {
+          "suspicious": { "noConsole": "off" }
+        }
+      }
+    },
+    {
+      "includes": ["apps/web-report/workbench/src/**"],
       "linter": {
         "rules": {
           "suspicious": { "noConsole": "off" }

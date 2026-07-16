@@ -6,7 +6,7 @@ import type { getCodexDefaultResolvedRuntime } from "@agentarena/adapters";
 import { isPathInsideWorkspace, metrics } from "@agentarena/core";
 import { formatLocalUiOrigin } from "../local-only.js";
 import { checkAuthHeader, checkCorsOrigin, checkRateLimit, detectContentType, getClientIp, HttpError, jsonResponse, readRequestBody, textResponse } from "../server/index.js";
-import { handleAdaptersList, handleAdhocTaskpackDelete, handleAdhocTaskpacksList, handleAgentDetection, handleCheckCompatibility, handleCreateAdhocTaskpack, handleInstallGuides, handlePreflight, handleProviderProfileCreate, handleProviderProfileDelete, handleProviderProfileSecret, handleProviderProfilesGet, handleProviderProfileUpdate, handleQuickPreflight, handleTaskpacksList, handleUiInfo, withErrorHandling } from "./api-routes.js";
+import { handleAdaptersList, handleAdhocTaskpackDelete, handleAdhocTaskpacksList, handleAgentDetection, handleCheckCompatibility, handleCreateAdhocTaskpack, handleInstallGuides, handlePreflight, handleProviderProfileCreate, handleProviderProfileDelete, handleProviderProfileSecret, handleProviderProfilesGet, handleProviderProfileUpdate, handleQuickPreflight, handleTaskpacksList, handleTraceGet, handleUiInfo, withErrorHandling } from "./api-routes.js";
 import { WEB_REPORT_DIST_ROOT } from "./shared.js";
 import { sendApiResponse } from "./ui-http.js";
 import { handleUiRunRequest, isUiRunRoute } from "./ui-run-routes.js";
@@ -174,19 +174,19 @@ export function createRequestHandler(ctx: RequestContext) {
         return;
       }
 
-      // GET /api/agent-detection — EchoBird-style agent detection
+      // GET /api/agent-detection —EchoBird-style agent detection
       if (request.method === "GET" && requestUrl.pathname === "/api/agent-detection") {
         sendApiResponse(response, await withErrorHandling(handleAgentDetection()));
         return;
       }
 
-      // GET /api/install-guides — install guide definitions for all agents
+      // GET /api/install-guides —install guide definitions for all agents
       if (request.method === "GET" && requestUrl.pathname === "/api/install-guides") {
         sendApiResponse(response, await withErrorHandling(handleInstallGuides()));
         return;
       }
 
-      // GET /api/metrics — Prometheus metrics endpoint
+      // GET /api/metrics —Prometheus metrics endpoint
       if (request.method === "GET" && requestUrl.pathname === "/api/metrics") {
         const { exportAllMetrics } = await import("@agentarena/core");
         const metricsText = exportAllMetrics();
@@ -203,13 +203,29 @@ export function createRequestHandler(ctx: RequestContext) {
         return;
       }
 
+      // GET /api/trace?runId=<id>&variantId=<vid> — replay a single agent's
+      // execution trace. Resolves from the workspace run output dir and is
+      // contained to the workspace, so it replaces the legacy relative-path
+      // fetch that caused trace identity to split across demo/imported/real runs.
+      if (request.method === "GET" && requestUrl.pathname === "/api/trace") {
+        const runId = requestUrl.searchParams.get("runId");
+        const variantId = requestUrl.searchParams.get("variantId");
+        sendApiResponse(response, await withErrorHandling(handleTraceGet(process.cwd(), runId, variantId)));
+        return;
+      }
+
       // ─── Static file serving ───
 
       if (request.method === "GET") {
         // SECURITY: resolve the web root via realpath once so symlink / \\?\ long-path
         // forms cannot escape the containment check below.
         const rootReal = await fs.realpath(WEB_REPORT_DIST_ROOT).catch(() => WEB_REPORT_DIST_ROOT);
-        let filePath = requestUrl.pathname === "/" ? path.join(WEB_REPORT_DIST_ROOT, "index.html") : path.join(WEB_REPORT_DIST_ROOT, requestUrl.pathname.replace(/^\/+/, ""));
+        const relativePath = requestUrl.pathname === "/"
+          ? "index.html"
+          : requestUrl.pathname.endsWith("/")
+            ? `${requestUrl.pathname.replace(/^\/+/, "")}index.html`
+            : requestUrl.pathname.replace(/^\/+/, "");
+        let filePath = path.join(WEB_REPORT_DIST_ROOT, relativePath);
         filePath = path.normalize(filePath);
         // Re-resolve the target via realpath (falls back to the normalized path if
         // it does not exist yet, e.g. SPA routes) so symlink escapes are caught.
