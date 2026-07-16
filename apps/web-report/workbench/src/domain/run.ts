@@ -11,6 +11,14 @@ export interface NormalizedJudgeResult {
   message: string | null;
 }
 
+export interface FileDiff {
+  path: string;
+  /** Raw unified-diff text (e.g. `git diff HEAD -- <path>` output). */
+  text?: string;
+  /** Pre-split hunks when the source provides them instead of raw text. */
+  hunks?: string[];
+}
+
 export interface NormalizedAgentResult {
   agentId: string;
   variantId: string;
@@ -22,6 +30,9 @@ export interface NormalizedAgentResult {
   costKnown: boolean;
   compositeScore: number | null;
   changedFiles: string[];
+  /** Line-level diffs, when the runner persisted them. Undefined today — the
+   * runner only stores file names, so the UI degrades to a file list. */
+  fileDiffs?: FileDiff[];
   judgeResults: NormalizedJudgeResult[];
   tracePath: string | null;
   traceAvailability: "available" | "missing" | "unknown";
@@ -83,12 +94,25 @@ function normalizeJudge(value: unknown, index: number): NormalizedJudgeResult {
   };
 }
 
+function normalizeFileDiff(value: unknown): FileDiff | null {
+  const item = record(value);
+  const path = text(item.path ?? item.file);
+  if (!path) return null;
+  const textValue = text(item.text);
+  const hunks = Array.isArray(item.hunks) ? item.hunks.filter((line): line is string => typeof line === "string") : [];
+  if (!textValue && hunks.length === 0) return null;
+  return { path, text: textValue ?? undefined, hunks: hunks.length > 0 ? hunks : undefined };
+}
+
 function normalizeResult(value: unknown, index: number): NormalizedAgentResult {
   const item = record(value);
   const agentId = text(item.agentId) ?? text(item.baseAgentId) ?? `agent-${index + 1}`;
   const variantId = text(item.variantId) ?? agentId;
   const tracePath = text(item.tracePath);
   const costKnown = item.costKnown === true || finiteNumber(item.estimatedCostUsd) !== null;
+  const fileDiffs = Array.isArray(item.fileDiffs)
+    ? item.fileDiffs.map((entry) => normalizeFileDiff(entry)).filter((entry): entry is FileDiff => entry !== null)
+    : [];
   return {
     agentId,
     variantId,
@@ -100,6 +124,7 @@ function normalizeResult(value: unknown, index: number): NormalizedAgentResult {
     costKnown,
     compositeScore: finiteNumber(item.compositeScore) ?? finiteNumber(item.score),
     changedFiles: stringList(item.changedFiles),
+    fileDiffs: fileDiffs.length > 0 ? fileDiffs : undefined,
     judgeResults: Array.isArray(item.judgeResults)
       ? item.judgeResults.map(normalizeJudge)
       : [],

@@ -7,6 +7,11 @@ interface TraceReplayProps {
   locale: Locale;
   timeline: TraceTimeline;
   truncated: boolean;
+  /** When the timeline was built in a worker for a large trace, only the
+   * first screen of steps is shipped to the main thread. `hasMore` + `onLoadFull`
+   * let the user pull the full timeline without re-blocking the UI. */
+  hasMore?: boolean;
+  onLoadFull?: () => void;
 }
 
 function formatDuration(ms: number, _locale: Locale): string {
@@ -33,7 +38,7 @@ function StepCard({ step }: { step: TraceStep }) {
   );
 }
 
-export function TraceReplay({ locale, timeline, truncated }: TraceReplayProps) {
+export function TraceReplay({ locale, timeline, truncated, hasMore, onLoadFull }: TraceReplayProps) {
   const steps = timeline.steps;
   const [index, setIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -83,6 +88,9 @@ export function TraceReplay({ locale, timeline, truncated }: TraceReplayProps) {
         <button type="button" class={`button ${playing ? "secondary" : "primary"}`} onClick={() => setPlaying((p) => !p)}>{playing ? t(locale, "tracePause") : t(locale, "tracePlay")}</button>
         <button type="button" class="icon-button" onClick={() => setIndex((i) => Math.min(total - 1, i + 1))} disabled={index >= total - 1} aria-label={t(locale, "traceNext")}><span aria-hidden="true">›</span></button>
         <span class="trace-progress-label">{t(locale, "traceStepProgress")?.replace("{current}", String(index + 1)).replace("{total}", String(total)) ?? `${index + 1} / ${total}`}</span>
+        {hasMore && onLoadFull && (
+          <button type="button" class="button ghost compact-button" onClick={onLoadFull}>{t(locale, "traceLoadFull")}</button>
+        )}
       </div>
 
       <div class="timeline-track" role="presentation">

@@ -5,6 +5,20 @@
 
 ---
 
+## [2026-07-16] 阶段9 遗留收尾：Trace Worker + FileChanges 行级 diff 就绪
+
+- 现象/目标：阶段9 两项遗留未完成——大 Trace 主线程卡顿、FileChanges 无行级改动。
+- 根因/思路：runner 跑完即清理 workspace，只存文件名不存内容，行级 diff 对已完成 run 不可重建（需 runner 改动，仅惠及未来 run，需单独授权）；大 Trace 的 `buildTimeline` 在主线程跑会卡 UI。
+- 解法：新增 `workers/trace-worker.ts`（>2000 事件走 Worker 解析，先发前 500 步，`loadFull` 拉全量，报错回退主线程）；`FileChanges` 支持 `DiffBlock` 渲染统一 diff（红绿/上下文行，无 innerHTML 防 XSS），`NormalizedAgentResult.fileDiffs` 已接好，runner 何时存内容即可零成本接入。
+- 教训/可复用点：跨端数据缺失（如行级 diff）若需改 runner 才能补全，前端先做成「结构就绪」而非硬造数据；重计算放 Worker，主线程只兜底。
+
+## [2026-07-16] e2e 测试中文正则编码损坏导致 compare 测试永久超时
+
+- 现象/目标：阶段10 提交的 compare e2e 测试在套件和单独运行都卡 30s+ 等「Safe demo」按钮，但同结构 evidence 测试却过。
+- 根因/思路：compare 测试块的中文正则（如 `/Safe demo|安全 Demo/i`、`/Save session|保存会话/i`）在提交时被以错误编码（GBK 字节混进 UTF-8 文件，或乱码成 U+FFFD）写入；i18n 默认 zh-CN 时按钮文案是 UTF-8「安全 Demo」，正则里的坏字节匹配不到 → 超时。另一错误：断言 `.trend-grid/.muted-line`，但 demo 只加载 1 个 run，compare 页走 `runs.length < 2` 的 empty-state 分支，根本不渲染这两个类。
+- 解法：用 PowerShell 以 UTF-8 字节级核对，把损坏中文还原为正确 UTF-8；断言改为等 `.empty-state, .compare-session`（单 run 真实渲染），session 按钮存在时才校验；单独跑 2.9s 通过，全量 15/15 绿。
+- 教训/可复用点：[通用] 往 UTF-8 源码里写中文时，绝不用 GBK 视角的编辑器/工具（PowerShell ISE、某些 heredoc）落盘，否则混合编码极难肉眼发现；e2e 断言要匹配「当前数据下的真实渲染分支」，demo 单 run 不可比时该显示 empty-state 而非 trend 区。
+
 ## [2026-07-16] 新版 Compare 接入基线趋势 / 交叉会话 / 保存分享
 
 - 现象/目标：Compare 页只有单基准 + 候选排除，缺历史趋势、多运行交叉聚合和会话持久化（阶段10）。

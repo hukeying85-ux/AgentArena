@@ -1,4 +1,4 @@
-import assert from "node:assert/strict";
+﻿import assert from "node:assert/strict";
 import test from "node:test";
 import {
   comparisonExclusionReasons,
@@ -174,4 +174,28 @@ test("buildTimeline handles empty event list", () => {
 test("safeCategoryClass rejects unsafe input", () => {
   assert.equal(safeCategoryClass("agent"), "agent");
   assert.equal(safeCategoryClass("bad<class"), "other");
+});
+
+
+test("normalizeRun reads persisted file diffs when present", () => {
+  const normalized = normalizeRun(run({
+    results: [result({
+      changedFiles: ["src/a.ts", "src/b.ts"],
+      fileDiffs: [
+        { path: "src/a.ts", text: "--- a.ts\n+++ a.ts\n@@ -1 +1 @@\n-old\n+new" },
+        { path: "src/b.ts", hunks: ["@@ -1 +1 @@", "-x", "+y"] }
+      ]
+    })]
+  }));
+  const fileDiffs = normalized.results[0].fileDiffs;
+  assert.equal(fileDiffs.length, 2);
+  assert.equal(fileDiffs[0].path, "src/a.ts");
+  assert.ok(fileDiffs[0].text.includes("+new"));
+  assert.deepEqual(fileDiffs[1].hunks, ["@@ -1 +1 @@", "-x", "+y"]);
+});
+
+test("normalizeRun degrades to file list when no diffs stored", () => {
+  const normalized = normalizeRun(run({ results: [result({ changedFiles: ["src/a.ts"] })] }));
+  assert.equal(normalized.results[0].fileDiffs, undefined);
+  assert.deepEqual(normalized.results[0].changedFiles, ["src/a.ts"]);
 });

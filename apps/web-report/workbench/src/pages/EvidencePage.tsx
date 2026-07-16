@@ -68,7 +68,7 @@ export function EvidencePage() {
         </Section>
 
         <Section title={t(locale, "files")} description={t(locale, "filesDesc")}>
-          <FileChanges locale={locale} files={selected.changedFiles} runId={selectedRun.runId} variantId={selected.variantId} />
+          <FileChanges locale={locale} files={selected.changedFiles} diffs={selected.fileDiffs} runId={selectedRun.runId} variantId={selected.variantId} />
         </Section>
 
         <Section title={t(locale, "trace")} description={t(locale, "traceDesc")} className="evidence-trace">
