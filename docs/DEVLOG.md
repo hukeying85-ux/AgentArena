@@ -5,6 +5,13 @@
 
 ---
 
+## [2026-07-16] 工作台 PWA：首次安装 service worker 的 controllerchange 不应 reload
+
+- 现象/目标：加离线 PWA（sw.js + 注册）后，workbench 三个 e2e 报 `errors` 数组非空，命中 `assert.deepEqual(errors, [])`；监控到 `/api/ui-info`、`/api/agent-detection`、`/api/taskpacks`、`/api/provider-profiles` 首屏全部 `net::ERR_ABORTED`。
+- 根因/思路：`main.tsx` 注册 SW 后无条件监听 `controllerchange` 并 `location.reload()`。`sw.js` 在 `install` 时 `skipWaiting()`、`activate` 时 `clients.claim()`，会令**首次安装**也触发 `controllerchange`。reload 发生在 `useWorkbench` 的 `refreshEnvironment()` 仍在进行 4 个 `/api/*` 请求时 → 请求被取消（abort），且造成首屏闪烁。`provider-profiles` 单独 401 是 localhost 鉴权豁免边界差异，非主因。
+- 解法：把 reload 绑定到「主动 `postMessage(SKIP_WAITING)`（即发现更新版 SW）」这一事实——仅在 `updatefound` 监听里、worker `installed` 且有旧 controller 时置 `pendingSkip` 再跳等待；首次 install 的 `controllerchange` 不 reload（页面本就已被新 worker 接管）。诊断脚本证实 6 个 `/api/*` 全部 200，无 aborted；e2e 3/3 复绿。
+- 教训/可复用点：[通用] 注册 SW 时 `controllerchange → reload` 必须区分「首装 claim」与「更新跳过等待」；标准 PWA 只在后者 reload，否则会打断进行中的请求并闪烁。验证「无网络错误」类 e2e 时，用 Playwright `response`/`requestfailed` 监听打印每个 `/api` 请求的真实状态，比只看断言快定位。
+
 ## [2026-07-16] 阶段9 遗留收尾：Trace Worker + FileChanges 行级 diff 就绪
 
 - 现象/目标：阶段9 两项遗留未完成——大 Trace 主线程卡顿、FileChanges 无行级改动。
