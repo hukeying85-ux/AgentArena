@@ -870,7 +870,7 @@ test("workbench registers an offline-capable service worker", {
       }
     }, { timeout: 20000, polling: 200 }).then((h) => h.jsonValue()).catch(() => null);
 
-    assert.ok(scope && scope.includes("/workbench/"), `sw should register under /workbench/ (got: ${scope})`);
+    assert.ok(scope?.includes("/workbench/"), `sw should register under /workbench/ (got: ${String(scope)})`);
     assert.ok(swErrors.length === 0, `no service worker page errors (${swErrors.join("; ")})`);
   } finally {
     await browser.close();
