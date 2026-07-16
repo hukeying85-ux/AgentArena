@@ -28,6 +28,11 @@ function agentKeyFor(run: NormalizedRun, variantId: string): string {
 export function ComparePage() {
   const { locale, runs, selectedRun, setSelectedRunId, setPage } = useWorkbench();
   const session = useCompareSession(runs);
+  const [sessionPage, setSessionPage] = useState(0);
+  const SESSION_PAGE_SIZE = 50;
+  const sessionPageCount = Math.max(1, Math.ceil(runs.length / SESSION_PAGE_SIZE));
+  const sessionSafePage = Math.min(sessionPage, sessionPageCount - 1);
+  const pagedRuns = runs.slice(sessionSafePage * SESSION_PAGE_SIZE, sessionSafePage * SESSION_PAGE_SIZE + SESSION_PAGE_SIZE);
 
   const baseId = session.session.baseRunId
     ?? selectedRun?.runId
@@ -123,7 +128,7 @@ export function ComparePage() {
         <NoticeCaution locale={locale} trust={trust} />
       )}
       <div class="compare-session">
-        {runs.map((run) => {
+        {pagedRuns.map((run) => {
           const isBase = run.runId === base.runId;
           const checked = session.session.selectedRunIds.includes(run.runId) || isBase;
           const reasons = comparisonExclusionReasons(base, run);
@@ -138,6 +143,11 @@ export function ComparePage() {
           </label>;
         })}
       </div>
+      {sessionPageCount > 1 && <div class="pager">
+        <button class="button ghost compact-button" type="button" disabled={sessionSafePage === 0} onClick={() => setSessionPage(sessionSafePage - 1)} aria-label={t(locale, "pagePrev")}>{t(locale, "pagePrev")}</button>
+        <span class="pager-info">{t(locale, "pageInfo", { current: sessionSafePage + 1, total: sessionPageCount })}</span>
+        <button class="button ghost compact-button" type="button" disabled={sessionSafePage >= sessionPageCount - 1} onClick={() => setSessionPage(sessionSafePage + 1)} aria-label={t(locale, "pageNext")}>{t(locale, "pageNext")}</button>
+      </div>}
 
       {crossData.rows.length > 0 && (
         <div class="results-table compare-table">
