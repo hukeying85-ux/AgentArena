@@ -21,6 +21,19 @@ function formatDuration(ms: number, _locale: Locale): string {
   return `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`;
 }
 
+/** Cap the number of timeline markers rendered as DOM buttons. A large trace
+ * (e.g. after "load full") can hold thousands of steps; rendering one button per
+ * step would balloon the DOM. We keep both endpoints and the current step, then
+ * sample the rest evenly so the marker count stays near `max`. */
+const MAX_MARKERS = 200;
+function markerIndexes(total: number, currentIndex: number, max: number = MAX_MARKERS): number[] {
+  if (total <= max) return Array.from({ length: total }, (_, i) => i);
+  const indexes = new Set<number>([0, total - 1, currentIndex]);
+  const stride = Math.ceil(total / max);
+  for (let i = 0; i < total; i += stride) indexes.add(i);
+  return [...indexes].sort((a, b) => a - b);
+}
+
 function StepCard({ step }: { step: TraceStep }) {
   const categoryClass = safeCategoryClass(step.category);
   const first = step.events[0];
@@ -96,16 +109,19 @@ export function TraceReplay({ locale, timeline, truncated, hasMore, onLoadFull }
       <div class="timeline-track" role="presentation">
         <div class="timeline-progress" style={{ width: `${progress}%` }}></div>
         <div class="timeline-markers">
-          {steps.map((step, i) => (
-            <button
-              type="button"
-              class={`timeline-marker trace-cat-${safeCategoryClass(step.category)}${i === index ? " active" : ""}`}
-              style={{ left: `${total > 1 ? (i / (total - 1)) * 100 : 0}%` }}
-              title={`${step.category}: ${step.summary}`}
-              aria-label={`${t(locale, "traceStep")?.replace("{step}", String(i + 1)) ?? `Step ${i + 1}`}`}
-              onClick={() => setIndex(i)}
-            />
-          ))}
+          {markerIndexes(total, index).map((i) => {
+            const step = steps[i];
+            return (
+              <button
+                type="button"
+                class={`timeline-marker trace-cat-${safeCategoryClass(step.category)}${i === index ? " active" : ""}`}
+                style={{ left: `${total > 1 ? (i / (total - 1)) * 100 : 0}%` }}
+                title={`${step.category}: ${step.summary}`}
+                aria-label={`${t(locale, "traceStep")?.replace("{step}", String(i + 1)) ?? `Step ${i + 1}`}`}
+                onClick={() => setIndex(i)}
+              />
+            );
+          })}
         </div>
       </div>
 
