@@ -71,7 +71,15 @@ export function Field({ label, help, error, children }: { label: string; help?: 
   return <div class={`field ${error ? "field-error" : ""}`}><label class="field-label" for={id}>{label}</label>{control}{error ? <span id={messageId} class="field-message" role="alert">{error}</span> : help ? <span id={messageId} class="field-help">{help}</span> : null}</div>;
 }
 
-export function t(locale: Locale, key: CopyKey): string { return copy[locale][key]; }
+export function t(locale: Locale, key: CopyKey, params?: Record<string, string | number>): string {
+  let text: string = copy[locale][key];
+  if (params) {
+    for (const [name, value] of Object.entries(params)) {
+      text = text.replace(new RegExp(`\\{${name}\\}`, "g"), String(value));
+    }
+  }
+  return text;
+}
 
 export function formatDuration(value: number | null, locale: Locale): string {
   if (value === null) return t(locale, "unknown");

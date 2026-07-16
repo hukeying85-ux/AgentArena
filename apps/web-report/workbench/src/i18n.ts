@@ -1,4 +1,4 @@
-export const copy = {
+﻿export const copy = {
   "zh-CN": {
     productName: "AgentArena",
     productTagline: "本地智能体评测实验工作台",
@@ -20,6 +20,9 @@ export const copy = {
     recentRuns: "最近结果",
     noRuns: "还没有结果",
     noRunsHint: "先运行安全 Demo、导入历史结果，或创建一次真实评测。",
+    pagePrev: "上一页",
+    pageNext: "下一页",
+    pageInfo: "第 {current} / {total} 页",
     repo: "仓库",
     task: "任务",
     agents: "参赛 Agent",
@@ -162,6 +165,9 @@ export const copy = {
     recentRuns: "Recent results",
     noRuns: "No results yet",
     noRunsHint: "Run the safe demo, import history, or create a real evaluation.",
+    pagePrev: "Previous",
+    pageNext: "Next",
+    pageInfo: "Page {current} of {total}",
     repo: "Repository",
     task: "Task",
     agents: "Agents",
