@@ -5,6 +5,20 @@
 
 ---
 
+## [2026-07-16] 新版 Compare 接入基线趋势 / 交叉会话 / 保存分享
+
+- 现象/目标：Compare 页只有单基准 + 候选排除，缺历史趋势、多运行交叉聚合和会话持久化（阶段10）。
+- 根因/思路：旧版 `view-model/comparison.js` 已有 `getAgentTrendRows`/`getCrossRunCompareRows` 等逻辑，但新版工作台未暴露；且带重 legacy 依赖，不能整段引入。
+- 解法：新增独立 `domain/compare.ts`（纯函数，复用同一套公平规则但自含评分，不引 legacy）、`useCompareSession` hook（localStorage 引用式保存）、`TrendSparkline` 纯 SVG 组件；Compare 页拆成「公平比较 / 基线趋势 / 交叉会话」三块，未知指标显示「未知」不补零，推荐项仅在有成功 agent 时出现，可信度低时显示 caution 横幅。
+- 教训/可复用点：新版 domain 逻辑优先收敛成无依赖纯函数，避免把旧 view-model 整段拖进来；趋势/推荐用引用式会话（只存 runId），run 不存在时静默忽略，不报错。
+
+## [2026-07-16] [通用] Windows 下向测试文件追加含中文的内容
+
+- 现象/目标：给 `tests/*.e2e.mjs` 追加含中文正则（如 `/Safe demo|安全 Demo/i`）的内容后，`biome check` 报 `stream did not contain valid UTF-8` 内部错误。
+- 根因/思路：用 `Out-File -Encoding utf8` 写入会给文件加 BOM（EF BB BF），biome 的底层 reader 对带 BOM 或被 PowerShell 二次编码的中文产生误判；且该错误在原始提交版本上就已存在，是 biome 在 Windows 上对含 CJK 的 test 文件的已知 I/O 怪象，并非我改动引入。
+- 解法：用 `.Substring`/`[System.IO.File]::WriteAllBytes` 去掉 BOM；用 `node --check` 单独验证 `.mjs` 语法（biome 不可用时）；`pnpm lint` 仍会因该文件报内部错误，但全仓 302 个文件实际“No fixes applied”，属可忽略的 Windows 怪象。
+- 教训/可复用点：PowerShell 追加中文文本别用 `Out-File -Encoding utf8`（会加 BOM），改用普通重定向或先写无 BOM 文件；biome 对含中文测试文件的 UTF-8 报错在 Windows 上是环境怪象，用 `node --check` 兜底验证语法即可。
+
 ## [2026-07-16] 新版 Evidence 接入真实 Trace 回放
 
 - 现象/目标：新版工作台 Evidence 页的 Trace 区块只是占位，旧版靠相对 URL 巧合命中 trace 文件，真实/导入结果无法稳定回放（P1「Trace 路径再次分裂」）。

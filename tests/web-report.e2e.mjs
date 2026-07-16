@@ -798,3 +798,45 @@ test("workbench evidence page replays trace and shows per-agent identity", {
     await uiServer.stop();
   }
 });
+
+
+test("workbench compare page shows trend empty state and session controls", {
+  concurrency: false,
+  timeout: 120000
+}, async (t) => {
+  const chromium = await loadChromiumOrSkip(t);
+  if (!chromium) return;
+
+  const root = path.resolve(import.meta.dirname, "..");
+  const uiServer = await startUiServer(root);
+  const browser = await chromium.launch({ headless: true });
+
+  try {
+    const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
+    await page.goto(`http://127.0.0.1:${uiServer.port}/workbench/`);
+
+    const demoButton = page.getByRole("button", { name: /Safe demo|安全 Demo/i }).first();
+    await demoButton.waitFor({ state: "visible", timeout: 15000 });
+    await demoButton.click();
+
+    await page.evaluate(() => { window.location.hash = "/compare"; });
+    await page.waitForSelector(".trend-grid, .muted-line", { timeout: 15000 });
+
+    const trendEmpty = await page.locator(".trend-grid, .muted-line").count();
+    assert.ok(trendEmpty >= 1, "trend section should render (grid or empty note)");
+
+    const saveBtn = page.getByRole("button", { name: /Save session|保存会话/i });
+    const shareBtn = page.getByRole("button", { name: /Copy share|复制分享/i });
+    const exportBtn = page.getByRole("button", { name: /Export JSON|导出 JSON/i });
+    assert.ok(await saveBtn.isVisible());
+    assert.ok(await shareBtn.isVisible());
+    assert.ok(await exportBtn.isVisible());
+
+    await saveBtn.click();
+  } finally {
+    await browser.close();
+    await uiServer.stop();
+  }
+});
+
+
