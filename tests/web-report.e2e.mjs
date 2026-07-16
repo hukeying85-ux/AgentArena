@@ -840,3 +840,40 @@ test("workbench compare page shows trend empty state and session controls", {
   }
 });
 
+
+test("workbench registers an offline-capable service worker", {
+  concurrency: false,
+  timeout: 120000
+}, async (t) => {
+  const chromium = await loadChromiumOrSkip(t);
+  if (!chromium) return;
+
+  const root = path.resolve(import.meta.dirname, "..");
+  const uiServer = await startUiServer(root);
+  const browser = await chromium.launch({ headless: true });
+
+  try {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    const swErrors = [];
+    page.on("pageerror", (e) => swErrors.push(e.message));
+
+    await page.goto(`http://127.0.0.1:${uiServer.port}/workbench/`, { waitUntil: "domcontentloaded" });
+
+    const scope = await page.waitForFunction(async () => {
+      if (!("serviceWorker" in navigator)) return null;
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        return reg ? reg.scope : null;
+      } catch {
+        return null;
+      }
+    }, { timeout: 20000, polling: 200 }).then((h) => h.jsonValue()).catch(() => null);
+
+    assert.ok(scope && scope.includes("/workbench/"), `sw should register under /workbench/ (got: ${scope})`);
+    assert.ok(swErrors.length === 0, `no service worker page errors (${swErrors.join("; ")})`);
+  } finally {
+    await browser.close();
+    await uiServer.stop();
+  }
+});
