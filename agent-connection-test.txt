@@ -1,0 +1,8 @@
+AgentArena × Arena.ai Agent 连接测试
+=====================================
+
+此文件由 Arena.ai Agent Mode 于 2026-07-17 自动创建,
+用于验证 Agent 能否成功向 GitHub 仓库提交并推送变更。
+
+If you can see this file on GitHub, the write (push) connection works. ✅
+确认后你可以随时安全地删除此文件。
